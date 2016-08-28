@@ -2,25 +2,26 @@ package ulysses.mongo
 
 import scala.concurrent.Future
 import scala.language.implicitConversions
-import scala.reflect.{ClassTag, classTag}
+import scala.reflect.{ ClassTag, classTag }
 import scala.util.Success
 import scala.util.control.NonFatal
-import org.bson.{BsonReader, BsonType, BsonWriter, Document}
-import org.bson.codecs.{Codec, DecoderContext, EncoderContext}
-import com.mongodb.{Block, MongoNamespace, WriteConcern}
+import org.bson.{ BsonReader, BsonType, BsonWriter, Document }
+import org.bson.codecs.{ Codec, DecoderContext, EncoderContext }
+import com.mongodb.{ Block, MongoNamespace, WriteConcern }
 import com.mongodb.async.SingleResultCallback
-import com.mongodb.async.client.{MongoClient, MongoCollection}
+import com.mongodb.async.client.{ MongoClient, MongoCollection }
 import com.mongodb.connection.ClusterType
 import scuff.concurrent.StreamCallback
-import ulysses.Event
 import scala.collection.immutable.Seq
+import scala.collection.{ Seq => aSeq, Map => aMap }
 import org.bson.codecs.configuration.CodecRegistry
-import ulysses.util.EventCodec
+import ulysses.EventCodec
 import org.bson.codecs.BsonArrayCodec
 import org.bson.BsonArray
 import scala.concurrent.ExecutionContext
 import com.mongodb.MongoWriteException
 import com.mongodb.ErrorCategory
+import ulysses.StreamFilter
 
 object MongoEventStore {
 
@@ -33,42 +34,42 @@ object MongoEventStore {
 }
 
 /**
- * Stores events, using this format:
- * {{{
- *   {
- *     _id: { // Indexed
- *       stream: 34534, // Stream identifier
- *       rev: 987, // Stream revision
- *     }
- *     time: 1426320727122, // Indexed if with TimeOrdering.
- *     category: "FooBar", // App specific type
- *     events: [{
- *      name: "MyEvent",
- *      version: 1,
- *      data: {} // App specific
- *     }]
- *   }
- * }}}
- */
-class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
-    dbColl: MongoCollection[Document])(implicit evtCodec: EventCodec[EVT, Document], protected val exeCtx: ExecutionContext)
-    extends ulysses.EventStore[ID, EVT, CAT] {
+  * Stores events, using this format:
+  * {{{
+  *   {
+  *     _id: { // Indexed
+  *       stream: 34534, // Stream identifier
+  *       rev: 11, // Stream revision
+  *     }
+  *     tick: 1426320727122, // Clock tick.
+  *     channel: "FooBar", // App specific type
+  *     events: [{
+  *      name: "MyEvent",
+  *      v: 1, // Event version
+  *      data: {} // App specific
+  *     }]
+  *   }
+  * }}}
+  */
+class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
+  dbColl: MongoCollection[Document])(implicit evtCodec: EventCodec[EVT, CH, Document],
+                                     protected val exeCtx: ExecutionContext)
+    extends ulysses.EventStore[ID, EVT, CH] {
 
   protected val store = {
     withBlockingCallback[String]()(dbColl.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _))
-    dbColl.withCodecRegistry(Factory.newCodecRegistry(dbColl.getCodecRegistry)).withDocumentClass(classOf[Transaction])
+    dbColl.withCodecRegistry(Factory.newCodecRegistry(dbColl.getCodecRegistry)).withDocumentClass(classOf[TXN])
   }
 
   private[this] val OrderByRevision = new Document("_id.rev", 1)
 
-
   def currRevision(stream: ID): Future[Option[Int]] = {
     withFutureCallback[Document] { callback =>
       store.find(new Document("_id.stream", stream), classOf[Document])
-      .projection(new Document("_id.rev", true))
-      .sort(new Document("_id.rev", -1))
-      .limit(1)
-      .first(callback)
+        .projection(new Document("_id.rev", true))
+        .sort(new Document("_id.rev", -1))
+        .limit(1)
+        .first(callback)
     }.map { optDoc =>
       optDoc.map { doc =>
         doc.get("_id", classOf[Document]).getInteger("rev").intValue
@@ -76,23 +77,22 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
     }
   }
 
-
-  def replayStream(stream: ID)(callback: StreamCallback[Transaction]): Unit = {
+  def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit = {
     query(new Document("_id.stream", stream), OrderByRevision, callback)
   }
 
-  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[Transaction]): Unit = {
+  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit = {
     val filter = new Document("_id.stream", stream)
     if (fromRevision > 0) {
       filter.append("_id.rev", new Document("$gte", fromRevision))
     }
     query(filter, OrderByRevision, callback)
   }
-  def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamCallback[Transaction]): Unit = {
-    val filter = new Document("_id.stream", stream).append("_id.rev", new Document("$lte", toRevision))
-    query(filter, OrderByRevision, callback)
-  }
-  def replayStreamRange(stream: ID, revisionRange: collection.immutable.Range)(callback: StreamCallback[Transaction]): Unit = {
+  //  def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamCallback[TXN]): Unit = {
+  //    val filter = new Document("_id.stream", stream).append("_id.rev", new Document("$lte", toRevision))
+  //    query(filter, OrderByRevision, callback)
+  //  }
+  def replayStreamRange(stream: ID, revisionRange: collection.immutable.Range)(callback: StreamCallback[TXN]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val filter = new Document("_id.stream", stream)
     val from = revisionRange.head
@@ -108,24 +108,24 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
     query(filter, OrderByRevision, callback)
   }
 
-  def record(clock: Long, category: CAT, stream: ID, revision: Int, events: Seq[EVT], metadata: Map[String, String]): Future[Transaction] = {
-    val txn = Transaction(clock, category, stream, revision, metadata, events)
+  def record(channel: CH, stream: ID, revision: Int, tick: Long, events: aSeq[EVT], metadata: aMap[String, String]): Future[TXN] = {
+    val txn = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
       store.insertOne(txn, callback)
     }.map(_ => txn)
     insertFuture.recoverWith {
       case e: MongoWriteException if e.getError.getCategory == ErrorCategory.DUPLICATE_KEY =>
-        withFutureCallback[Transaction] { callback =>
+        withFutureCallback[TXN] { callback =>
           store.find(new Document("_id.stream", stream).append("_id.rev", revision))
-          .limit(1)
-          .first(callback)
+            .limit(1)
+            .first(callback)
         }.map(conflicting => throw new DuplicateRevisionException(conflicting.get))
     }
   }
 
-  protected def query(filter: Document, ordering: Document, callback: StreamCallback[Transaction]): Unit = {
-    val onTxn = new Block[Transaction] {
-      def apply(txn: Transaction) = callback.onNext(txn)
+  protected def query(filter: Document, ordering: Document, callback: StreamCallback[TXN]): Unit = {
+    val onTxn = new Block[TXN] {
+      def apply(txn: TXN) = callback.onNext(txn)
     }
     val onFinish = new SingleResultCallback[Void] {
       def onResult(result: Void, t: Throwable) {
@@ -137,18 +137,18 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
   }
 
   private object Factory {
-     def newCodecRegistry(registry: CodecRegistry): org.bson.codecs.configuration.CodecRegistry = new org.bson.codecs.configuration.CodecRegistry {
+    def newCodecRegistry(registry: CodecRegistry): org.bson.codecs.configuration.CodecRegistry = new org.bson.codecs.configuration.CodecRegistry {
       def get[C](cls: Class[C]): Codec[C] = {
-        if (cls == classOf[Transaction]) transactionCodec.asInstanceOf[Codec[C]]
+        if (cls == classOf[TXN]) transactionCodec.asInstanceOf[Codec[C]]
         else registry.get(cls)
       }
       private[this] val docCodec: Codec[Document] = registry.get(classOf[Document])
-      private[this] val transactionCodec = new org.bson.codecs.Codec[Transaction] {
+      private[this] val transactionCodec = new org.bson.codecs.Codec[TXN] {
         import language.implicitConversions
         implicit def tag2class[T](tag: ClassTag[T]): Class[T] = tag.runtimeClass.asInstanceOf[Class[T]]
-        def getEncoderClass = classOf[Transaction]
+        def getEncoderClass = classOf[TXN]
         val idCodec = registry.get(classTag[ID]).ensuring(_ != null, s"Codec for ${classTag[ID]} not found")
-        val catCodec = registry.get(classTag[CAT]).ensuring(_ != null, s"Codec for ${classTag[CAT]} not found")
+        val catCodec = registry.get(classTag[CH]).ensuring(_ != null, s"Codec for ${classTag[CH]} not found")
 
         private def writeEntry(name: String, value: AnyRef, writer: BsonWriter)(implicit ctx: EncoderContext) {
           writer.writeName(name)
@@ -169,15 +169,15 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
           thunk
           writer.writeEndArray()
         }
-        def encode(writer: BsonWriter, txn: Transaction, ctx: EncoderContext) {
-          implicit def encCtx = ctx
+        def encode(writer: BsonWriter, txn: TXN, ctx: EncoderContext) {
+            implicit def encCtx = ctx
           writer.writeStartDocument()
           writeDocument(writer, "_id") {
-            writer.writeName("stream"); idCodec.encode(writer, txn.streamId, ctx)
+            writer.writeName("stream"); idCodec.encode(writer, txn.stream, ctx)
             writer.writeInt32("rev", txn.revision)
           }
-          writer.writeInt64("time", txn.clock)
-          writer.writeName("category"); catCodec.encode(writer, txn.category, ctx)
+          writer.writeInt64("tick", txn.tick)
+          writer.writeName("channel"); catCodec.encode(writer, txn.channel, ctx)
           if (txn.metadata.nonEmpty) {
             writeDocument(writer, "metadata") {
               txn.metadata.foreach {
@@ -189,8 +189,8 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
           writeArray("events", writer) {
             txn.events.foreach { evt =>
               writeDocument(writer) {
-                writeEntry("name", evtCodec.eventName(evt), writer)
-                writeEntry("version", Integer.valueOf(evtCodec.eventVersion(evt)), writer)
+                writeEntry("name", evtCodec.name(evt), writer)
+                writeEntry("v", Integer.valueOf(evtCodec.version(evt)), writer)
                 val data = evtCodec.encodeEvent(evt)
                 writeEntry("data", data, writer)
               }
@@ -213,7 +213,7 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
           r
         }
         @annotation.tailrec
-        private def readMetadata(reader: BsonReader, map: Map[String,String] = Map.empty): Map[String, String] = {
+        private def readMetadata(reader: BsonReader, map: Map[String, String] = Map.empty): Map[String, String] = {
           if (reader.readBsonType() == BsonType.END_OF_DOCUMENT) {
             map
           } else {
@@ -224,50 +224,103 @@ class MongoEventStore[ID: ClassTag, EVT, CAT: ClassTag](
         }
 
         @annotation.tailrec
-        private def readEvents(category: CAT, reader: BsonReader, events: Vector[EVT] = Vector.empty[EVT])(implicit ctx: DecoderContext): Vector[EVT] = {
+        private def readEvents(channel: CH, reader: BsonReader, events: Vector[EVT] = Vector.empty[EVT])(implicit ctx: DecoderContext): Vector[EVT] = {
           if (reader.readBsonType() == BsonType.END_OF_DOCUMENT) {
             events
           } else {
             val evt = readDocument(reader) {
               val name = reader.readString("name")
-              val version = reader.readInt32("version").toShort
+              val version = reader.readInt32("v").toShort
               reader.readName("data")
               val data = docCodec.decode(reader, ctx)
               evtCodec.decodeEvent(name, version, data)
             }
-            readEvents(category, reader, events :+ evt)
+            readEvents(channel, reader, events :+ evt)
           }
         }
-        def decode(reader: BsonReader, ctx: DecoderContext): Transaction = {
-          implicit def decCtx = ctx
+        def decode(reader: BsonReader, ctx: DecoderContext): TXN = {
+            implicit def decCtx = ctx
           reader.readStartDocument()
           val (id: ID, rev: Int) = readDocument(reader, "_id") {
             reader.readName("stream")
             idCodec.decode(reader, ctx) -> reader.readInt32("rev")
           }
-          val clock = reader.readInt64("time")
-          val category = {
-            reader.readName("category")
+          val clock = reader.readInt64("tick")
+          val channel = {
+            reader.readName("channel")
             catCodec.decode(reader, ctx)
           }
           val (metadata, events) = reader.readName match {
             case "metadata" =>
               val metadata = readDocument(reader)(readMetadata(reader))
               metadata -> readArray(reader, "events") {
-                readEvents(category, reader)
+                readEvents(channel, reader)
               }
             case "events" =>
-              Map.empty[String,String] -> readArray(reader) {
-                readEvents(category, reader)
+              Map.empty[String, String] -> readArray(reader) {
+                readEvents(channel, reader)
               }
             case other => throw new IllegalStateException(s"Unknown field: $other")
           }
           reader.readEndDocument()
-          new Transaction(clock, category, id, rev, metadata, events)
+          Transaction(clock, channel, id, rev, metadata, events)
         }
       }
 
     }
   }
-}
 
+  withBlockingCallback[String]()(store.createIndex(new Document("tick", 1), _))
+  withBlockingCallback[String]()(store.createIndex(new Document("channel", 1), _))
+
+  private[this] val OrderByTime = new Document("tick", 1)
+
+  def lastTick(): Future[Option[Long]] = getFirst[Long]("tick", false)
+
+  private def getFirst[T](name: String, smallest: Boolean): Future[Option[T]] = {
+    withFutureCallback[Document] { callback =>
+      store.find(new Document, classOf[Document])
+        .projection(new Document(name, true).append("_id", false))
+        .sort(new Document(name, if (smallest) 1 else -1))
+        .limit(1)
+        .first(callback)
+    }.map { optDoc =>
+      optDoc.map(_.get(name).asInstanceOf[T])
+    }
+  }
+
+  private def toJList[T](tr: Traversable[T]): java.util.List[T] = {
+    tr.foldLeft(new java.util.ArrayList[T](tr.size)) {
+      case (list, t) =>
+        list add t
+        list
+    }
+  }
+
+  private def toDoc(streamFilter: StreamFilter[ID, EVT, CH], docFilter: Document = new Document): Document = {
+    import StreamFilter._
+    streamFilter match {
+      case Everything() => // Ignore
+      case ByChannel(channels) =>
+        docFilter.append("channel", new Document("$in", toJList(channels)))
+      case ByEventType(evtTypes, channels) =>
+        docFilter.append("channel", new Document("$in", toJList(channels)))
+        val evtNames = evtTypes.map(evtCodec.name)
+        docFilter.append("events.name", new Document("$in", toJList(evtNames)))
+      case ById(idAndChannels) =>
+        val ids = idAndChannels.map(_._1)
+        docFilter.append("_id.stream", new Document("$in", toJList(ids)))
+    }
+    docFilter
+  }
+
+  def replay(streamFilter: StreamFilter[ID, EVT, CH])(callback: StreamCallback[TXN]): Unit = {
+    query(toDoc(streamFilter), OrderByTime, callback)
+  }
+
+  def replaySince(sinceTick: Long, streamFilter: StreamFilter[ID, EVT, CH])(callback: StreamCallback[TXN]): Unit = {
+    val docFilter = new Document("tick", new Document("$gte", sinceTick))
+    query(toDoc(streamFilter, docFilter), OrderByTime, callback)
+  }
+
+}

@@ -1,85 +1,105 @@
 package ulysses.redis
 
-import scuff.redis._
 import redis.clients.jedis.JedisShardInfo
+import scuff.redis._
 import scuff.Codec
 import scala.concurrent.ExecutionContext
 import scuff.Subscription
 import scuff.concurrent.Threads
 import ulysses.EventStore
 import ulysses.Publishing
+import redis.clients.jedis.Jedis
+import ulysses.StreamFilter
+import scuff.concurrent.StreamCallback
+import scala.util.{ Try, Failure }
+import scuff.concurrent.HashPartitionExecutionContext
 
-trait RedisPublishing[ID, EVT, CAT]
-    extends Publishing[ID, EVT, CAT] {
+trait RedisPublishing[ID, EVT, CH]
+    extends Publishing[ID, EVT, CH] {
 
-  protected def publishPool: RedisConnectionPool
+  protected def jedis(thunk: Jedis => Unit): Unit
   protected def subscribeServer: JedisShardInfo
 
-  protected trait Categorizer {
-    /** Name of category. */
-    def name(cat: CAT): String
-    /** Index of category. Must be between 0 and n-1, where n is the number of categories. */
-    def index(cat: CAT): Int
+  protected trait ChannelIndexer {
+    /** Name of channel. */
+    def name(ch: CH): String
+    /** Index of channel. Must be between 0 and n-1, where n is the number of channels. */
+    def index(ch: CH): Int
   }
-  protected def publishChannelName(cat: CAT): String = s"EventStore:${categorizer.name(cat)}"
-  protected def publishCodec: Codec[Transaction, Array[Byte]]
-  protected def allCategories: Set[CAT]
-  private lazy val defaultCategorizer = {
-    if (allCategories.forall(_.isInstanceOf[java.lang.Enum[_]])) {
-      new Categorizer {
-        def name(cat: CAT): String = cat.asInstanceOf[java.lang.Enum[_]].name
-        def index(cat: CAT): Int = cat.asInstanceOf[java.lang.Enum[_]].ordinal
+  protected def publishCtx: HashPartitionExecutionContext = HashPartitionExecutionContext.global
+  protected def publishChannelName(ch: CH): String = s"${getClass.getSimpleName}:${indexer.name(ch)}"
+  protected def publishCodec: Codec[TXN, Array[Byte]]
+  protected def allChannels: Set[CH]
+  private lazy val defaultIndexer = {
+    if (allChannels.forall(_.isInstanceOf[java.lang.Enum[_]])) {
+      new ChannelIndexer {
+        def name(ch: CH): String = ch.asInstanceOf[java.lang.Enum[_]].name
+        def index(ch: CH): Int = ch.asInstanceOf[java.lang.Enum[_]].ordinal
       }
-    } else if (allCategories.forall(_.isInstanceOf[Enumeration#Value])) {
-      new Categorizer {
-        def name(cat: CAT): String = cat.toString
-        def index(cat: CAT): Int = cat.asInstanceOf[Enumeration#Value].id
+    } else if (allChannels.forall(_.isInstanceOf[Enumeration#Value])) {
+      new ChannelIndexer {
+        def name(ch: CH): String = ch.toString
+        def index(ch: CH): Int = ch.asInstanceOf[Enumeration#Value].id
       }
     } else {
-      new Categorizer {
-        val _categoryIndex = allCategories.toSeq.zipWithIndex.toMap
-        def name(cat: CAT): String = cat.toString
-        def index(cat: CAT): Int = _categoryIndex(cat)
+      new ChannelIndexer {
+        val _channelIndex = allChannels.toSeq.zipWithIndex.toMap
+        def name(ch: CH): String = ch.toString
+        def index(ch: CH): Int = _channelIndex(ch)
       }
     }
 
   }
-  protected def categorizer: Categorizer = defaultCategorizer
+  protected def indexer: ChannelIndexer = defaultIndexer
 
   private lazy val pubChannels = {
-    val channels = new Array[BinaryRedisPublisher[Transaction]](allCategories.size)
-    allCategories.foreach { category =>
-      channels(categorizer.index(category)) = new BinaryRedisPublisher(publishChannelName(category), publishCodec)
+    val channels = new Array[BinaryRedisPublisher[TXN]](allChannels.size)
+    allChannels.foreach { channel =>
+      channels(indexer.index(channel)) =
+        new BinaryRedisPublisher(publishChannelName(channel), publishCodec)
     }
     channels
   }
-  protected def publish(txn: Transaction) = {
-    val channel = pubChannels(categorizer.index(txn.category))
-    publishPool { conn =>
+  protected def publish(txn: TXN) = {
+    val channel = pubChannels(indexer.index(txn.channel))
+    jedis { conn =>
       channel.publish(txn)(conn)
     }
   }
   private lazy val subChannels = {
     val tg = new ThreadGroup("RedisChannelSubscribers")
-    allCategories.toList.map { category =>
-      val channelName = publishChannelName(category)
+    allChannels.toList.map { channel =>
+      val channelName = publishChannelName(channel)
       val tf = Threads.daemonFactory(s"RedisChannelSubscriber($channelName)", tg)
-      category -> BinaryRedisFaucet(channelName, subscribeServer, tf, publishCodec, ExecutionContext.global)
+      channel -> BinaryRedisFeed(channelName, subscribeServer, tf, publishCodec, publishCtx)
     }
   }
-  def subscribe(sub: Transaction => Unit, include: CAT => Boolean) = {
-    val subscriptions = subChannels.filter(c => include(c._1)).map(_._2.subscribe(sub))
+  def subscribe(
+    filter: StreamFilter[ID, EVT, CH])(
+      callback: StreamCallback[TXN]): Subscription = {
+    import StreamFilter._
+    val channels = filter match {
+      case Everything() =>
+        subChannels
+      case ByChannel(channels) =>
+        subChannels.filter(cf => channels.contains(cf._1))
+      case ByEventType(_, channels) =>
+        subChannels.filter(cf => channels.contains(cf._1))
+      case ById(idsWithChannel) =>
+        val channels = idsWithChannel.map(_._2)
+        subChannels.filter(cf => channels.contains(cf._1))
+    }
+    val subscriptions = channels.map {
+      case (_, feed) =>
+//        val f: (TXN => Boolean) = (txn) => filter.allowed(txn)
+        feed.subscribe(filter.allowed _)(callback.onNext)
+    }
     new Subscription {
       def cancel {
-        var cancelE: Exception = null
-        subscriptions.foreach { sub =>
-          try {
-            sub.cancel()
-          } catch {
-            case e: Exception => if (cancelE == null) cancelE = e
-          }
+        subscriptions.map(s => Try(s.cancel)).foreach {
+          case Failure(th) => throw th
+          case _ => // All good
         }
-        if (cancelE != null) throw cancelE
       }
     }
   }

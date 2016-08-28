@@ -1,38 +1,36 @@
 package ulysses
 
-import scala.collection.immutable.Seq
+import scala.collection.{ Seq, Map }
 import scala.concurrent.ExecutionContext
-import scuff.Faucet
+import scuff.{ Subscription, Feed }
 import scala.concurrent.Future
 import scala.util.Success
 import scala.util.control.NonFatal
+import scuff.concurrent.StreamCallback
+import scuff.Subscription
 
-trait Publishing[ID, EVT, CAT] extends EventStore[ID, EVT, CAT] with Faucet {
+trait Publishing[ID, EVT, CH]
+    extends EventStore[ID, EVT, CH] {
 
-  type Filter = CAT
-  type Consumer = (Transaction => Unit)
-
-  /** Execution context for publishing. */
+  /** Execution context for calling `publish(TXN)`. */
   protected def publishCtx: ExecutionContext
   /** This call will be executed in the `publishCtx`. */
-  protected def publish(txn: Transaction): Unit
-  private def publish(txn: Future[Transaction]): Unit = {
+  protected def publish(txn: TXN): Unit
+  private def publish(txn: Future[TXN]): Unit = {
     txn.foreach { txn =>
       try publish(txn) catch {
         case NonFatal(e) => publishCtx reportFailure e
       }
     }(publishCtx)
   }
-  abstract override def createStream(streamId: ID, category: CAT, clock: Long, events: Seq[EVT], metadata: Map[String, String]): Future[Transaction] = {
-    val txn = super.createStream(streamId, category, clock, events, metadata)
+  abstract override def record(
+    channel: CH, stream: ID, revision: Int, tick: Long,
+    events: Seq[EVT], metadata: Map[String, String]): Future[TXN] = {
+    val txn = super.record(channel, stream, revision, tick, events, metadata)
     publish(txn)
     txn
   }
-  abstract override def appendStream(
-    streamId: ID, revision: Int, clock: Long, events: Seq[EVT], metadata: Map[String, String]): Future[Transaction] = {
-    val txn = super.appendStream(streamId, revision, clock, events, metadata)
-    publish(txn)
-    txn
-  }
-
+  def subscribe(
+    filter: StreamFilter[ID, EVT, CH] = StreamFilter.Everything())(
+      callback: StreamCallback[TXN]): Subscription
 }

@@ -29,7 +29,7 @@
 //    classOf[Int] -> "INT",
 //    classOf[java.lang.Integer] -> "INT")
 //
-//  private def ensureTable[ID: TypeConverter, CAT: TypeConverter](
+//  private def ensureTable[ID: TypeConverter, CH: TypeConverter](
 //    session: Session, keyspace: String, table: String, replication: Map[String, Any]) {
 //    val replicationStr = replication.map {
 //      case (key, str: CharSequence) => s"'$key':'$str'"
@@ -37,19 +37,19 @@
 //    }.mkString("{", ",", "}")
 //    def typeClass[T: TypeConverter]: Class[_] = implicitly[TypeConverter[ID]].cassandraType.runtimeClass
 //    val idTypeStr = CassandraTypes.getOrElse(typeClass[ID], sys.error(s"Unsupported ID type: ${typeClass[ID].getName}"))
-//    val catTypeStr = CassandraTypes.getOrElse(typeClass[CAT], sys.error(s"Unsupported category type: ${typeClass[CAT].getName}"))
+//    val catTypeStr = CassandraTypes.getOrElse(typeClass[CH], sys.error(s"Unsupported channel type: ${typeClass[CH].getName}"))
 //    session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH REPLICATION = $replicationStr")
 //    session.execute(s"""CREATE TABLE IF NOT EXISTS $keyspace.$table (
 //    		stream $idTypeStr,
 //    		revision INT,
 //    		time BIGINT,
-//    		category $catTypeStr,
+//    		channel $catTypeStr,
 //    		events LIST<TEXT>,
 //    		metadata MAP<TEXT,TEXT>,
 //    		PRIMARY KEY (stream, revision)
 //    );""")
 //    session.execute(s"CREATE INDEX IF NOT EXISTS ON $keyspace.$table(clock)")
-//    session.execute(s"CREATE INDEX IF NOT EXISTS ON $keyspace.$table(category)")
+//    session.execute(s"CREATE INDEX IF NOT EXISTS ON $keyspace.$table(channel)")
 //  }
 //
 //}
@@ -57,21 +57,21 @@
 ///**
 // * JDBC event store implementation.
 // */
-//class JdbcEventStore[ID: TypeConverter, EVT, CAT: TypeConverter](
+//class JdbcEventStore[ID: TypeConverter, EVT, CH: TypeConverter](
 //  session: Session,
 //  keyspace: String, table: String,
 //  replication: Map[String, Any])(implicit exeCtx: ExecutionContext, evtCodec: EventCodec[EVT, String])
-//    extends EventStore[ID, EVT, CAT] {
+//    extends EventStore[ID, EVT, CH] {
 //
-//  CassandraEventStore.ensureTable[ID, CAT](session, keyspace, table, replication)
+//  CassandraEventStore.ensureTable[ID, CH](session, keyspace, table, replication)
 //
 //  private def getID(row: Row): ID = implicitly[TypeConverter[ID]].getValue(row, 0)
-//  private def getCategory(row: Row): CAT = implicitly[TypeConverter[CAT]].getValue(row, 3)
+//  private def getChannel(row: Row): CH = implicitly[TypeConverter[CH]].getValue(row, 3)
 //
 //  private def toTransaction(row: Row): Transaction = {
 //    val id = getID(row)
 //    val clock = row.getLong("clock")
-//    val category = getCategory(row)
+//    val channel = getChannel(row)
 //    val revision = row.getInt("revision")
 //    val metadata = {
 //      val map = row.getMap("metadata", classOf[String], classOf[String])
@@ -82,7 +82,7 @@
 //      }
 //    }
 //    val events = fromStringList(row.getList("events", classOf[String]))
-//    new Transaction(clock, category, id, revision, metadata, events)
+//    new Transaction(clock, channel, id, revision, metadata, events)
 //  }
 //
 //  private def execute[T](stm: BoundStatement)(handler: ResultSet => T): Future[T] = {
@@ -161,51 +161,51 @@
 //    query(callback, ReplayStreamRange, stream, revisionRange.head, revisionRange.last)
 //  }
 //
-//  private def newReplayStatement(categoryCount: Int) = {
-//    val cql = categoryCount match {
+//  private def newReplayStatement(channelCount: Int) = {
+//    val cql = channelCount match {
 //      case 0 =>
 //        s"SELECT * FROM $keyspace.$table ORDER BY clock"
 //      case 1 =>
-//        s"SELECT * FROM $keyspace.$table WHERE category = ? ORDER BY clock"
+//        s"SELECT * FROM $keyspace.$table WHERE channel = ? ORDER BY clock"
 //      case n =>
 //        val qs = Seq.fill(n)("?").mkString(",")
-//        s"SELECT * FROM $keyspace.$table WHERE category IN ($qs) ORDER BY clock"
+//        s"SELECT * FROM $keyspace.$table WHERE channel IN ($qs) ORDER BY clock"
 //    }
 //    session.prepare(cql)
 //  }
 //  private val Replay = new Multiton[Int, PreparedStatement](newReplayStatement)
-//  def replay(categories: CAT*)(callback: StreamCallback[Transaction]): Unit = {
-//    val stm = Replay(categories.size)
-//    query(callback, stm, categories: _*)
+//  def replay(channels: CH*)(callback: StreamCallback[Transaction]): Unit = {
+//    val stm = Replay(channels.size)
+//    query(callback, stm, channels: _*)
 //  }
 //
-//  private def newReplayFromStatement(categoryCount: Int) = {
-//    val cql = categoryCount match {
+//  private def newReplayFromStatement(channelCount: Int) = {
+//    val cql = channelCount match {
 //      case 0 =>
 //        s"SELECT * FROM $keyspace.$table WHERE clock >= ? ORDER BY clock"
 //      case 1 =>
-//        s"SELECT * FROM $keyspace.$table WHERE clock >= ? AND category = ? ORDER BY clock"
+//        s"SELECT * FROM $keyspace.$table WHERE clock >= ? AND channel = ? ORDER BY clock"
 //      case n =>
 //        val qs = Seq.fill(n)("?").mkString(",")
-//        s"SELECT * FROM $keyspace.$table WHERE clock >= ? AND category IN ($qs) ORDER BY clock"
+//        s"SELECT * FROM $keyspace.$table WHERE clock >= ? AND channel IN ($qs) ORDER BY clock"
 //    }
 //    session.prepare(cql)
 //  }
 //  private val ReplayFrom = new Multiton[Int, PreparedStatement](newReplayFromStatement)
-//  def replayFrom(fromTimestamp: Long, categories: CAT*)(callback: StreamCallback[Transaction]): Unit = {
-//    val stm = ReplayFrom(categories.size)
-//    val parms = fromTimestamp +: categories
+//  def replayFrom(fromTimestamp: Long, channels: CH*)(callback: StreamCallback[Transaction]): Unit = {
+//    val stm = ReplayFrom(channels.size)
+//    val parms = fromTimestamp +: channels
 //    query(callback, stm, parms)
 //  }
 //
 //  private val RecordTransaction =
-//    session.prepare(s"INSERT INTO $keyspace.$table (clock, stream, revision, category, events, metadata) VALUES(?,?,?,?,?,?) IF NOT EXISTS")
-//  def record(clock: Long, category: CAT, stream: ID, revision: Int, events: Seq[EVT], metadata: Map[String, String]): Future[Transaction] = {
+//    session.prepare(s"INSERT INTO $keyspace.$table (clock, stream, revision, channel, events, metadata) VALUES(?,?,?,?,?,?) IF NOT EXISTS")
+//  def record(clock: Long, channel: CH, stream: ID, revision: Int, events: Seq[EVT], metadata: Map[String, String]): Future[Transaction] = {
 //    val jEvents = toStringList(events)
 //    val jMetadata = metadata.asJava
-//    execute(RecordTransaction, stream, revision, category, jEvents, jMetadata) { rs =>
+//    execute(RecordTransaction, stream, revision, channel, jEvents, jMetadata) { rs =>
 //      if (rs.wasApplied) {
-//        new Transaction(clock, category, stream, revision, metadata, events)
+//        new Transaction(clock, channel, stream, revision, metadata, events)
 //      } else {
 //        val conflicting = toTransaction(rs.one)
 //        throw new DuplicateRevisionException(conflicting)

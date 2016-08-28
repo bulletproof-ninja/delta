@@ -1,11 +1,9 @@
 package ulysses.cassandra
 
-import scala.reflect.ClassTag
-import com.datastax.driver.core.Row
+import scala.reflect.{ ClassTag, classTag }
 
-trait TypeConverter[T] {
-  type CT <: AnyRef
-  def cassandraType: ClassTag[CT]
-  def getValue(row: Row, column: Int): T
-  def toCassandraType(t: T): CT
+abstract class TypeConverter[T: ClassTag]
+    extends ulysses.conv.TypeConverter[T] {
+  final type ROW = com.datastax.driver.core.Row
+  final val jvmType: Class[T] = classTag[T].runtimeClass.asInstanceOf[Class[T]]
 }

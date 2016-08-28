@@ -3,25 +3,24 @@ package ulysses.util
 import scuff.MonotonicSequencer
 import ulysses.EventSource
 import collection.concurrent.TrieMap
+import ulysses.Transaction
 
 /**
- * Sequenced [[ulysses.EventSource#Transaction]] handler.
+ * Sequenced [[ulysses.Transaction]] handler.
  * This trait guarantees transactions ordered
  * by revision.
  * NOTICE: This trait expects processing of streams
  * to be serialized, i.e. transactions from the same
  * stream should not be applied concurrently.
  */
-trait SequencedTransactionHandler[ID, EVT, CAT] extends (EventSource[ID, EVT, CAT]#Transaction => Unit) {
+trait SequencedTransactionHandler[ID, EVT, CH] extends (Transaction[ID, EVT, CH] => Unit) {
 
-  private type ES = EventSource[ID, EVT, CAT]
-//  private type ID = ES#ID
-  private type TXN = ES#Transaction
+  type TXN = Transaction[ID, EVT, CH]
 
   /**
    * Callback on duplicate transaction.
    */
-  protected def onDuplicate(txn: TXN) {}
+  protected def onDuplicate(txn: TXN): Unit = ()
   private def dupeHandler(rev: Int, txn: TXN) = onDuplicate(txn)
 
   /**
@@ -55,17 +54,17 @@ trait SequencedTransactionHandler[ID, EVT, CAT] extends (EventSource[ID, EVT, CA
   }
 
   abstract override def apply(txn: TXN) {
-    sequencers.get(txn.streamId) match {
+    sequencers.get(txn.stream) match {
       // Out-of-sequence mode
       case Some(sequencer) => sequencer(txn.revision, txn)
       // In-sequence mode
-      case None => expectedRevision(txn.streamId) match {
+      case None => expectedRevision(txn.stream) match {
         case -1L => super.apply(txn)
         case expected =>
           if (txn.revision == expected) {
             super.apply(txn)
           } else if (txn.revision > expected) {
-            val sequencer = newSequencer(txn.streamId, expected)
+            val sequencer = newSequencer(txn.stream, expected)
             sequencer(txn.revision, txn)
           } else {
             onDuplicate(txn)

@@ -17,24 +17,41 @@ case class User(name: String, age: Int)
 
 class TestEventStore {
 
-  private[this] val es: EventStore[Symbol, Event, String] = null
-
-  @Before
-  def setup {
-    new Surgeon(this).set('es, new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack))
+  private[this] val es = new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack) {
+    override def Transaction(
+      tick: Long,
+      channel: String,
+      stream: Symbol,
+      revision: Int,
+      metadata: Map[String, String],
+      events: Seq[Event]) = super.Transaction(tick, channel, stream, revision, metadata, events)
   }
+
+//  @Before
+//  def setup {
+//    val tes = new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack) {
+//      override def Transaction(
+//        tick: Long,
+//        channel: String,
+//        stream: Symbol,
+//        revision: Int,
+//        metadata: Map[String, String],
+//        events: Seq[Event]) = super.Transaction(tick, channel, stream, revision, metadata, events)
+//    }
+//    new Surgeon(this).set('es, tes)
+//  }
 
   @Test
   def serialization {
     val wallClock = System.currentTimeMillis
-    val txn = new es.Transaction(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
+    val txn = es.Transaction(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
     val objOut = new ObjectOutputStream(out)
     objOut.writeObject(txn)
     objOut.close()
     val bytes = out.toArray
     val objInp = new ObjectInputStream(new ByteInputStream(bytes))
-    val outTxn = objInp.readObject().asInstanceOf[es.Transaction]
+    val outTxn = objInp.readObject().asInstanceOf[es.TXN]
     assertEquals(0, objInp.available)
     assertEquals(txn, outTxn)
   }

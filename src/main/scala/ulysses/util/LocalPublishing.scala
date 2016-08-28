@@ -7,16 +7,25 @@ import scuff.concurrent.Threads
 import ulysses.EventStore
 import ulysses.Publishing
 import scuff.PubSub
+import scuff.concurrent.StreamCallback
+import ulysses.StreamFilter
 
-trait LocalPublishing[ID, EVT, CAT]
-    extends Publishing[ID, EVT, CAT] {
+trait LocalPublishing[ID, EVT, CH]
+    extends Publishing[ID, EVT, CH] {
 
-  private[this] lazy val pubSub = new PubSub[Transaction, Transaction](publishCtx)
+  private[this] lazy val pubSub = new PubSub[TXN, TXN]
 
-  protected def publish(txn: Transaction) = pubSub.publish(txn)
-  def subscribe(sub: Transaction => Unit, include: CAT => Boolean) = {
-      def filter(txn: Transaction): Boolean = include(txn.category)
-    pubSub.subscribe(sub, filter)
+  protected def publish(txn: TXN) = pubSub.publish(txn)
+
+  def subscribe(
+    filter: StreamFilter[ID, EVT, CH] = StreamFilter.Everything())(
+      callback: StreamCallback[TXN]): Subscription = {
+    val subscription = pubSub.subscribe(filter.allowed)(callback)
+    new Subscription {
+      def cancel(): Unit = {
+        subscription.cancel()
+      }
+    }
   }
 
 }

@@ -7,69 +7,57 @@ import java.sql.ResultSet
 import scuff.Numbers._
 
 package object jdbc {
-  implicit object UUIDConverter extends TypeConverter[UUID] {
-    type JT = Array[Byte]
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int) = {
+  object UUIDBinaryConverter extends UUIDBinaryConverter
+  class UUIDBinaryConverter extends TypeConverter[UUID] {
+    def typeName = "BINARY(16)"
+    def writeAs(uuid: UUID): Array[Byte] = {
+      val bytes = new Array[Byte](16)
+      longToBytes(uuid.getMostSignificantBits, bytes, 0)
+      longToBytes(uuid.getLeastSignificantBits, bytes, 8)
+    }
+    def readFrom(row: ResultSet, col: Int) = {
       val bytes = row.getBytes(col)
       val msb = bytesToLong(bytes, 0)
       val lsb = bytesToLong(bytes, 8)
       new UUID(msb, lsb)
     }
-    def toJdbcType(uuid: UUID): Array[Byte] = {
-      val bytes = new Array[Byte](16)
-      longToBytes(uuid.getMostSignificantBits, bytes, 0)
-      longToBytes(uuid.getLeastSignificantBits, bytes, 8)
-    }
+  }
+  object UUIDCharConverter extends UUIDCharConverter
+  class UUIDCharConverter extends TypeConverter[UUID] {
+    def typeName = "CHAR(36)"
+    def writeAs(uuid: UUID): String = uuid.toString
+    def readFrom(row: ResultSet, col: Int) = UUID fromString row.getString(col)
   }
   implicit object LongConverter extends TypeConverter[Long] {
-    type JT = Long
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int) = row.getLong(col)
-    def toJdbcType(long: Long): JT = long
+    def typeName = "BIGINT"
+    def readFrom(row: ResultSet, col: Int) = row.getLong(col)
   }
   implicit object IntConverter extends TypeConverter[Int] {
-    type JT = Int
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int) = row.getInt(col)
-    def toJdbcType(int: Int) = int
+    def typeName = "INT"
+    def readFrom(row: ResultSet, col: Int) = row.getInt(col)
   }
   implicit object StringConverter extends TypeConverter[String] {
-    type JT = String
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int) = row.getString(col)
-    def toJdbcType(str: String): JT = str
+    def typeName = "VARCHAR"
+    def readFrom(row: ResultSet, col: Int) = row.getString(col)
   }
   implicit object BigIntConverter extends TypeConverter[BigInt] {
-    type JT = BigDecimal
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
-    def toJdbcType(bint: BigInt): JT = new java.math.BigDecimal(bint.underlying)
-  }
-  implicit object BlobConverter extends TypeConverter[Array[Byte]] {
-    type JT = Array[Byte]
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int): Array[Byte] = row.getBytes(col)
-    def toJdbcType(bytes: Array[Byte]) = bytes
+    def typeName = "NUMERIC"
+    def readFrom(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
+    def writeAs(bint: BigInt) = new java.math.BigDecimal(bint.underlying)
   }
   implicit object UnitConverter extends TypeConverter[Unit] {
-    type JT = String
-    def jdbcType: ClassTag[JT] = implicitly
-    def getValue(row: ResultSet, col: Int): Unit = ()
-    def toJdbcType(unit: Unit) = "Unit"
+    def typeName = "TINYINT"
+    def readFrom(row: ResultSet, col: Int): Unit = ()
+    def writeAs(unit: Unit): Byte = 0
   }
-
-  implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] = new TypeConverter[T] {
-    type JT = String
-    def jdbcType: ClassTag[JT] = implicitly
-    private[this] val values =
-      classTag[T].runtimeClass.getEnumConstants.foldLeft(Map.empty[String, T]) {
-        case (map, value) =>
-          val t = value.asInstanceOf[T]
-          map.updated(t.name, t)
-      }
-    def getValue(row: ResultSet, col: Int): T = values(row.getString(col))
-    def toJdbcType(value: T) = value.name
-  }
-
+  implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] =
+    new TypeConverter[T] with conv.JavaEnumConverter[T] {
+      def typeName = "VARCHAR"
+      def readFrom(row: ROW, col: Int) = byName(row.getString(col))
+    }
+  implicit def ScalaEnumConverter[E <: Enumeration: ClassTag] =
+    new TypeConverter[E] with conv.ScalaEnumConverter[E] {
+      def typeName = "VARCHAR"
+      def readFrom(row: ROW, col: Int) = byName(row.getString(col))
+    }
 }

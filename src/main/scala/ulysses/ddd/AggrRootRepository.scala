@@ -6,9 +6,9 @@ import scala.concurrent.Future
 import scuff.concurrent.Threads.PiggyBack
 import scala.util.control.NonFatal
 
-class AggrRootRepository[AR, ID, EVT, ESID, CAT, S](
+class AggrRootRepository[AR, ID, EVT, ESID, CH, S](
   aggr: AggrRoot[AR, ID, EVT, S],
-  repo: EventStoreRepository[S, ID, EVT, ESID, CAT])
+  repo: EventStoreRepository[S, ID, EVT, ESID, CH])
     extends Repository[AR, ID] {
 
   def exists(id: ID): Future[Option[Int]] = repo.exists(id)

@@ -1,26 +1,27 @@
 package ulysses.util
 
 import ulysses._
+import scala.util.control.NonFatal
 
 /**
- * Fail safe [[ulysses.EventSource#Transaction]] handler.
+ * Fail safe [[ulysses.Transaction]] handler.
  * This handler will exclude any streams that fails, to ensure
  * continuous processing of all other streams.
  */
-trait FailSafeTransactionHandler[ID, EVT, CAT] extends (EventSource[ID, EVT, CAT]#Transaction => Unit) {
+trait FailSafeTransactionHandler[ID, EVT, CH] extends (Transaction[ID, EVT, CH]=> Unit) {
 
-  type Transaction = EventSource[ID, EVT, CAT]#Transaction
+  type TXN = Transaction[ID, EVT, CH]
 
   /** Determine if stream is failed. */
   protected def isFailed(stream: ID): Boolean
-  /** Mark stream as failed. Re-throw exception to fail further up. */
-  protected def markFailed(stream: ID, cat: CAT, t: Throwable)
+  /** Mark stream as failed. Re-throw exception if propagation desirable. */
+  protected def markFailed(stream: ID, ch: CH, t: Throwable)
 
-  abstract override def apply(txn: Transaction) {
-    if (!isFailed(txn.streamId)) try {
+  abstract override def apply(txn: TXN) {
+    if (!isFailed(txn.stream)) try {
       super.apply(txn)
     } catch {
-      case t: Throwable => markFailed(txn.streamId, txn.category, t)
+      case NonFatal(th) => markFailed(txn.stream, txn.channel, th)
     }
   }
 

@@ -12,14 +12,14 @@
 //
 //  /** Id type. */
 //  type ID
-//  /** Category filter type. */
-//  type CAT
+//  /** Channel filter type. */
+//  type CH
 //
-//  protected def categoryFilter: Set[CAT]
+//  protected def channelFilter: Set[CH]
 //
 //  protected def tracker: EventStreamTracker[ID]
 //
-//  protected type ES = EventStream[ID, _, CAT]
+//  protected type ES = EventStream[ID, _, CH]
 //  protected type TXN = ES#TXN
 //
 //  protected def consume(txn: TXN)(implicit conn: store.RW): Iterable[DAT]
@@ -32,17 +32,17 @@
 //   * NOTICE: This assumes that the data store has also been wiped appropriately
 //   */
 //  def resume(eventStream: ES): Future[Subscription] = {
-//    require(categoryFilter.nonEmpty, s"${getClass.getName}: Category filter cannot be empty")
+//    require(channelFilter.nonEmpty, s"${getClass.getName}: Channel filter cannot be empty")
 //    eventStream resume new eventStream.DurableConsumer {
-//      val categoryFilter = Generator.this.categoryFilter
+//      val channelFilter = Generator.this.channelFilter
 //      def lastTimestamp() = tracker.lastTimestamp
 //      def consumeReplay(txn: eventStream.TXN) {
-//        val expected = tracker.expectedRevision(txn.streamId)
+//        val expected = tracker.expectedRevision(txn.stream)
 //        if (txn.revision == expected) {
 //          store.readWrite(consume(txn)(_))
-//          tracker.markAsConsumed(txn.streamId, txn.revision, txn.clock)
+//          tracker.markAsConsumed(txn.stream, txn.revision, txn.clock)
 //        } else if (txn.revision > expected) {
-//          throw new IllegalStateException(s"${txn.category} ${txn.streamId} revision(s) missing. Got ${txn.revision}, but was epxecting $expected. This is either revisions missing from the EventSource or a bug in the EventStream implementation.")
+//          throw new IllegalStateException(s"${txn.channel} ${txn.stream} revision(s) missing. Got ${txn.revision}, but was epxecting $expected. This is either revisions missing from the EventSource or a bug in the EventStream implementation.")
 //        }
 //      }
 //      def onLive() = {
@@ -51,7 +51,7 @@
 //          def expectedRevision(streamId: ID): Int = tracker.expectedRevision(streamId)
 //          def consumeLive(txn: eventStream.TXN) = store.readWrite { implicit conn =>
 //            val forPublish = consume(txn)
-//            tracker.markAsConsumed(txn.streamId, txn.revision, txn.clock)
+//            tracker.markAsConsumed(txn.stream, txn.revision, txn.clock)
 //            publish(forPublish)
 //          }
 //        }

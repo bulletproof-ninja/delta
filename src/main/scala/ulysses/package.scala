@@ -1,6 +1,8 @@
-package scuff
-
 /**
- * Event store package.
- */
-package ulysses
+  * Event store package.
+  */
+package ulysses {
+}
+
+package object ulysses {
+}

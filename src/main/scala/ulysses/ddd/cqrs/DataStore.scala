@@ -1,7 +1,5 @@
 package ulysses.ddd.cqrs
 
-import scuff.Faucet
-
 trait DataStore {
 
   type R

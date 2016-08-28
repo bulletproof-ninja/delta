@@ -4,69 +4,96 @@ import java.util.UUID
 import scala.reflect._
 import com.datastax.driver.core.Row
 import java.math.BigInteger
+import java.net.InetAddress
+import collection.immutable._
+import collection.{ Map => aMap, Seq => aSeq, Set => aSet }
+import collection.mutable.{ Map => mMap, Seq => mSeq, Set => mSet }
 
 package object cassandra {
+  object TimeUUIDConverter extends TypeConverter[UUID] {
+    def typeName = "timeuuid"
+    def readFrom(row: Row, col: Int): UUID = row.getUUID(col)
+  }
   implicit object UUIDConverter extends TypeConverter[UUID] {
-    type CT = UUID
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int) = row.getUUID(col)
-    def toCassandraType(uuid: UUID) = uuid
+    def typeName = "uuid"
+    def readFrom(row: Row, col: Int): UUID = row.getUUID(col)
   }
   implicit object LongConverter extends TypeConverter[Long] {
-    type CT = Long
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int) = row.getLong(col)
-    def toCassandraType(long: Long) = long
+    def typeName = "bigint"
+    def readFrom(row: Row, col: Int) = row.getLong(col)
   }
   implicit object IntConverter extends TypeConverter[Int] {
-    type CT = Int
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int) = row.getInt(col)
-    def toCassandraType(int: Int) = int
+    def typeName = "int"
+    def readFrom(row: Row, col: Int) = row.getInt(col)
   }
-  implicit object StringConverter extends TypeConverter[String] {
-    type CT = String
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int) = row.getString(col)
-    def toCassandraType(str: String) = str
+  implicit object UTF8Converter extends TypeConverter[String] {
+    def typeName = "text"
+    def readFrom(row: Row, col: Int) = row.getString(col)
+  }
+  object ASCIIConverter extends TypeConverter[String] {
+    def typeName = "ascii"
+    def readFrom(row: Row, col: Int) = row.getString(col)
   }
   implicit object BigIntConverter extends TypeConverter[BigInt] {
-    type CT = BigInteger
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int): BigInt = row.getVarint(col)
-    def toCassandraType(bint: BigInt) = bint.underlying
+    def typeName = "varint"
+    def readFrom(row: Row, col: Int): BigInt = row.getVarint(col)
+    override def writeAs(bint: BigInt) = bint.underlying
   }
   implicit object BlobConverter extends TypeConverter[Array[Byte]] {
-    type CT = Array[Byte]
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int): Array[Byte] = row.getBytes(col).array()
-    def toCassandraType(bytes: Array[Byte]) = bytes
+    def typeName = "blob"
+    def readFrom(row: Row, col: Int): Array[Byte] = row.getBytesUnsafe(col).array()
   }
-  implicit object UnitConverter extends TypeConverter[Unit] {
-    type CT = String
-    def cassandraType: ClassTag[CT] = implicitly
-    def getValue(row: Row, col: Int): Unit = ()
-    def toCassandraType(unit: Unit) = "Unit"
+  implicit object InetAddrConverter extends TypeConverter[InetAddress] {
+    def typeName = "inet"
+    def readFrom(row: Row, col: Int): InetAddress = row.getInet(col)
+  }
+  implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] =
+    new TypeConverter[T] with conv.JavaEnumConverter[T] {
+      def typeName = "ascii"
+      def readFrom(row: Row, col: Int): T = byName(row.getString(col))
+    }
+  implicit def ScalaEnumConverter[E <: Enumeration: ClassTag] =
+    new TypeConverter[E#Value] with conv.ScalaEnumConverter[E] {
+      val enumType = classTag[E].runtimeClass
+      def typeName = "ascii"
+      def readFrom(row: Row, col: Int) = byName(row.getString(col))
+    }
+  private abstract class AbstractMapConverter[K: TypeConverter, V: TypeConverter, M <: aMap[K, V]: ClassTag]
+      extends TypeConverter[M] {
+    import collection.JavaConverters._
+    type T = M
+    @inline protected def kType = implicitly[TypeConverter[K]]
+    @inline protected def vType = implicitly[TypeConverter[V]]
+    final val typeName = s"frozen<map<${kType.typeName},${vType.typeName}>>"
+    final override def writeAs(map: T): java.util.Map[K, V] = map.asJava
   }
 
-  implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] = new TypeConverter[T] {
-    type CT = String
-    def cassandraType: ClassTag[CT] = implicitly
-    private[this] val values =
-      classTag[T].runtimeClass.getEnumConstants.foldLeft(Map.empty[String, T]) {
-        case (map, value) =>
-          val t = value.asInstanceOf[T]
-          map.updated(t.name, t)
-      }
-    def getValue(row: Row, col: Int): T = values(row.getString(col))
-    def toCassandraType(value: T) = value.name
-  }
+  implicit def MapConverter[K: TypeConverter, V: TypeConverter]: TypeConverter[Map[K, V]] =
+    new AbstractMapConverter[K, V, Map[K, V]] {
+      import collection.JavaConverters._
+      def readFrom(row: Row, col: Int): T =
+        row.getMap(col, kType.jvmType, vType.jvmType).asScala.toMap
+    }
+  implicit def AnyMapConverter[K: TypeConverter, V: TypeConverter]: TypeConverter[aMap[K, V]] =
+    new AbstractMapConverter[K, V, aMap[K, V]] {
+      import collection.JavaConverters._
+      def readFrom(row: Row, col: Int): T =
+        row.getMap(col, kType.jvmType, vType.jvmType).asScala
+    }
+  implicit def MutableMapConverter[K: TypeConverter, V: TypeConverter]: TypeConverter[mMap[K, V]] =
+    new AbstractMapConverter[K, V, mMap[K, V]] {
+      import collection.JavaConverters._
+      def readFrom(row: Row, col: Int): T =
+        row.getMap(col, kType.jvmType, vType.jvmType).asScala
+    }
 
-//  implicit def ScalaEnumConverter[T <: Enumeration#Value: ClassTag] = new TypeConverter[T] {
-//    type CT = String
-//    private[this] val values = ???
-//    def getValue(row: Row, col: Int): T = values(row.getString(col))
-//    def toCassandraType(value: T) = value.name
-//  }
+  private abstract class AbstractSeqConverter[V: TypeConverter, S <: aSeq[V]: ClassTag]
+      extends TypeConverter[S] {
+    import collection.JavaConverters._
+    type T = S
+    @inline protected def vType = implicitly[TypeConverter[V]]
+    final val typeName = s"frozen<list<${vType.typeName}>>"
+    final override def writeAs(seq: T): java.util.List[V] = seq.asJava
+  }
 
 }

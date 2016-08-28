@@ -1,12 +1,9 @@
 package ulysses.jdbc
 
-import java.sql.ResultSet
+import scala.reflect.{ ClassTag, classTag }
 
-import scala.reflect.ClassTag
-
-trait TypeConverter[T] {
-  type JT
-  def jdbcType: ClassTag[JT]
-  def getValue(row: ResultSet, column: Int): T
-  def toJdbcType(t: T): JT
+abstract class TypeConverter[T: ClassTag]
+    extends ulysses.conv.TypeConverter[T] {
+  final type ROW = java.sql.ResultSet
+  final val jvmType: Class[T] = classTag[T].runtimeClass.asInstanceOf[Class[T]]
 }
