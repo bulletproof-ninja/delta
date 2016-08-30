@@ -53,11 +53,12 @@ package object jdbc {
   implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] =
     new TypeConverter[T] with conv.JavaEnumConverter[T] {
       def typeName = "VARCHAR"
-      def readFrom(row: ROW, col: Int) = byName(row.getString(col))
+      def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }
   implicit def ScalaEnumConverter[E <: Enumeration: ClassTag] =
-    new TypeConverter[E] with conv.ScalaEnumConverter[E] {
+    new TypeConverter[E#Value] with conv.ScalaEnumConverter[E] {
+      val enumType = classTag[E].runtimeClass
       def typeName = "VARCHAR"
-      def readFrom(row: ROW, col: Int) = byName(row.getString(col))
+      def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }
 }

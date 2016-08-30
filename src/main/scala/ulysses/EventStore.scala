@@ -38,8 +38,9 @@ trait EventStore[ID, EVT, CH]
     * @param revision Stream revision.
     * @param tick The clock tick
     * @param events The events, at least one.
+    * @param metadata Optional metadata
     * @return Transaction, or if failed a possible
-    * [[DuplicateRevisionException]] if the stream already exists.
+    * [[DuplicateRevisionException]] if the revision already exists.
     */
   def record(
     channel: CH, stream: ID, revision: Int, tick: Long,
