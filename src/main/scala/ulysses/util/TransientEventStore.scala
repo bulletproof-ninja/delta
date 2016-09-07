@@ -15,8 +15,10 @@ import collection.concurrent.TrieMap
 /**
   * Non-persistent implementation, probably only useful for testing.
   */
-class TransientEventStore[ID, EVT, CH](execCtx: ExecutionContext)
+class TransientEventStore[ID, EVT, CH](execCtx: ExecutionContext, evtChannel: Class[_ <: EVT] => CH)
     extends EventStore[ID, EVT, CH] {
+
+  protected def getChannel(cls: Class[_ <: EVT]) = evtChannel(cls)
 
   @inline
   implicit private def ec = execCtx
@@ -25,16 +27,13 @@ class TransientEventStore[ID, EVT, CH](execCtx: ExecutionContext)
 
   private[this] val txnMap = new TrieMap[ID, Vector[TXN]]
 
-  def tickRange: Future[Option[(Long, Long)]] =
-    if (txnMap.isEmpty) {
-      Future successful None
-    } else {
-      val ticks = Future(txnMap.values.iterator.flatten.map(_.tick))
-      val min = ticks.map(_.min)
-      val max = ticks.map(_.max)
-      (min zip max).map(Some(_))
+  def lastTick: Future[Option[Long]] = {
+    val ticks = Future(txnMap.values.iterator.flatten.map(_.tick))
+    ticks.map { ticks =>
+      if (ticks.isEmpty) None
+      else Some(ticks.max)
     }
-
+  }
   private def findCurrentRevision(id: ID): Option[Int] = txnMap.get(id).map(_.last.revision)
 
   def currRevision(stream: ID): Future[Option[Int]] = Future(findCurrentRevision(stream))
@@ -92,7 +91,7 @@ class TransientEventStore[ID, EVT, CH](execCtx: ExecutionContext)
   }
   def replaySince(sinceTick: Long, filter: StreamFilter[ID, EVT, CH])(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
     txnMap.valuesIterator.flatten
-    .filter(txn => filter.allowed(txn) && txn.tick >= sinceTick)
-    .toSeq.sortBy(_.tick).foreach(callback.onNext _)
+      .filter(txn => filter.allowed(txn) && txn.tick >= sinceTick)
+      .toSeq.sortBy(_.tick).foreach(callback.onNext _)
   }
 }

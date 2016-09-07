@@ -6,12 +6,13 @@ import java.sql.Connection
 import java.sql.SQLException
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import scuff.Memoizer
 
-class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( final val schema: String)(
+class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val schema: String)(
     implicit final val evtCtx: EventContext[EVT, CH, SF]) {
 
   @inline
-  final def tc[T: TypeConverter] = implicitly[TypeConverter[T]]
+  final def ct[T: ColumnType] = implicitly[ColumnType[T]]
 
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = {
     Option(sqlEx.getSQLState).exists(_ startsWith "23") ||
@@ -40,8 +41,8 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
 
   def streamTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $streamTable (
-      stream_id ${tc[ID].typeName} NOT NULL,
-      channel ${tc[CH].typeName} NOT NULL,
+      stream_id ${ct[ID].typeName} NOT NULL,
+      channel ${ct[CH].typeName} NOT NULL,
 
       PRIMARY KEY (stream_id)
     )
@@ -56,7 +57,7 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
 
   def transactionTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $transactionTable (
-      stream_id ${tc[ID].typeName} NOT NULL,
+      stream_id ${ct[ID].typeName} NOT NULL,
       revision INT NOT NULL,
       tick BIGINT NOT NULL,
 
@@ -76,12 +77,12 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
   protected def eventNameType = "VARCHAR(255)"
   def eventTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $eventTable (
-      stream_id ${tc[ID].typeName} NOT NULL,
+      stream_id ${ct[ID].typeName} NOT NULL,
       revision INT NOT NULL,
       event_idx TINYINT NOT NULL,
       event_name $eventNameType NOT NULL,
       event_version SMALLINT NOT NULL,
-      event_data ${tc[SF].typeName} NOT NULL,
+      event_data ${ct[SF].typeName} NOT NULL,
 
       PRIMARY KEY (stream_id, revision, event_idx),
       FOREIGN KEY (stream_id, revision)
@@ -101,7 +102,7 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
 
   def metadataTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $metadataTable (
-      stream_id ${tc[ID].typeName} NOT NULL,
+      stream_id ${ct[ID].typeName} NOT NULL,
       revision INT NOT NULL,
       metadata_key $metadataKeyType NOT NULL,
       metadata_val $metadataValType NOT NULL,
@@ -113,8 +114,8 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
   """
   def createMetadataTable(conn: Connection): Unit = executeDDL(conn, metadataTableDDL)
 
-  protected def setObject[T: TypeConverter](ps: PreparedStatement)(colIdx: Int, value: T) {
-    ps.setObject(colIdx, tc[T].writeAs(value))
+  protected def setObject[T: ColumnType](ps: PreparedStatement)(colIdx: Int, value: T) {
+    ps.setObject(colIdx, ct[T].writeAs(value))
   }
   private def prepareStatement[R](sql: String)(thunk: PreparedStatement => R)(
     implicit conn: Connection): R = {
@@ -268,8 +269,7 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
     }
   }
 
-  protected def makeStreamQuery(AND: String = ""): String = s"""
-    SELECT $StreamColumnsSelect
+  protected def FromJoin = s"""
     FROM $streamTable s
     JOIN $transactionTable t
       ON t.stream_id = s.stream_id
@@ -279,14 +279,106 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
     LEFT OUTER JOIN $metadataTable m
       ON m.stream_id = t.stream_id
       AND m.revision = t.revision
-    WHERE stream_id = ? $AND
-    ORDER BY e.stream_id, e.revision, e.event_idx
   """
-  private val streamQueryFull = makeStreamQuery()
-  private val streamQueryFromRevision = makeStreamQuery("AND revision >= ?")
+  protected def makeTxnQuery(WHERE: String = ""): String = s"""
+    SELECT $TxnColumnsSelect
+    $FromJoin
+    $WHERE
+    ORDER BY t.tick, e.stream_id, e.revision, e.event_idx
+  """
 
-  def selectStreamFull[R](stream: ID)(thunk: (ResultSet, Columns) => R)(
-    implicit conn: Connection): R = {
+  def selectTransactionsByChannels(channels: Set[CH], sinceTick: Long = Long.MinValue)(
+    thunk: (ResultSet, Columns) => Unit)(
+      implicit conn: Connection): Unit = {
+    val tickBound = sinceTick != Long.MinValue
+    val prefix = if (tickBound) {
+      s"WHERE t.tick >= ? AND"
+    } else "WHERE"
+    val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size)}"
+    val query = makeTxnQuery(WHERE)
+    prepareStatement(query) { ps =>
+      val colIdx = Iterator.from(1)
+      channels foreach { channel =>
+        setObject(ps)(colIdx.next, channel)
+      }
+      executeQuery(ps) { rs =>
+        thunk(rs, TxnColumnsIdx)
+      }
+    }
+  }
+  def selectTransactionsByEvents(events: Set[Class[_ <: EVT]], sinceTick: Long = Long.MinValue)(
+    thunk: (ResultSet, Columns) => Unit)(
+      implicit conn: Connection): Unit = {
+    val tickBound = sinceTick != Long.MinValue
+    val prefix = if (tickBound) {
+      s"WHERE t.tick >= ? AND"
+    } else "WHERE"
+    val channels = events.map(evtCtx.channel)
+    val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size, events.size)}"
+    val query = makeTxnQuery(WHERE)
+    prepareStatement(query) { ps =>
+      val colIdx = Iterator.from(1)
+      if (tickBound) ps.setLong(colIdx.next, sinceTick)
+      channels foreach { channel =>
+        setObject(ps)(colIdx.next, channel)
+      }
+      events foreach { evt =>
+        ps.setString(colIdx.next, evtCtx.name(evt))
+      }
+      executeQuery(ps) { rs =>
+        thunk(rs, TxnColumnsIdx)
+      }
+    }
+  }
+  def selectTransactions(sinceTick: Long = Long.MinValue)(
+    thunk: (ResultSet, Columns) => Unit)(
+      implicit conn: Connection): Unit = {
+    val tickBound = sinceTick != Long.MinValue
+    val query = if (tickBound) {
+      makeTxnQuery(s"WHERE t.tick >= ?")
+    } else {
+      makeTxnQuery()
+    }
+    prepareStatement(query) { ps =>
+      if (tickBound) ps.setLong(1, sinceTick)
+      executeQuery(ps) { rs =>
+        thunk(rs, TxnColumnsIdx)
+      }
+    }
+  }
+
+  protected def makeWHEREByChannelsOrEvents(chCount: Int, evtCount: Int = 0): String = {
+    val whereEventName =
+      if (evtCount == 1) "WHERE e2.event_name = ?"
+      else {
+        val parms = Iterator.fill(evtCount)("?")
+        parms.mkString("WHERE e2.event_name IN (", ",", ")")
+      }
+    val andEventMatch = if (evtCount == 0) "" else s"""AND
+      (t.stream_id, t.revision) IN (
+        SELECT e2.stream_id, e2.revision
+        FROM $eventTable e2
+        $whereEventName
+      )
+    """
+    if (chCount == 1) {
+      s"s.channel = ? $andEventMatch"
+    } else {
+      val parms = Iterator.fill(chCount)("?")
+      parms.mkString("s.channel IN (", ",", s") $andEventMatch")
+    }
+  }
+
+  protected def makeStreamQuery(AND: String = ""): String = s"""
+    SELECT $StreamColumnsSelect
+    $FromJoin
+    WHERE stream_id = ? $AND
+    ORDER BY e.revision, e.event_idx
+  """
+
+  private val streamQueryFull = makeStreamQuery()
+  def selectStreamFull(stream: ID)(thunk: (ResultSet, Columns) => Unit)(
+    implicit conn: Connection): Unit = {
     prepareStatement(streamQueryFull) { ps =>
       setObject(ps)(1, stream)
       executeQuery(ps) { rs =>
@@ -295,4 +387,27 @@ class Dialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter]( fin
     }
   }
 
+  private val streamQuerySingleRevision = makeStreamQuery("AND revision = ?")
+  def selectStreamRevision(stream: ID, revision: Int)(thunk: (ResultSet, Columns) => Unit)(
+    implicit conn: Connection): Unit = {
+    prepareStatement(streamQuerySingleRevision) { ps =>
+      setObject(ps)(1, stream)
+      ps.setInt(2, revision)
+      executeQuery(ps) { rs =>
+        thunk(rs, StreamColumnsIdx)
+      }
+    }
+  }
+  private val streamQueryRevisionRange = makeStreamQuery("AND revision BETWEEN ? AND ?")
+  def selectStreamRange(stream: ID, range: Range)(thunk: (ResultSet, Columns) => Unit)(
+    implicit conn: Connection): Unit = {
+    prepareStatement(streamQueryRevisionRange) { ps =>
+      setObject(ps)(1, stream)
+      ps.setInt(2, range.head)
+      ps.setInt(3, range.last)
+      executeQuery(ps) { rs =>
+        thunk(rs, StreamColumnsIdx)
+      }
+    }
+  }
 }

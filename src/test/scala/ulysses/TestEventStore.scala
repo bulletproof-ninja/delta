@@ -17,7 +17,7 @@ case class User(name: String, age: Int)
 
 class TestEventStore {
 
-  private[this] val es = new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack) {
+  private[this] val es = new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack, _ => "!") {
     override def Transaction(
       tick: Long,
       channel: String,

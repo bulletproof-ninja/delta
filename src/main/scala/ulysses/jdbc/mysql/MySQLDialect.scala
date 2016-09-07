@@ -1,11 +1,11 @@
 package ulysses.jdbc.mysql
 
-import ulysses.jdbc.TypeConverter
+import ulysses.jdbc.ColumnType
 import ulysses.EventContext
 import java.sql.Connection
 import java.sql.SQLException
 
-class MySQLDialect[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter](_schema: String)(
+class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](_schema: String)(
   implicit evtCtx: EventContext[EVT, CH, SF])
     extends ulysses.jdbc.Dialect[ID, EVT, CH, SF](_schema) {
 

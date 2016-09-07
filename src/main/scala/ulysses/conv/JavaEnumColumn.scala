@@ -1,6 +1,6 @@
 package ulysses.conv
 
-trait JavaEnumConverter[T <: java.lang.Enum[T]] extends TypeConverter[T] {
+trait JavaEnumColumn[T <: java.lang.Enum[T]] extends ColumnType[T] {
   protected val byName =
     jvmType.getEnumConstants.foldLeft(Map.empty[String, T]) {
       case (map, value) =>

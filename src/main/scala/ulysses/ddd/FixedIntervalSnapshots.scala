@@ -7,7 +7,7 @@ import scuff.ddd._
  * revision intervals. Does not implement snapshot
  * storage.
  */
-trait FixedIntervalSnapshots[S, ID] extends SnapshotStore[S, ID] {
+trait FixedIntervalSnapshots[S <: AnyRef, ID] extends SnapshotStore[S, ID] {
 
   /**
    * Interval between revisions.

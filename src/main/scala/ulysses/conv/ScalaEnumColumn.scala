@@ -3,7 +3,7 @@ package ulysses.conv
 import scala.reflect.classTag
 import scala.reflect.runtime.ReflectionUtils.staticSingletonInstance
 
-trait ScalaEnumConverter[E <: Enumeration] extends TypeConverter[E#Value] {
+trait ScalaEnumColumn[E <: Enumeration] extends ColumnType[E#Value] {
   protected def enumType: Class[E]
   protected lazy val byName = {
     val enum = staticSingletonInstance(enumType).asInstanceOf[E]

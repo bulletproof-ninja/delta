@@ -5,7 +5,7 @@ import scala.concurrent.Future
 /**
   * Snapshot storage implementation.
   */
-trait SnapshotStore[S, ID] {
+trait SnapshotStore[S <: AnyRef, ID] {
   type Snapshot = SnapshotStore.Snapshot[S]
 
   /** Load snapshot, if exists. */
@@ -37,7 +37,7 @@ object SnapshotStore {
     * @param revision Snapshot revision
     * @param tick Transaction clock
     */
-  case class Snapshot[S](state: S, revision: Int, tick: Long)
+  case class Snapshot[S <: AnyRef](state: S, revision: Int, tick: Long)
 
   private[this] val Empty = new SnapshotStore[AnyRef, Any] {
     private[this] val NoSnapshot = Future.successful(None)
@@ -45,5 +45,5 @@ object SnapshotStore {
     def save(id: Any, snapshot: Snapshot): Unit = ()
   }
 
-  def NoSnapshots[S, ID]: SnapshotStore[S, ID] = Empty.asInstanceOf[SnapshotStore[S, ID]]
+  def NoSnapshots[S <: AnyRef, ID]: SnapshotStore[S, ID] = Empty.asInstanceOf[SnapshotStore[S, ID]]
 }

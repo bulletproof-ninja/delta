@@ -7,10 +7,10 @@ import java.sql.ResultSet
 import scuff.Numbers._
 
 package object jdbc {
-  object UUIDBinaryConverter extends UUIDBinaryConverter
-  class UUIDBinaryConverter extends TypeConverter[UUID] {
+  object UUIDBinaryColumn extends UUIDBinaryColumn
+  class UUIDBinaryColumn extends ColumnType[UUID] {
     def typeName = "BINARY(16)"
-    def writeAs(uuid: UUID): Array[Byte] = {
+    override def writeAs(uuid: UUID): Array[Byte] = {
       val bytes = new Array[Byte](16)
       longToBytes(uuid.getMostSignificantBits, bytes, 0)
       longToBytes(uuid.getLeastSignificantBits, bytes, 8)
@@ -22,42 +22,43 @@ package object jdbc {
       new UUID(msb, lsb)
     }
   }
-  object UUIDCharConverter extends UUIDCharConverter
-  class UUIDCharConverter extends TypeConverter[UUID] {
+  object UUIDCharColumn extends UUIDCharColumn
+  class UUIDCharColumn extends ColumnType[UUID] {
     def typeName = "CHAR(36)"
-    def writeAs(uuid: UUID): String = uuid.toString
+    override def writeAs(uuid: UUID): String = uuid.toString
     def readFrom(row: ResultSet, col: Int) = UUID fromString row.getString(col)
   }
-  implicit object LongConverter extends TypeConverter[Long] {
+  implicit object LongColumn extends ColumnType[Long] {
     def typeName = "BIGINT"
     def readFrom(row: ResultSet, col: Int) = row.getLong(col)
   }
-  implicit object IntConverter extends TypeConverter[Int] {
+  implicit object IntColumn extends ColumnType[Int] {
     def typeName = "INT"
     def readFrom(row: ResultSet, col: Int) = row.getInt(col)
   }
-  implicit object StringConverter extends TypeConverter[String] {
+  implicit object StringColumn extends ColumnType[String] {
     def typeName = "VARCHAR"
     def readFrom(row: ResultSet, col: Int) = row.getString(col)
   }
-  implicit object BigIntConverter extends TypeConverter[BigInt] {
+  implicit object BigIntColumn extends ColumnType[BigInt] {
     def typeName = "NUMERIC"
     def readFrom(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
-    def writeAs(bint: BigInt) = new java.math.BigDecimal(bint.underlying)
+    override def writeAs(bint: BigInt) = new java.math.BigDecimal(bint.underlying)
   }
-  implicit object UnitConverter extends TypeConverter[Unit] {
+  implicit object UnitColumn extends ColumnType[Unit] {
+    private[this] final val Zero = java.lang.Byte.valueOf(0.asInstanceOf[Byte])
     def typeName = "TINYINT"
     def readFrom(row: ResultSet, col: Int): Unit = ()
-    def writeAs(unit: Unit): Byte = 0
+    override def writeAs(unit: Unit) = Zero
   }
-  implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] =
-    new TypeConverter[T] with conv.JavaEnumConverter[T] {
+  implicit def JavaEnumColumn[T <: java.lang.Enum[T]: ClassTag] =
+    new ColumnType[T] with conv.JavaEnumColumn[T] {
       def typeName = "VARCHAR"
       def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }
-  implicit def ScalaEnumConverter[E <: Enumeration: ClassTag] =
-    new TypeConverter[E#Value] with conv.ScalaEnumConverter[E] {
-      val enumType = classTag[E].runtimeClass
+  implicit def ScalaEnumColumn[E <: Enumeration: ClassTag] =
+    new ColumnType[E#Value] with conv.ScalaEnumColumn[E] {
+      val enumType = classTag[E].runtimeClass.asInstanceOf[Class[E]]
       def typeName = "VARCHAR"
       def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }

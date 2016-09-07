@@ -18,14 +18,14 @@ import scala.collection.immutable.NumericRange
 
 private[cassandra] object CassandraEventStore {
 
-  private def ensureTable[ID: TypeConverter, CH: TypeConverter, SF: TypeConverter](
+  private def ensureTable[ID: ColumnType, CH: ColumnType, SF: ColumnType](
     session: Session, keyspace: String, table: String, replication: Map[String, Any]) {
     val replicationStr = replication.map {
       case (key, str: CharSequence) => s"'$key':'$str'"
       case (key, cls: Class[_]) => s"'$key':'${cls.getName}'"
       case (key, any) => s"'$key':$any"
     }.mkString("{", ",", "}")
-      def cqlName[T: TypeConverter]: String = implicitly[TypeConverter[ID]].typeName
+      def cqlName[T: ColumnType]: String = implicitly[ColumnType[ID]].typeName
     session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH REPLICATION = $replicationStr")
     session.execute(s"""
       CREATE TABLE IF NOT EXISTS $keyspace.$table (
@@ -86,28 +86,30 @@ trait TableDescriptor {
   * WARNING: Not tested WHAT SO EVER.
   * @param session The Cassandra session (connection pool)
   * @param td The table descriptor
-  * @param maxTickRange The tick range to include when doing a global query.
+  * @param queryMaxTickRange The tick range to include when doing a globally ordered query.
   * The size should be a function of how many transactions are expected in
   * each chunk, as those will be held in memory and sorted.
   */
-class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeConverter](
+class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
   session: Session,
   td: TableDescriptor,
-  maxTickRange: Int)(implicit exeCtx: ExecutionContext, evtCtx: EventContext[EVT, CH, SF])
+  queryMaxTickRange: Int)(implicit exeCtx: ExecutionContext, evtCtx: EventContext[EVT, CH, SF])
     extends EventStore[ID, EVT, CH] {
 
   import CassandraEventStore._
 
   ensureTable[ID, CH, SF](session, td.keyspace, td.table, td.replication)
 
-  private def tc[T: TypeConverter] = implicitly[TypeConverter[T]]
+  protected final def getChannel(cls: Class[_ <: EVT]) = evtCtx.channel(cls)
+
+  private def ct[T: ColumnType] = implicitly[ColumnType[T]]
 
   private[this] val TableName = s"${td.keyspace}.${td.table}"
 
   protected def toTransaction(knownStream: Option[ID], row: Row, columns: Columns): TXN = {
-    val stream = knownStream getOrElse tc[ID].readFrom(row, columns.stream_id)
+    val stream = knownStream getOrElse ct[ID].readFrom(row, columns.stream_id)
     val tick = row.getLong(columns.tick)
-    val channel = tc[CH].readFrom(row, columns.channel)
+    val channel = ct[CH].readFrom(row, columns.channel)
     val revision = row.getInt(columns.revision)
     val metadata = {
       val map = row.getMap(columns.metadata, classOf[String], classOf[String])
@@ -119,7 +121,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
     }
     val eventNames = row.getList(columns.event_names, classOf[String])
     val eventVersions = row.getList(columns.event_versions, classOf[Short])
-    val eventData = row.getList(columns.event_data, tc[SF].jvmType)
+    val eventData = row.getList(columns.event_data, ct[SF].jvmType)
     val events = fromJLists(eventNames, eventVersions, eventData)
     Transaction(tick, channel, stream, revision, metadata, events)
   }
@@ -135,7 +137,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
   }
 
   private def queryStream(callback: StreamCallback[TXN], stm: PreparedStatement, stream: ID, parms: Any*) {
-    val streamParm = tc[ID].writeAs(stream)
+    val streamParm = ct[ID].writeAs(stream)
     val refParms = streamParm +: parms.map(_.asInstanceOf[AnyRef])
     val bound = stm.bind(refParms: _*)
     execute(bound) { rs =>
@@ -149,7 +151,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
     }
   }
   private def queryAsync(stream: Option[ID], callback: StreamCallback[TXN], stm: BoundStatement) {
-    //    val streamParm = tc[ID].writeAs(stream)
+    //    val streamParm = ct[ID].writeAs(stream)
     //    val refParms = streamParm +: parms.map(_.asInstanceOf[AnyRef])
     //    val bound = stm.bind(refParms: _*)
     execute(stm) { rs =>
@@ -194,7 +196,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
       WHERE stream_id = ?
       ORDER BY revision DESC
       LIMIT 1""").setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID) => ps.bind(tc[ID].writeAs(id))
+    (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
   def currRevision(streamId: ID): Future[Option[Int]] = {
     execute(CurrRevision(streamId))(rs => Option(rs.one).map(_.getInt(0)))
@@ -245,7 +247,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
     })
     (channels: Set[CH], tickRange: TickRange) => {
       val ps = getStatement(channels.size)
-      val args = channels.toSeq.map(tc[CH].writeAs) ++ tickRange.asArgs
+      val args = channels.toSeq.map(ct[CH].writeAs) ++ tickRange.asArgs
       ps.bind(args: _*)
     }
   }
@@ -259,7 +261,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
       ALLOW FILTERING
       """)
     (evtType: Class[_ <: EVT], tickRange: TickRange) => {
-      val channel = tc[CH].writeAs(evtCtx.channel(evtType))
+      val channel = ct[CH].writeAs(evtCtx.channel(evtType))
       val evtName = evtCtx.name(evtType)
       ps.bind(channel, evtName, tickRange.boxFirst, tickRange.boxLast)
     }
@@ -268,7 +270,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
   private val ReplayStream: ID => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? ORDER BY revision")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID) => ps.bind(tc[ID].writeAs(id))
+    (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
   def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit = {
     val stm = ReplayStream(stream)
@@ -278,7 +280,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
   private val ReplayStreamFrom: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision >= ? ORDER BY revision")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, fromRev: Int) => ps.bind(tc[ID].writeAs(id), Int.box(fromRev))
+    (id: ID, fromRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
   }
   def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit = {
     if (fromRevision == 0) {
@@ -292,7 +294,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
   private val ReplayStreamTo: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision <= ? ORDER BY revision")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, toRev: Int) => ps.bind(tc[ID].writeAs(id), Int.box(toRev))
+    (id: ID, toRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
   }
   override def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamCallback[TXN]): Unit = {
     val stm = ReplayStreamTo(stream, toRevision)
@@ -311,7 +313,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
       val first = Int box range.head
       val last = Int box range.last
       assert(first < last)
-      ps.bind(tc[ID].writeAs(id), first, last)
+      ps.bind(ct[ID].writeAs(id), first, last)
     }
   }
   def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamCallback[TXN]): Unit = {
@@ -334,7 +336,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
       FROM $TableName
       WHERE stream_id = ?
       AND revision = ?""").setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (stream: ID, rev: Int) => ps.bind(tc[ID].writeAs(stream), Int box rev)
+    (stream: ID, rev: Int) => ps.bind(ct[ID].writeAs(stream), Int box rev)
   }
   private def replayStreamRevision(stream: ID, revision: Int)(callback: StreamCallback[TXN]): Unit = {
     val stm = ReplayStreamRevision(stream, revision)
@@ -349,11 +351,11 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
     (id: ID, channel: CH, tick: Long, events: aSeq[EVT], metadata: aMap[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
-        tc[ID].writeAs(id),
+        ct[ID].writeAs(id),
         Long box tick,
         jTypes, jVers, jData,
         metadata.asJava,
-        tc[CH].writeAs(channel))
+        ct[CH].writeAs(channel))
     }
   }
   private val RecordLaterRevision = {
@@ -364,7 +366,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
     (id: ID, revision: Int, tick: Long, events: aSeq[EVT], metadata: aMap[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
-        tc[ID].writeAs(id),
+        ct[ID].writeAs(id),
         Long box tick,
         jTypes, jVers, jData,
         metadata.asJava,
@@ -445,11 +447,11 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
         val ticks = fullTickRange.tickCount
         require(ticks > 0, s"Invalid tick range: $tickRange")
         val chunkCount =
-          if (ticks <= maxTickRange) 1
-          else ticks / maxTickRange + (if (ticks % maxTickRange == 0) 0 else 1)
+          if (ticks <= queryMaxTickRange) 1
+          else ticks / queryMaxTickRange + (if (ticks % queryMaxTickRange == 0) 0 else 1)
         val queryRanges = (0L until chunkCount).map { chunkIdx =>
-          val from = (fullTickRange.first + chunkIdx * maxTickRange)
-          TickRange(from, from + maxTickRange - 1)
+          val from = (fullTickRange.first + chunkIdx * queryMaxTickRange)
+          TickRange(from, from + queryMaxTickRange - 1)
         }
         replayRanges(queryRanges.toList, statements, callback)
     }
@@ -460,7 +462,7 @@ class CassandraEventStore[ID: TypeConverter, EVT, CH: TypeConverter, SF: TypeCon
     filter match {
       case Everything() => Right(Seq(ReplayEverything))
       case ByChannel(channels) => Right(Seq(ReplayByChannels.curried(channels)))
-      case ByEvent(evtTypes, _) => Right {
+      case ByEvent(evtTypes) => Right {
         evtTypes.toSeq.map(ReplayByEvent.curried)
       }
       case ByStream(id, _) => Left(id -> ReplayStream(id))

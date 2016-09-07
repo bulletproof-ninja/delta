@@ -15,7 +15,7 @@ import scuff.concurrent.StreamCallback
 import scala.collection.immutable.Seq
 import scala.collection.{ Seq => aSeq, Map => aMap }
 import org.bson.codecs.configuration.CodecRegistry
-import ulysses.EventCodec
+import ulysses.EventContext
 import org.bson.codecs.BsonArrayCodec
 import org.bson.BsonArray
 import scala.concurrent.ExecutionContext
@@ -52,9 +52,11 @@ object MongoEventStore {
   * }}}
   */
 class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
-  dbColl: MongoCollection[Document])(implicit evtCodec: EventCodec[EVT, CH, Document],
+  dbColl: MongoCollection[Document])(implicit evtCtx: EventContext[EVT, CH, Document],
                                      protected val exeCtx: ExecutionContext)
     extends ulysses.EventStore[ID, EVT, CH] {
+
+  protected final def getChannel(cls: Class[_ <: EVT]) = evtCtx.channel(cls)
 
   protected val store = {
     withBlockingCallback[String]()(dbColl.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _))
@@ -189,9 +191,9 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
           writeArray("events", writer) {
             txn.events.foreach { evt =>
               writeDocument(writer) {
-                writeEntry("name", evtCodec.name(evt), writer)
-                writeEntry("v", Integer.valueOf(evtCodec.version(evt)), writer)
-                val data = evtCodec.encodeEvent(evt)
+                writeEntry("name", evtCtx.name(evt), writer)
+                writeEntry("v", Integer.valueOf(evtCtx.version(evt)), writer)
+                val data = evtCtx.encode(evt)
                 writeEntry("data", data, writer)
               }
             }
@@ -233,7 +235,7 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
               val version = reader.readInt32("v").toShort
               reader.readName("data")
               val data = docCodec.decode(reader, ctx)
-              evtCodec.decodeEvent(name, version, data)
+              evtCtx.decode(name, version, data)
             }
             readEvents(channel, reader, events :+ evt)
           }
@@ -277,11 +279,11 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
 
   def lastTick(): Future[Option[Long]] = getFirst[Long]("tick", false)
 
-  private def getFirst[T](name: String, smallest: Boolean): Future[Option[T]] = {
+  private def getFirst[T](name: String, desc: Boolean): Future[Option[T]] = {
     withFutureCallback[Document] { callback =>
       store.find(new Document, classOf[Document])
         .projection(new Document(name, true).append("_id", false))
-        .sort(new Document(name, if (smallest) 1 else -1))
+        .sort(new Document(name, if (desc) 1 else -1))
         .limit(1)
         .first(callback)
     }.map { optDoc =>
@@ -303,13 +305,13 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
       case Everything() => // Ignore
       case ByChannel(channels) =>
         docFilter.append("channel", new Document("$in", toJList(channels)))
-      case ByEventType(evtTypes, channels) =>
+      case ByEvent(evtTypes) =>
+        val channels = evtTypes.map(evtCtx.channel)
         docFilter.append("channel", new Document("$in", toJList(channels)))
-        val evtNames = evtTypes.map(evtCodec.name)
+        val evtNames = evtTypes.map(evtCtx.name)
         docFilter.append("events.name", new Document("$in", toJList(evtNames)))
-      case ById(idAndChannels) =>
-        val ids = idAndChannels.map(_._1)
-        docFilter.append("_id.stream", new Document("$in", toJList(ids)))
+      case ByStream(id, _) =>
+        docFilter.append("_id.stream", id)
     }
     docFilter
   }

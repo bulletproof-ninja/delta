@@ -1,35 +1,52 @@
-package ulysses
+package ulysses.test_repo
 
 import java.lang.reflect.Method
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit.{MILLISECONDS, SECONDS}
+import java.util.concurrent.TimeUnit.{ MILLISECONDS, SECONDS }
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.Seq
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ Future, Promise }
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration.{Duration, DurationInt}
+import scala.concurrent.duration.{ Duration, DurationInt }
 import scala.language.implicitConversions
 import scala.reflect.classTag
-import scala.util.{Failure, Success, Try}
-import org.bson.{BsonReader, BsonUndefined, BsonWriter, Document}
-import org.bson.codecs.{BsonUndefinedCodec, DecoderContext, EncoderContext}
+import scala.util.{ Failure, Success, Try }
+import org.bson.{ BsonReader, BsonUndefined, BsonWriter, Document }
+import org.bson.codecs.{ BsonUndefinedCodec, DecoderContext, EncoderContext }
 import org.junit._
 import org.junit.Assert._
-import com.datastax.driver.core.{Cluster, Session}
-import com.mongodb.async.client.{MongoClients, MongoCollection}
+import com.datastax.driver.core.{ Cluster, Session }
+import com.mongodb.async.client.{ MongoClients, MongoCollection }
 import com.mongodb.client.result.DeleteResult
-import scuff.{Codec, DoubleDispatch, Timestamp}
-import scuff.ddd.{Repository, UnknownIdException}
-import ulysses.cassandra.{CassandraEventStore, StringConverter, TableDescriptor, UnitConverter}
-import ulysses.ddd.{AggrRoot, AggrRootRepository, EventStoreRepository, MapSnapshotStore, StateMachine, EpochMillisTimestamps}
-import ulysses.mongo.{MongoEventStore, UlyssesCollection, withBlockingCallback}
-import ulysses.util.{EventCodec, ReflectiveEventDecoding, TransientEventStore}
+import scuff.{ Codec, DoubleDispatch, Timestamp }
+import scuff.ddd.{ Repository, UnknownIdException }
+import ulysses.mongo.{ MongoEventStore, UlyssesCollection, withBlockingCallback }
 import ulysses.ddd.SnapshotStore
 import com.mongodb.connection.ConnectionPoolSettings
 import com.datastax.driver.core.QueryOptions
 import com.datastax.driver.core.policies.RetryPolicy
 import com.datastax.driver.core.SocketOptions
+import ulysses.ddd._
+import ulysses.util.TransientEventStore
+import ulysses.cassandra.CassandraEventStore
+import ulysses.cassandra.TableDescriptor
+import ulysses.util.ReflectiveEventDecoding
+import scala.{ SerialVersionUID => version }
+import ulysses.EventStore
+
+trait AggrEventHandler {
+  final def apply(evt: AggrEvent) = evt.dispatch(this)
+}
+
+case class AggrState(status: String, numbers: Set[Int])
+
+final class AggrStateMutator(var state: AggrState)
+    extends StateMutator[AggrEvent, AggrState]
+    with AggrEventHandler {
+}
+
+sealed abstract class AggrEvent extends DoubleDispatch[AggrEventHandler]
 
 abstract class AbstractEventStoreRepositoryTest {
 
@@ -244,7 +261,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 }
 
-class Aggr(val id: String, stateMutator: AggrStateMutator, val concurrentEvents: Seq[AggrEvent]) {
+class Aggr(id: String, stateMutator: AggrStateMutator, val concurrentEvents: Seq[AggrEvent]) {
   type EVT = AggrEvent
   type ID = String
   def checkInvariants() {
@@ -277,55 +294,13 @@ object Aggr extends AggrRoot[Aggr, String, AggrEvent, AggrState] {
   def checkInvariants(ar: Aggr) = ar.checkInvariants()
 }
 
-case class AddNewNumber(n: Int)
-case class ChangeStatus(status: String)
-
-case class AggrState(status: String, numbers: Set[Int] = Set.empty)
-
-//object AggrEvent extends EventCodec[AggrEvent] {
-//  def version(evt: AggrEvent): Short = evt.eventVersion
-//  def name(evt: AggrEvent): String = evt.getClass.getSimpleName
+//final class AggrEventCollector(var state: AggrState = null) {
+//  var appliedEvents = Vector.empty[AggrEvent]
+//  def apply(evt: AggrEvent) {
+//    state = new AggrStateMutator(state)(evt)
+//    appliedEvents :+= evt
+//  }
 //}
-sealed abstract class AggrEvent(val eventVersion: Short) extends DoubleDispatch[AggrEventHandler]
-case class AggrCreated(status: String) extends AggrEvent(1) { def dispatch(handler: AggrEventHandler): handler.RT = handler.on(this) }
-case class NewNumberWasAdded(n: Int) extends AggrEvent(1) { def dispatch(handler: AggrEventHandler): handler.RT = handler.on(this) }
-case class StatusChanged(newStatus: String) extends AggrEvent(1) { def dispatch(handler: AggrEventHandler): handler.RT = handler.on(this) }
-
-trait AggrEventHandler {
-  type RT
-  @inline
-  final def apply(evt: AggrEvent) = evt.dispatch(this)
-
-  def on(evt: AggrCreated): RT
-  def on(evt: NewNumberWasAdded): RT
-  def on(evt: StatusChanged): RT
-}
-object AggrStateMachine extends StateMachine[AggrState, AggrEvent] {
-  def init(evt: AggrEvent) = new AggrStateMachine()(evt)
-  def transition(state: AggrState, evt: AggrEvent) = new AggrStateMachine(state)(evt)
-}
-final class AggrStateMutator(var state: AggrState = null) {
-  var appliedEvents = Vector.empty[AggrEvent]
-  def apply(evt: AggrEvent) {
-    state = new AggrStateMachine(state)(evt)
-    appliedEvents :+= evt
-  }
-}
-final class AggrStateMachine(state: AggrState = null) extends AggrEventHandler {
-  type RT = AggrState
-  def on(evt: AggrCreated) = {
-    assertNull(state)
-    new AggrState("New")
-  }
-  def on(evt: NewNumberWasAdded) = {
-    val newNumbers = state.numbers + evt.n
-    state.copy(numbers = newNumbers)
-  }
-  def on(evt: StatusChanged) = {
-    state.copy(status = evt.newStatus)
-  }
-
-}
 
 class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTest {
 
@@ -333,8 +308,8 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
 
   @Before
   def setup {
-    es = new TransientEventStore[String, AggrEvent, Unit](global)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, EpochMillisTimestamps)
+    es = new TransientEventStore[String, AggrEvent, Unit](global, _ => Unit)
+    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
     repo = new AggrRootRepository(Aggr, esRepo)
   }
 
@@ -346,10 +321,10 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
   @Before
   def setup {
-    es = new TransientEventStore[String, AggrEvent, Unit](global)
+    es = new TransientEventStore[String, AggrEvent, Unit](global, _ => Unit)
     val snapshotMap = new collection.concurrent.TrieMap[String, SnapshotStore[AggrState, String]#Snapshot]
     val snapshotStore = new MapSnapshotStore[Aggr, String, AggrEvent, AggrState](snapshotMap)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, EpochMillisTimestamps, snapshotStore)
+    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock, snapshotStore)
     repo = new AggrRootRepository(Aggr, esRepo)
   }
 
@@ -363,11 +338,14 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
 
   implicit def aggr2unit(s: AggrState): Unit = ()
 
-  implicit object AggrEventCodec extends EventCodec[AggrEvent, Document] with ReflectiveEventDecoding[AggrEvent, Document] with AggrEventHandler {
+  implicit object AggrEventCodec
+      extends ReflectiveEventDecoding[AggrEvent, Document]
+      with EventContext[AggrEvent, Unit, Document]
+      with AggrEventHandler {
     type RT = Document
-    def eventVersion(evt: AggrEvent) = evt.eventVersion
-    def eventName(evt: AggrEvent) = evt.getClass.getSimpleName
-    override protected def eventName(method: Method): String = method.getReturnType.getSimpleName
+    def version(evt: Class[AggrEvent]) = scuff.serialVersionUID(evt)
+    def name(evt: Class[AggrEvent]) = evt.getSimpleName
+    def channel(evt: Class[AggrEvent]) = ()
     protected def evtTag = classTag[AggrEvent]
     protected def fmtTag = classTag[Document]
 
@@ -407,7 +385,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     val result = deleteAll(coll)
     assertTrue(result.wasAcknowledged)
     es = new MongoEventStore[String, AggrEvent, Unit](coll)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, EpochMillisTimestamps)
+    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
     repo = new AggrRootRepository(Aggr, esRepo)
   }
   private def deleteAll(coll: MongoCollection[_]): DeleteResult = {
@@ -428,15 +406,17 @@ class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest
 
   implicit def aggr2unit(s: AggrState): Unit = ()
 
-  implicit object AggrEventCodec extends EventCodec[AggrEvent, String] with ReflectiveEventDecoding[AggrEvent, String] with AggrEventHandler {
+  implicit object AggrEventCodec
+      extends ReflectiveEventDecoding[AggrEvent, String]
+      with EventContext[AggrEvent, Unit, String]
+      with AggrEventHandler {
     type RT = String
-    def eventVersion(evt: AggrEvent) = evt.eventVersion
-    def eventName(evt: AggrEvent) = evt.getClass.getSimpleName
-    override protected def eventName(method: Method): String = method.getReturnType.getSimpleName
+    def version(cls: Class[AggrEvent]) = scuff.serialVersionUID(cls)
+    def name(cls: Class[AggrEvent]) = cls.getSimpleName
     protected def evtTag = classTag[AggrEvent]
     protected def fmtTag = classTag[String]
 
-    def encodeEvent(evt: AggrEvent): String = evt.dispatch(this)
+    def encode(evt: AggrEvent): String = evt.dispatch(this)
 
     def on(evt: AggrCreated) = s"""{"status":"${evt.status}"}"""
     val FindStatus = """\{"status":"(\w+)"\}""".r
@@ -465,8 +445,7 @@ class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest
     def table = Table
     val replication: Map[String, Any] = Map(
       "class" -> "SimpleStrategy",
-      "replication_factor" -> 1
-    )
+      "replication_factor" -> 1)
   }
 
   var session: Session = _
@@ -475,8 +454,8 @@ class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest
   def setup {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
-    es = new CassandraEventStore[String, AggrEvent, Unit](session, TableDescriptor)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, EpochMillisTimestamps)
+    es = new CassandraEventStore[String, AggrEvent, Unit, String](session, TableDescriptor, 10 * 1024)
+    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
     repo = new AggrRootRepository(Aggr, esRepo)
   }
   private def deleteAll(session: Session): Unit = {
@@ -487,4 +466,3 @@ class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest
     val result = deleteAll(session)
   }
 }
-

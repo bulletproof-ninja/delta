@@ -83,15 +83,14 @@ trait RedisPublishing[ID, EVT, CH]
         subChannels
       case ByChannel(channels) =>
         subChannels.filter(cf => channels.contains(cf._1))
-      case ByEventType(_, channels) =>
+      case ByEvent(events) =>
+        val channels = events.map(getChannel)
         subChannels.filter(cf => channels.contains(cf._1))
-      case ById(idsWithChannel) =>
-        val channels = idsWithChannel.map(_._2)
-        subChannels.filter(cf => channels.contains(cf._1))
+      case ByStream(id, channel) =>
+        subChannels.filter(cf => cf._1 == channel)
     }
     val subscriptions = channels.map {
       case (_, feed) =>
-//        val f: (TXN => Boolean) = (txn) => filter.allowed(txn)
         feed.subscribe(filter.allowed _)(callback.onNext)
     }
     new Subscription {

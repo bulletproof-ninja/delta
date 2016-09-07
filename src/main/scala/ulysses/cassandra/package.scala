@@ -10,90 +10,96 @@ import collection.{ Map => aMap, Seq => aSeq, Set => aSet }
 import collection.mutable.{ Map => mMap, Seq => mSeq, Set => mSet }
 
 package object cassandra {
-  object TimeUUIDConverter extends TypeConverter[UUID] {
+  object TimeUUIDColumn extends ColumnType[UUID] {
     def typeName = "timeuuid"
     def readFrom(row: Row, col: Int): UUID = row.getUUID(col)
   }
-  implicit object UUIDConverter extends TypeConverter[UUID] {
+  implicit object UUIDColumn extends ColumnType[UUID] {
     def typeName = "uuid"
     def readFrom(row: Row, col: Int): UUID = row.getUUID(col)
   }
-  implicit object LongConverter extends TypeConverter[Long] {
+  implicit object LongColumn extends ColumnType[Long] {
     def typeName = "bigint"
     def readFrom(row: Row, col: Int) = row.getLong(col)
   }
-  implicit object IntConverter extends TypeConverter[Int] {
+  implicit object IntColumn extends ColumnType[Int] {
     def typeName = "int"
     def readFrom(row: Row, col: Int) = row.getInt(col)
   }
-  implicit object UTF8Converter extends TypeConverter[String] {
+  implicit object UTF8Column extends ColumnType[String] {
     def typeName = "text"
     def readFrom(row: Row, col: Int) = row.getString(col)
   }
-  object ASCIIConverter extends TypeConverter[String] {
+  object ASCIIColumn extends ColumnType[String] {
     def typeName = "ascii"
     def readFrom(row: Row, col: Int) = row.getString(col)
   }
-  implicit object BigIntConverter extends TypeConverter[BigInt] {
+  implicit object BigIntColumn extends ColumnType[BigInt] {
     def typeName = "varint"
     def readFrom(row: Row, col: Int): BigInt = row.getVarint(col)
     override def writeAs(bint: BigInt) = bint.underlying
   }
-  implicit object BlobConverter extends TypeConverter[Array[Byte]] {
+  implicit object BlobColumn extends ColumnType[Array[Byte]] {
     def typeName = "blob"
     def readFrom(row: Row, col: Int): Array[Byte] = row.getBytesUnsafe(col).array()
   }
-  implicit object InetAddrConverter extends TypeConverter[InetAddress] {
+  implicit object InetAddrColumn extends ColumnType[InetAddress] {
     def typeName = "inet"
     def readFrom(row: Row, col: Int): InetAddress = row.getInet(col)
   }
-  implicit def JavaEnumConverter[T <: java.lang.Enum[T]: ClassTag] =
-    new TypeConverter[T] with conv.JavaEnumConverter[T] {
+  implicit def JavaEnumColumn[T <: java.lang.Enum[T]: ClassTag] =
+    new ColumnType[T] with conv.JavaEnumColumn[T] {
       def typeName = "ascii"
       def readFrom(row: Row, col: Int): T = byName(row.getString(col))
     }
-  implicit def ScalaEnumConverter[E <: Enumeration: ClassTag] =
-    new TypeConverter[E#Value] with conv.ScalaEnumConverter[E] {
-      val enumType = classTag[E].runtimeClass
+  implicit def ScalaEnumColumn[E <: Enumeration: ClassTag] =
+    new ColumnType[E#Value] with conv.ScalaEnumColumn[E] {
+      val enumType = classTag[E].runtimeClass.asInstanceOf[Class[E]]
       def typeName = "ascii"
       def readFrom(row: Row, col: Int) = byName(row.getString(col))
     }
-  private abstract class AbstractMapConverter[K: TypeConverter, V: TypeConverter, M <: aMap[K, V]: ClassTag]
-      extends TypeConverter[M] {
+  private abstract class AbstractMapColumn[K: ColumnType, V: ColumnType, M <: aMap[K, V]: ClassTag]
+      extends ColumnType[M] {
     import collection.JavaConverters._
     type T = M
-    @inline protected def kType = implicitly[TypeConverter[K]]
-    @inline protected def vType = implicitly[TypeConverter[V]]
+    @inline protected def kType = implicitly[ColumnType[K]]
+    @inline protected def vType = implicitly[ColumnType[V]]
     final val typeName = s"frozen<map<${kType.typeName},${vType.typeName}>>"
     final override def writeAs(map: T): java.util.Map[K, V] = map.asJava
   }
 
-  implicit def MapConverter[K: TypeConverter, V: TypeConverter]: TypeConverter[Map[K, V]] =
-    new AbstractMapConverter[K, V, Map[K, V]] {
+  implicit def MapColumn[K: ColumnType, V: ColumnType]: ColumnType[Map[K, V]] =
+    new AbstractMapColumn[K, V, Map[K, V]] {
       import collection.JavaConverters._
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala.toMap
     }
-  implicit def AnyMapConverter[K: TypeConverter, V: TypeConverter]: TypeConverter[aMap[K, V]] =
-    new AbstractMapConverter[K, V, aMap[K, V]] {
+  implicit def AnyMapColumn[K: ColumnType, V: ColumnType]: ColumnType[aMap[K, V]] =
+    new AbstractMapColumn[K, V, aMap[K, V]] {
       import collection.JavaConverters._
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala
     }
-  implicit def MutableMapConverter[K: TypeConverter, V: TypeConverter]: TypeConverter[mMap[K, V]] =
-    new AbstractMapConverter[K, V, mMap[K, V]] {
+  implicit def MutableMapColumn[K: ColumnType, V: ColumnType]: ColumnType[mMap[K, V]] =
+    new AbstractMapColumn[K, V, mMap[K, V]] {
       import collection.JavaConverters._
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala
     }
 
-  private abstract class AbstractSeqConverter[V: TypeConverter, S <: aSeq[V]: ClassTag]
-      extends TypeConverter[S] {
+  private abstract class AbstractSeqColumn[V: ColumnType, S <: aSeq[V]: ClassTag]
+      extends ColumnType[S] {
     import collection.JavaConverters._
     type T = S
-    @inline protected def vType = implicitly[TypeConverter[V]]
+    @inline protected def vType = implicitly[ColumnType[V]]
     final val typeName = s"frozen<list<${vType.typeName}>>"
     final override def writeAs(seq: T): java.util.List[V] = seq.asJava
+  }
+
+  implicit object UnitColumn extends ColumnType[Unit] {
+    def typeName = "boolean"
+    def readFrom(row: Row, col: Int): Unit = ()
+    override def writeAs(unit: Unit) = java.lang.Boolean.FALSE
   }
 
 }

@@ -8,7 +8,7 @@ import concurrent._
  * revision should be snapshotted, e.g. [[FixedIntervalSnapshots]] or [[LoadTimeSnapshots]],
  * unless memory consumption is a non-issue.
  */
-class MapSnapshotStore[AR, ID, EVT, S](map: collection.concurrent.Map[ID, SnapshotStore[S, ID]#Snapshot])(implicit ec: ExecutionContext)
+class MapSnapshotStore[AR, ID, EVT, S <: AnyRef](map: collection.concurrent.Map[ID, SnapshotStore[S, ID]#Snapshot])(implicit ec: ExecutionContext)
     extends SnapshotStore[S, ID] {
 
   @annotation.tailrec
