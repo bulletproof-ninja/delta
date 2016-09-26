@@ -7,8 +7,7 @@ import java.sql.ResultSet
 import scuff.Numbers._
 
 package object jdbc {
-  object UUIDBinaryColumn extends UUIDBinaryColumn
-  class UUIDBinaryColumn extends ColumnType[UUID] {
+  object UUIDBinaryColumn extends ColumnType[UUID] {
     def typeName = "BINARY(16)"
     override def writeAs(uuid: UUID): Array[Byte] = {
       val bytes = new Array[Byte](16)
@@ -22,8 +21,7 @@ package object jdbc {
       new UUID(msb, lsb)
     }
   }
-  object UUIDCharColumn extends UUIDCharColumn
-  class UUIDCharColumn extends ColumnType[UUID] {
+  object UUIDCharColumn extends ColumnType[UUID] {
     def typeName = "CHAR(36)"
     override def writeAs(uuid: UUID): String = uuid.toString
     def readFrom(row: ResultSet, col: Int) = UUID fromString row.getString(col)
@@ -52,14 +50,13 @@ package object jdbc {
     override def writeAs(unit: Unit) = Zero
   }
   implicit def JavaEnumColumn[T <: java.lang.Enum[T]: ClassTag] =
-    new ColumnType[T] with conv.JavaEnumColumn[T] {
-      def typeName = "VARCHAR"
+    new ColumnType[T] with conv.JavaEnumType[T] {
+      def typeName = "VARCHAR(255)"
       def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }
-  implicit def ScalaEnumColumn[E <: Enumeration: ClassTag] =
-    new ColumnType[E#Value] with conv.ScalaEnumColumn[E] {
-      val enumType = classTag[E].runtimeClass.asInstanceOf[Class[E]]
-      def typeName = "VARCHAR"
-      def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
-    }
+  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
+      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
+    def typeName = "VARCHAR(255)"
+    def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
+  }
 }

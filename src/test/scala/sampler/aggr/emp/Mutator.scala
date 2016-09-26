@@ -1,20 +1,22 @@
-package ulysses.test_repo.aggr.emp
+package sampler.aggr.emp
 
-import ulysses.test_repo.aggr.EmpId
+import sampler.aggr.EmpId
 import ulysses.ddd.StateMutator
-import ulysses.test_repo.LocalDate
+import sampler.MyDate
 
 case class State(
   name: String,
   soch: String,
-  dob: LocalDate,
+  dob: MyDate,
   salary: Int,
   title: String)
 
 class Mutator(
   var state: State = null)
-    extends StateMutator[EmpEvent, State]
-    with EmpEventHandler {
+    extends EmpEventHandler
+    with StateMutator[EmpEvent, State] {
+
+  override def apply(evt: EmpEvent) = super.apply(evt)
 
   type RT = Unit
 
@@ -23,6 +25,7 @@ class Mutator(
   /** Genesis event. */
   def on(evt: EmployeeRegistered): RT = {
     require(state == null)
+    state = State(name = evt.name, soch = evt.soch, dob = evt.dob, salary = evt.annualSalary, title = evt.title)
   }
 
   def on(evt: EmployeeSalaryChange): RT = {

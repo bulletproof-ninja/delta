@@ -1,6 +1,6 @@
-package ulysses.test_repo.aggr.dept
+package sampler.aggr.dept
 
-import ulysses.test_repo.aggr.EmpId
+import sampler.aggr.EmpId
 import ulysses.ddd.StateMutator
 
 case class State(
@@ -10,8 +10,8 @@ case class State(
 
 class Mutator(
   var state: State = null)
-    extends StateMutator[DeptEvent, State]
-    with DeptEventHandler {
+    extends DeptEventHandler
+    with StateMutator[DeptEvent, State] {
 
   type RT = Unit
 

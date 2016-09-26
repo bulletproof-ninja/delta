@@ -32,7 +32,7 @@ trait EventStore[ID, EVT, CH]
   }
 
   /**
-    * Record transaction.
+    * Commit transaction.
     * @param channel Stream channel.
     * @param stream Stream identifier.
     * @param revision Stream revision.
@@ -42,7 +42,7 @@ trait EventStore[ID, EVT, CH]
     * @return Transaction, or if failed a possible
     * [[DuplicateRevisionException]] if the revision already exists.
     */
-  def record(
+  def commit(
     channel: CH, stream: ID, revision: Int, tick: Long,
     events: aSeq[EVT], metadata: aMap[String, String] = Map.empty): Future[TXN]
 

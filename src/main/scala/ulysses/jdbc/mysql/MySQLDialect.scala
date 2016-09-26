@@ -1,12 +1,12 @@
 package ulysses.jdbc.mysql
 
 import ulysses.jdbc.ColumnType
-import ulysses.EventContext
+import ulysses.EventCodec
 import java.sql.Connection
 import java.sql.SQLException
 
 class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](_schema: String)(
-  implicit evtCtx: EventContext[EVT, CH, SF])
+  implicit codec: EventCodec[EVT, SF])
     extends ulysses.jdbc.Dialect[ID, EVT, CH, SF](_schema) {
 
   override def channelIndexDDL = super.channelIndexDDL.replace("IF NOT EXISTS ", "")

@@ -11,17 +11,44 @@ import org.bson.Document
 import org.bson.codecs.Codec
 import com.mongodb.async.client._
 import scala.collection.concurrent.TrieMap
+import org.bson.types.ObjectId
+import java.util.UUID
+import org.bson.BsonWriter
+import org.bson.BsonReader
+import org.bson.codecs.ObjectIdCodec
+import org.bson.codecs.UuidCodec
+import org.bson.UuidRepresentation
+import org.bson.codecs.StringCodec
 
 package object mongo {
 
+  implicit val ObjectIdCodec = new ObjectIdCodec
+  implicit val UUIDCodec = new UuidCodec(UuidRepresentation.STANDARD)
+  implicit val StringCodec = new StringCodec
+  implicit val IntCodec = new Codec[Int] {
+
+  }
+  implicit def JavaEnumCodec[T <: java.lang.Enum[T]: ClassTag] =
+    new TypeCodec[T] with conv.JavaEnumType[T] {
+      def readFrom(doc: Document, key: String) = byName(doc.getString(key))
+    }
+  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
+      extends TypeCodec[EV] with conv.ScalaEnumType[EV] {
+    def readFrom(doc: Document, key: String) = byName(doc.getString(key))
+  }
+
   private class UlyssesCodecRegistry(delegate: CodecRegistry) extends CodecRegistry {
     private[this] val map = new TrieMap[Class[_], Codec[_]]
-    def get[T](cls: Class[T]): Codec[T] = map.get(cls).getOrElse(delegate.get(cls)).asInstanceOf[Codec[T]]
-    def register[T: ClassTag](codec: Codec[T]): Unit = map.put(classTag[T].runtimeClass, codec)
+    def get[T](cls: Class[T]): Codec[T] =
+      map.get(cls).getOrElse(delegate.get(cls)).asInstanceOf[Codec[T]] match {
+        case null => get(cls.getSuperclass.asInstanceOf[Class[T]])
+        case codec => codec
+      }
+    def register(codec: Codec[_]): Unit = map.put(codec.getEncoderClass, codec)
   }
 
   implicit class UlyssesCollection[T](val coll: MongoCollection[T]) extends AnyVal {
-    def withCodec[A: ClassTag](codec: Codec[A]): MongoCollection[T] = {
+    def withCodec(codec: Codec[_]): MongoCollection[T] = {
       val reg = coll.getCodecRegistry match {
         case reg: UlyssesCodecRegistry => reg
         case other => new UlyssesCodecRegistry(other)

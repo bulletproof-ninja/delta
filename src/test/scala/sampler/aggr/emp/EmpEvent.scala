@@ -1,28 +1,31 @@
-package ulysses.test_repo.aggr.emp
+package sampler.aggr.emp
 
 import scuff.DoubleDispatch
-import ulysses.test_repo.LocalDate
+import sampler.MyDate
+import sampler.aggr.DomainEvent
 
 trait EmpEventHandler {
-  type RT
-
   def apply(evt: EmpEvent) = evt.dispatch(this)
+
+  type RT
 
   def on(evt: EmployeeRegistered): RT
   def on(evt: EmployeeSalaryChange): RT
   def on(evt: EmployeeTitleChange): RT
 }
 
-sealed abstract class EmpEvent extends DoubleDispatch[EmpEventHandler]
+sealed abstract class EmpEvent
+  extends DomainEvent
+  with DoubleDispatch[EmpEventHandler]
 
 @SerialVersionUID(1)
 case class EmployeeRegistered(
   name: String,
   soch: String,
-  dob: LocalDate,
+  dob: MyDate,
   annualSalary: Int,
   title: String)
-  extends EmpEvent { def dispatch(handler: EmpEventHandler): handler.RT = handler.on(this) }
+    extends EmpEvent { def dispatch(handler: EmpEventHandler): handler.RT = handler.on(this) }
 
 @SerialVersionUID(1)
 case class EmployeeSalaryChange(newSalary: Int)

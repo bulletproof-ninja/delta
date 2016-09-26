@@ -1,20 +1,20 @@
 package ulysses.cassandra
 
-import ulysses._
-import com.datastax.driver.core._
-import scala.reflect.{ ClassTag, classTag }
-import java.util.{ UUID, List => JList, Map => JMap, ArrayList }
-import scuff.concurrent._
-import scala.concurrent._
-import scala.util.{ Try, Success, Failure }
-import collection.JavaConverters._
-import scuff.Memoizer
-import collection.{ Seq => aSeq, Map => aMap }
-import collection.immutable.Seq
-import scuff.Codec
-import ulysses.EventContext
+import java.util.{ ArrayList, List => JList }
+
+import scala.{ Left, Right }
+import scala.collection.{ Map => aMap, Seq => aSeq }
+import scala.collection.JavaConverters._
+import scala.collection.immutable.Seq
+import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.util.{ Failure, Success, Try }
 import scala.util.control.NonFatal
-import scala.collection.immutable.NumericRange
+
+import com.datastax.driver.core._
+
+import scuff.Memoizer
+import scuff.concurrent.{ StreamCallback, exeCtxToExecutor }
+import ulysses.{ EventCodec, EventStore, StreamFilter }
 
 private[cassandra] object CassandraEventStore {
 
@@ -93,14 +93,12 @@ trait TableDescriptor {
 class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
   session: Session,
   td: TableDescriptor,
-  queryMaxTickRange: Int)(implicit exeCtx: ExecutionContext, evtCtx: EventContext[EVT, CH, SF])
+  queryMaxTickRange: Int)(implicit exeCtx: ExecutionContext, codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT, CH] {
 
   import CassandraEventStore._
 
   ensureTable[ID, CH, SF](session, td.keyspace, td.table, td.replication)
-
-  protected final def getChannel(cls: Class[_ <: EVT]) = evtCtx.channel(cls)
 
   private def ct[T: ColumnType] = implicitly[ColumnType[T]]
 
@@ -174,7 +172,7 @@ class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
   private def fromJLists(types: JList[String], vers: JList[Short], data: JList[SF]): Seq[EVT] = {
     types.iterator.asScala.zip(vers.iterator.asScala).zip(data.iterator.asScala).foldLeft(Vector.empty[EVT]) {
       case (events, ((evtName, version), data)) =>
-        events :+ evtCtx.decode(evtName, version, data)
+        events :+ codec.decode(evtName, version, data)
     }
   }
   private def toJLists(events: aSeq[EVT]): (JList[String], JList[Int], JList[SF]) = {
@@ -182,9 +180,9 @@ class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
     val typeVers = new ArrayList[Int](events.size)
     val data = new ArrayList[SF](events.size)
     events.foreach { evt =>
-      types add evtCtx.name(evt)
-      typeVers add evtCtx.version(evt)
-      data add evtCtx.encode(evt)
+      types add codec.name(evt)
+      typeVers add codec.version(evt)
+      data add codec.encode(evt)
     }
     (types, typeVers, data)
   }
@@ -251,7 +249,7 @@ class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
       ps.bind(args: _*)
     }
   }
-  private def ReplayByEvent: (Class[_ <: EVT], TickRange) => BoundStatement = {
+  private def ReplayByEvent: (CH, Class[_ <: EVT], TickRange) => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $txnColumns
       FROM $TableName
@@ -260,9 +258,9 @@ class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
       AND tick >= ? AND tick <= ?
       ALLOW FILTERING
       """)
-    (evtType: Class[_ <: EVT], tickRange: TickRange) => {
-      val channel = ct[CH].writeAs(evtCtx.channel(evtType))
-      val evtName = evtCtx.name(evtType)
+    (ch: CH, evtType: Class[_ <: EVT], tickRange: TickRange) => {
+      val channel = ct[CH].writeAs(ch)
+      val evtName = codec.name(evtType)
       ps.bind(channel, evtName, tickRange.boxFirst, tickRange.boxLast)
     }
   }
@@ -388,7 +386,7 @@ class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
     }
   }
 
-  def record(
+  def commit(
     channel: CH, stream: ID, revision: Int, tick: Long,
     events: aSeq[EVT], metadata: aMap[String, String]): Future[TXN] = {
 
@@ -463,7 +461,10 @@ class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
       case Everything() => Right(Seq(ReplayEverything))
       case ByChannel(channels) => Right(Seq(ReplayByChannels.curried(channels)))
       case ByEvent(evtTypes) => Right {
-        evtTypes.toSeq.map(ReplayByEvent.curried)
+        evtTypes.toSeq.flatMap {
+          case (ch, evtTypes) =>
+            evtTypes.toSeq.map(ReplayByEvent.curried(ch))
+        }
       }
       case ByStream(id, _) => Left(id -> ReplayStream(id))
     }

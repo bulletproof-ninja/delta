@@ -15,13 +15,22 @@ import scala.util.control.NonFatal
 import java.sql.SQLException
 import java.sql.ResultSet
 
-class JdbcEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
+private object JdbcEventStore {
+  lazy val DefaultThreadPool = {
+    val tg = Threads.newThreadGroup("JDBC Executors", false)
+    val tf = Threads.factory("jdbc-executor", tg)
+    Threads.newCachedThreadPool(tf)
+  }
+}
+
+class JdbcEventStore[ID, EVT, CH, SF](
   dataSource: DataSource,
-  dialect: Dialect[ID, EVT, CH, SF])(
-    implicit blockingJdbcCtx: ExecutionContext)
+  dialect: Dialect[ID, EVT, CH, SF],
+  blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool,
+  ensureSchema: Boolean = true)
     extends EventStore[ID, EVT, CH] {
 
-  protected final def getChannel(cls: Class[_ <: EVT]) = dialect.evtCtx.channel(cls)
+  if (ensureSchema) ensureSchema()
 
   protected def ensureSchema(): Unit = {
     forUpdate { conn =>
@@ -69,7 +78,9 @@ class JdbcEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
     var dupe: Option[TXN] = None
     dialect.selectStreamRevision(stream, revision) {
       case (rs, col) =>
-        processTransactions(singleStream = true, txn => dupe = Some(txn))(stream, revision, rs, col)
+        if (rs.next) {
+          processTransactions(singleStream = true, txn => dupe = Some(txn))(stream, revision, rs, col)
+        }
     }
     assert {
       dupe.forall { txn =>
@@ -80,7 +91,7 @@ class JdbcEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
     dupe
   }
 
-  def record(
+  def commit(
     channel: CH, stream: ID, revision: Int, tick: Long,
     events: aSeq[EVT], metadata: aMap[String, String] = Map.empty): Future[TXN] = {
     require(revision >= 0, "Must be non-negative revision, was: " + revision)
@@ -102,21 +113,22 @@ class JdbcEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
         }
       }
       Transaction(tick, channel, stream, revision, metadata, events)
-    }
+    }(blockingJdbcCtx)
   }
 
   def currRevision(stream: ID): Future[Option[Int]] = Future {
     forQuery { implicit conn =>
       dialect.selectMaxRevision(stream)
     }
-  }
+  }(blockingJdbcCtx)
+
   def lastTick(): Future[Option[Long]] = Future {
     forQuery(dialect.selectMaxTick(_))
-  }
+  }(blockingJdbcCtx)
 
   private def nextTransactionKey(rs: ResultSet, col: dialect.Columns): Option[(ID, Int)] = {
     nextRevision(rs, col).map { rev =>
-      dialect.ct[ID].readFrom(rs, col.stream_id) -> rev
+      dialect.idType.readFrom(rs, col.stream_id) -> rev
     }
   }
   private def nextRevision(rs: ResultSet, col: dialect.Columns): Option[Int] = {
@@ -135,7 +147,7 @@ class JdbcEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
   @annotation.tailrec
   private def processTransactions(singleStream: Boolean, onNext: TXN => Unit)(
     stream: ID, revision: Int, rs: ResultSet, col: dialect.Columns): Unit = {
-    val channel = dialect.ct[CH].readFrom(rs, col.channel)
+    val channel = dialect.chType.readFrom(rs, col.channel)
     val tick = rs.getLong(col.tick)
     var lastEvtIdx: Byte = -1
     var metadata = Map.empty[String, String]
@@ -154,8 +166,8 @@ class JdbcEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
       if (evtIdx != lastEvtIdx) { // New event
         val name = rs.getString(col.event_name)
         val version = rs.getShort(col.event_version)
-        val data = dialect.ct[SF].readFrom(rs, col.event_data)
-        events :+= dialect.evtCtx.decode(name, version, data)
+        val data = dialect.sfType.readFrom(rs, col.event_data)
+        events :+= dialect.codec.decode(name, version, data)
       }
       lastEvtIdx = evtIdx
       val nextRow =

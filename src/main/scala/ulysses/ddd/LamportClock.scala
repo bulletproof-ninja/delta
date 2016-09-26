@@ -9,7 +9,7 @@ import scuff.Subscription
 import language.existentials
 import ulysses.StreamFilter
 
-class LamportClock private (impl: scuff.LamportClock, onClose: () => Unit) extends Clock {
+final class LamportClock private (impl: scuff.LamportClock, onClose: () => Unit) extends Clock {
   def nextTick(lastTick: Long): Long = impl.next(lastTick)
   def close = onClose()
 }
@@ -17,7 +17,7 @@ class LamportClock private (impl: scuff.LamportClock, onClose: () => Unit) exten
 object LamportClock {
 
   private def factory[ID, EVT, CH](es: Publishing[ID, EVT, CH]): LamportClock = {
-    val lastTick = es.lastTick.get(111.seconds) getOrElse -1L
+    val lastTick = es.lastTick.await(111.seconds) getOrElse -1L
     val clock = new scuff.LamportClock(lastTick)
     val clockSyncher = StreamPromise[es.TXN] { txn =>
       clock.sync(txn.tick)

@@ -1,6 +1,5 @@
-package ulysses.test_repo
+package ulysses
 
-import java.lang.reflect.Method
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.{ MILLISECONDS, SECONDS }
 import scala.collection.concurrent.TrieMap
@@ -12,41 +11,75 @@ import scala.concurrent.duration.{ Duration, DurationInt }
 import scala.language.implicitConversions
 import scala.reflect.classTag
 import scala.util.{ Failure, Success, Try }
-import org.bson.{ BsonReader, BsonUndefined, BsonWriter, Document }
+import org.bson.{ BsonReader, BsonUndefined, BsonWriter }
 import org.bson.codecs.{ BsonUndefinedCodec, DecoderContext, EncoderContext }
 import org.junit._
 import org.junit.Assert._
 import com.datastax.driver.core.{ Cluster, Session }
-import com.mongodb.async.client.{ MongoClients, MongoCollection }
 import com.mongodb.client.result.DeleteResult
 import scuff.{ Codec, DoubleDispatch, Timestamp }
 import scuff.ddd.{ Repository, UnknownIdException }
-import ulysses.mongo.{ MongoEventStore, UlyssesCollection, withBlockingCallback }
-import ulysses.ddd.SnapshotStore
+import ulysses.mongo.UlyssesCollection
 import com.mongodb.connection.ConnectionPoolSettings
-import com.datastax.driver.core.QueryOptions
-import com.datastax.driver.core.policies.RetryPolicy
 import com.datastax.driver.core.SocketOptions
 import ulysses.ddd._
 import ulysses.util.TransientEventStore
 import ulysses.cassandra.CassandraEventStore
 import ulysses.cassandra.TableDescriptor
-import ulysses.util.ReflectiveEventDecoding
-import scala.{ SerialVersionUID => version }
-import ulysses.EventStore
+import scuff.reflect.Surgeon
+import ulysses.util.ReflectiveDecoder
+import rapture.data.ForcedConversion.forceConversion
+import rapture.json.jsonBackends.jackson.implicitJsonAst
+import rapture.json.jsonBackends.jackson.implicitJsonStringParser
+import rapture.json.jsonStringContext
 
-trait AggrEventHandler {
-  final def apply(evt: AggrEvent) = evt.dispatch(this)
+trait AggrEventHandler extends (AggrEvent => Any) {
+  type RT
+  def apply(evt: AggrEvent): RT = evt.dispatch(this)
+
+  def on(evt: AggrCreated): RT
+  def on(evt: NewNumberWasAdded): RT
+  def on(evt: StatusChanged): RT
 }
+
+case class AddNewNumber(n: Int)
+case class ChangeStatus(newStatus: String)
 
 case class AggrState(status: String, numbers: Set[Int])
 
-final class AggrStateMutator(var state: AggrState)
-    extends StateMutator[AggrEvent, AggrState]
-    with AggrEventHandler {
+final class AggrStateMutator(var state: AggrState = null)
+    extends AggrEventHandler
+    with StateMutator[AggrEvent, AggrState] {
+  override def appliedEvents = {
+    val surgeon = new Surgeon(this)
+    val candidates = surgeon.getAll[Vector[AggrEvent]]
+    require(candidates.size == 1)
+    candidates.head._2
+  }
+
+  type RT = Unit
+
+  def on(evt: AggrCreated) {
+    require(state == null)
+    state = new AggrState(evt.status, Set.empty)
+  }
+  def on(evt: NewNumberWasAdded) {
+    val numbers = state.numbers + evt.n
+    state = state.copy(numbers = numbers)
+  }
+  def on(evt: StatusChanged) {
+    state = state.copy(status = evt.newStatus)
+  }
+
 }
 
 sealed abstract class AggrEvent extends DoubleDispatch[AggrEventHandler]
+case class NewNumberWasAdded(n: Int)
+  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
+case class AggrCreated(status: String)
+  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
+case class StatusChanged(newStatus: String)
+  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
 
 abstract class AbstractEventStoreRepositoryTest {
 
@@ -56,20 +89,20 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   var es: EventStore[String, AggrEvent, Unit] = _
-  var repo: Repository[Aggr, String] = _
+  var repo: Repository[String, Aggr] = _
 
   private def doAsync(f: Promise[Any] => Unit) {
     val something = Promise[Any]
     f(something)
     Await.result(something.future, 50000.seconds) match {
-      case t: Throwable => throw t
-      case Failure(t) => throw t
+      case th: Throwable => throw th
+      case Failure(th) => throw th
       case _ =>
     }
   }
 
   def metadata: Map[String, String] = Map(
-    "epochMs" -> System.currentTimeMillis.toString,
+    "timestamp" -> new Timestamp().toString,
     "random" -> math.random.toString)
 
   @Test
@@ -85,11 +118,12 @@ abstract class AbstractEventStoreRepositoryTest {
 
   @Test
   def failedInvariants = doAsync { done =>
-    val newFoo = Aggr.create("Foo")
-    newFoo(AddNewNumber(-1))
-    repo.insert(newFoo.id, newFoo, metadata).onComplete {
+    val id = "Foo"
+    val newFoo = Aggr.create()
+    newFoo apply AddNewNumber(-1)
+    repo.insert(id, newFoo, metadata).onComplete {
       case Failure(_) =>
-        repo.exists(newFoo.id).onSuccess {
+        repo.exists(id).onSuccess {
           case None => done.success("Fail on negative number")
           case Some(rev) => fail(s"Should not exist: $rev")
         }
@@ -99,9 +133,9 @@ abstract class AbstractEventStoreRepositoryTest {
 
   @Test
   def saveNewThenUpdate = doAsync { done =>
-    val newFoo = Aggr.create("Foo")
-    assertEquals(1, newFoo.appliedEvents.size)
-    repo.insert(newFoo.id, newFoo, metadata).onSuccess {
+    val id = "Foo"
+    val newFoo = Aggr.create()
+    repo.insert(id, newFoo, metadata).onSuccess {
       case _ =>
         repo.update("Foo", 0, metadata) {
           case (foo, rev) =>
@@ -125,7 +159,7 @@ abstract class AbstractEventStoreRepositoryTest {
                 repo.update("Foo", 0) {
                   case (foo, rev) =>
                     assertEquals(1, rev)
-                    assertTrue(foo.concurrentEvents.contains(NewNumberWasAdded(44)))
+                    assertTrue(foo.mergeEvents.contains(NewNumberWasAdded(44)))
                     assertEquals("New", foo.aggr.status)
                     foo(AddNewNumber(44))
                     Future successful foo
@@ -136,7 +170,7 @@ abstract class AbstractEventStoreRepositoryTest {
                     repo.update("Foo", 1, metadata) {
                       case (foo, rev) =>
                         assertEquals(1, rev)
-                        assertTrue(foo.concurrentEvents.isEmpty)
+                        assertTrue(foo.mergeEvents.isEmpty)
                         assertEquals("New", foo.aggr.status)
                         foo(ChangeStatus("NotNew"))
                         Future successful foo
@@ -159,13 +193,14 @@ abstract class AbstractEventStoreRepositoryTest {
   }
   @Test
   def update = doAsync { done =>
-    val newFoo = Aggr.create("Foo")
+    val id = "Foo"
+    val newFoo = Aggr.create()
     newFoo(AddNewNumber(42))
     newFoo.appliedEvents match {
-      case AggrCreated(_) +: NewNumberWasAdded(n) +: Nil => assertEquals(42, n)
+      case Seq(AggrCreated(_), NewNumberWasAdded(n)) => assertEquals(42, n)
       case _ => fail("Event sequence incorrect: " + newFoo.appliedEvents)
     }
-    val update1 = repo.insert(newFoo.id, newFoo).flatMap {
+    val update1 = repo.insert(id, newFoo).flatMap {
       case _ =>
         repo.update("Foo", 0) {
           case (foo, rev) =>
@@ -195,11 +230,12 @@ abstract class AbstractEventStoreRepositoryTest {
 
   @Test
   def `idempotent insert` = doAsync { done =>
-    val baz = Aggr.create("Baz")
-    repo.insert(baz.id, baz).onSuccess {
+    val id = "Baz"
+    val baz = Aggr.create()
+    repo.insert(id, baz).onSuccess {
       case rev0 =>
         assertEquals(0, rev0)
-        repo.insert(baz.id, baz).onSuccess {
+        repo.insert(id, baz).onSuccess {
           case rev0 =>
             assertEquals(0, rev0)
             done.success(Unit)
@@ -210,8 +246,9 @@ abstract class AbstractEventStoreRepositoryTest {
   @Test
   def `concurrent update` = doAsync { done =>
     val executor = java.util.concurrent.Executors.newScheduledThreadPool(16)
-    val foo = Aggr.create("Foo")
-    val insFut = repo.insert(foo.id, foo, metadata)
+    val id = "Foo"
+    val foo = Aggr.create()
+    val insFut = repo.insert(id, foo, metadata)
     val updateRevisions = new TrieMap[Int, Future[Int]]
     val range = 0 to 75
     val latch = new CountDownLatch(range.size)
@@ -245,8 +282,9 @@ abstract class AbstractEventStoreRepositoryTest {
   }
   @Test
   def `noop update`() = doAsync { done =>
-    val foo = Aggr.create("Foo")
-    repo.insert(foo.id, foo).onComplete {
+    val id = "Foo"
+    val foo = Aggr.create()
+    repo.insert(id, foo).onComplete {
       case Failure(t) => done.failure(t)
       case Success(_) =>
         repo.update("Foo", 0) {
@@ -261,13 +299,8 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 }
 
-class Aggr(id: String, stateMutator: AggrStateMutator, val concurrentEvents: Seq[AggrEvent]) {
-  type EVT = AggrEvent
-  type ID = String
-  def checkInvariants() {
-    require(stateMutator.state.numbers.filter(_ < 0).isEmpty, "Cannot contain negative numbers")
-  }
-  private[ulysses] def appliedEvents: Seq[EVT] = stateMutator.appliedEvents
+class Aggr(val stateMutator: AggrStateMutator, val mergeEvents: Seq[AggrEvent]) {
+  def appliedEvents = stateMutator.appliedEvents
   private[ulysses] def aggr = stateMutator.state
   def apply(cmd: AddNewNumber) {
     if (!aggr.numbers.contains(cmd.n)) {
@@ -275,57 +308,110 @@ class Aggr(id: String, stateMutator: AggrStateMutator, val concurrentEvents: Seq
     }
   }
   def apply(cmd: ChangeStatus) {
-    if (aggr.status != cmd.status) {
-      stateMutator(StatusChanged(cmd.status))
+    if (aggr.status != cmd.newStatus) {
+      stateMutator(StatusChanged(cmd.newStatus))
     }
   }
   def numbers = aggr.numbers
 }
 
-object Aggr extends AggrRoot[Aggr, String, AggrEvent, AggrState] {
-  def create(id: String): Aggr = {
+object Aggr extends AggregateRoot {
+  type Channel = Unit
+  def channel = ()
+  type Entity = Aggr
+  type Event = AggrEvent
+  type State = AggrState
+
+  def newMutator(state: Option[State]): StateMutator[Event, State] = new AggrStateMutator(state.orNull)
+  def init(state: State, mergeEvents: Vector[Event]): Entity = new Aggr(new AggrStateMutator(state), mergeEvents)
+  def getMutator(entity: Entity): StateMutator[Event, State] = entity.stateMutator
+  def checkInvariants(state: State): Unit = {
+    require(state.numbers.filter(_ < 0).isEmpty, "Cannot contain negative numbers")
+  }
+  def create(): Aggr = {
     val mutator = new AggrStateMutator
     mutator(new AggrCreated("New"))
-    new Aggr(id, mutator, Nil)
+    new Aggr(mutator, Nil)
   }
-  def apply(id: String, state: AggrState, concurrentEvents: Seq[AggrEvent]) = new Aggr(id, new AggrStateMutator(state), concurrentEvents)
-  def newEvents(ar: Aggr): Seq[AggrEvent] = ar.appliedEvents
-  def currState(ar: Aggr): AggrState = ar.aggr
-  def checkInvariants(ar: Aggr) = ar.checkInvariants()
 }
-
-//final class AggrEventCollector(var state: AggrState = null) {
-//  var appliedEvents = Vector.empty[AggrEvent]
-//  def apply(evt: AggrEvent) {
-//    state = new AggrStateMutator(state)(evt)
-//    appliedEvents :+= evt
-//  }
-//}
 
 class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTest {
 
-  implicit def aggr2unit(s: AggrState): Unit = ()
+  implicit object Codec
+      extends EventCodec[AggrEvent, String]
+      with NoVersioning[AggrEvent, String] {
+
+    import rapture.json._, jsonBackends.jackson._
+
+    def name(cls: ClassEVT): String = cls.getSimpleName
+
+    def encode(evt: AggrEvent): String = evt match {
+      case AggrCreated(status) => json""" { "status": $status } """.toBareString
+      case NewNumberWasAdded(num) => json""" { "num": $num } """.toBareString
+      case StatusChanged(newStatus) => json""" { "status": $newStatus } """.toBareString
+    }
+    def decode(name: String, json: String): AggrEvent = {
+      val ast = Json.parse(json)
+      name match {
+        case "AggrCreated" => AggrCreated(status = ast.status.as[String])
+        case "NewNumberWasAdded" => NewNumberWasAdded(n = ast.num.as[Int])
+        case "StatusChanged" => StatusChanged(newStatus = ast.status.as[String])
+      }
+    }
+  }
 
   @Before
   def setup {
-    es = new TransientEventStore[String, AggrEvent, Unit](global, _ => Unit)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
-    repo = new AggrRootRepository(Aggr, esRepo)
+    es = new TransientEventStore[String, AggrEvent, Unit, String](global)
+    //    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
+//    repo = new EntityRepository[String, AggrEvent, Unit, AggrState, String, Aggr](es, Aggr, SystemClock)
   }
 
 }
 
 class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepositoryTest {
 
-  implicit def aggr2unit(s: AggrState): Unit = ()
+  implicit object Codec
+      extends ReflectiveDecoder[AggrEvent, String]
+      with AggrEventHandler
+      with EventCodec[AggrEvent, String]
+      with NoVersioning[AggrEvent, String] {
+
+    type RT = String
+
+    import rapture.json._, jsonBackends.jackson._
+
+    def name(cls: ClassEVT): String = cls.getSimpleName
+
+    def encode(evt: AggrEvent): String = evt.dispatch(this)
+
+    def on(evt: AggrCreated): RT = json""" { "status": ${evt.status} } """.toBareString
+    def decodeAggrCreated(json: String): AggrCreated = {
+      val ast = Json.parse(json)
+      AggrCreated(status = ast.status.as[String])
+    }
+
+    def on(evt: NewNumberWasAdded): RT = json""" { "num": ${evt.n} } """.toBareString
+    def decodeNewNumberWasAdded(name: String, json: String): NewNumberWasAdded = {
+      val ast = Json.parse(json)
+      NewNumberWasAdded(n = ast.num.as[Int])
+    }
+
+    def on(evt: StatusChanged): RT = json""" { "status": ${evt.newStatus} } """.toBareString
+    def decodeStatusChanged(name: String, json: String): StatusChanged = {
+      val ast = Json.parse(json)
+      StatusChanged(newStatus = ast.status.as[String])
+    }
+  }
 
   @Before
   def setup {
-    es = new TransientEventStore[String, AggrEvent, Unit](global, _ => Unit)
-    val snapshotMap = new collection.concurrent.TrieMap[String, SnapshotStore[AggrState, String]#Snapshot]
+    es = new TransientEventStore(global)
+    val snapshotMap = new collection.concurrent.TrieMap[String, SnapshotStore[String, AggrState]#Snapshot]
     val snapshotStore = new MapSnapshotStore[Aggr, String, AggrEvent, AggrState](snapshotMap)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock, snapshotStore)
-    repo = new AggrRootRepository(Aggr, esRepo)
+    // [AggrState, String, AggrEvent, String, Unit]
+//    val esRepo = new EntityRepository(es, Aggr, SystemClock, snapshotStore)
+    //    repo = new AggrRootRepository(Aggr, esRepo)
   }
 
 }
@@ -336,33 +422,31 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   import ulysses.mongo._
   import com.mongodb.async.client._
 
-  implicit def aggr2unit(s: AggrState): Unit = ()
-
-  implicit object AggrEventCodec
-      extends ReflectiveEventDecoding[AggrEvent, Document]
-      with EventContext[AggrEvent, Unit, Document]
+  implicit object MongoDBAggrEventCtx
+      extends ReflectiveDecoder[AggrEvent, Document]
+      with EventCodec[AggrEvent, Document]
       with AggrEventHandler {
     type RT = Document
-    def version(evt: Class[AggrEvent]) = scuff.serialVersionUID(evt)
-    def name(evt: Class[AggrEvent]) = evt.getSimpleName
-    def channel(evt: Class[AggrEvent]) = ()
-    protected def evtTag = classTag[AggrEvent]
-    protected def fmtTag = classTag[Document]
+    def version(evt: ClassEVT) = scuff.serialVersionUID(evt).toShort
+    def name(evt: ClassEVT) = evt.getSimpleName
 
-    def encodeEvent(evt: AggrEvent): Document = evt.dispatch(this)
+//    protected def evtTag = classTag[AggrEvent]
+//    protected def fmtTag = classTag[Document]
+
+    def encode(evt: AggrEvent): Document = evt.dispatch(this)
 
     def on(evt: AggrCreated) = new Document("status", evt.status)
-    def aggrCreated(version: Short, doc: Document): AggrCreated = version match {
+    def offAggrCreated(version: Short, doc: Document): AggrCreated = version match {
       case 1 => AggrCreated(doc.getString("status"))
     }
 
     def on(evt: NewNumberWasAdded) = new Document("number", evt.n)
-    def newNumberWasAdded(version: Short, doc: Document): NewNumberWasAdded = version match {
+    def offNewNumberWasAdded(version: Short, doc: Document): NewNumberWasAdded = version match {
       case 1 => NewNumberWasAdded(doc.getInteger("number"))
     }
 
     def on(evt: StatusChanged) = new Document("newStatus", evt.newStatus)
-    def statusChanged(version: Short, doc: Document): StatusChanged = version match {
+    def offStatusChanged(version: Short, doc: Document): StatusChanged = version match {
       case 1 => StatusChanged(doc.getString("newStatus"))
     }
   }
@@ -385,8 +469,8 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     val result = deleteAll(coll)
     assertTrue(result.wasAcknowledged)
     es = new MongoEventStore[String, AggrEvent, Unit](coll)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
-    repo = new AggrRootRepository(Aggr, esRepo)
+    //    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
+//    repo = new EntityRepository(es, Aggr, Clock.System)
   }
   private def deleteAll(coll: MongoCollection[_]): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>
@@ -404,15 +488,14 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
 //@Ignore
 class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest {
 
-  implicit def aggr2unit(s: AggrState): Unit = ()
-
   implicit object AggrEventCodec
-      extends ReflectiveEventDecoding[AggrEvent, String]
-      with EventContext[AggrEvent, Unit, String]
+      extends ReflectiveDecoder[AggrEvent, String]
+      with EventCodec[AggrEvent, String]
       with AggrEventHandler {
     type RT = String
-    def version(cls: Class[AggrEvent]) = scuff.serialVersionUID(cls)
-    def name(cls: Class[AggrEvent]) = cls.getSimpleName
+    def version(cls: ClassEVT) = scuff.serialVersionUID(cls).toShort
+    def name(cls: ClassEVT) = cls.getSimpleName
+
     protected def evtTag = classTag[AggrEvent]
     protected def fmtTag = classTag[String]
 
@@ -455,8 +538,8 @@ class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, Unit, String](session, TableDescriptor, 10 * 1024)
-    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
-    repo = new AggrRootRepository(Aggr, esRepo)
+    //    val esRepo = new EventStoreRepository[AggrState, String, AggrEvent, String, Unit](es, AggrStateMachine, SystemClock)
+    //    repo = new AggrRootRepository(Aggr, esRepo)
   }
   private def deleteAll(session: Session): Unit = {
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))

@@ -1,11 +1,12 @@
-package ulysses.test_repo.aggr.dept
+package sampler.aggr.dept
 
 import scala.{ SerialVersionUID => version }
 import scuff.DoubleDispatch
-import ulysses.EventContext
-import ulysses.test_repo.aggr.EmpId
+import sampler.aggr.EmpId
+import sampler.aggr.DomainEvent
+import scuff.ReplacedBy
 
-trait DeptEventHandler {
+trait DeptEventHandler extends (DeptEvent => Any) {
   type RT
 
   def apply(evt: DeptEvent) = evt.dispatch(this)
@@ -16,7 +17,9 @@ trait DeptEventHandler {
   def on(evt: NameChanged): RT
 }
 
-sealed abstract class DeptEvent extends DoubleDispatch[DeptEventHandler]
+sealed abstract class DeptEvent
+  extends DomainEvent
+  with DoubleDispatch[DeptEventHandler]
 
 @version(1)
 case class DeptCreated(name: String)
@@ -30,23 +33,14 @@ case class EmployeeAdded(id: EmpId)
 case class EmployeeRemoved(id: EmpId)
   extends DeptEvent { def dispatch(handler: DeptEventHandler): handler.RT = handler.on(this) }
 
-@version(1)
-case class NameChanged(newName: String)
+@version(2)
+case class NameChanged(newName: String, reason: String)
   extends DeptEvent { def dispatch(handler: DeptEventHandler): handler.RT = handler.on(this) }
 
-//object DeptEvent
-//    extends EventContext[DeptEvent, Unit, String]
-//    with DeptEventHandler {
-//
-//  def version(evt: Class[DeptEvent]): Short = scuff.serialVersionUID(evt).toShort
-//  def name(evt: Class[DeptEvent]): String = evt.getSimpleName
-//  def channel(evt: Class[DeptEvent]) = Unit
-//
-//  def encode(evt: DeptEvent): String = ""
-//  def decode(name: String, version: Short, data: String): DeptEvent = {
-//
-//  }
-//
-//  type RT = DeptEvent
-//
-//}
+package archive {
+  @version(1)
+  case class NameChanged_v1(newName: String) extends ReplacedBy[NameChanged] {
+    def upgrade() = new NameChanged(newName = newName, reason = "N/A")
+  }
+
+}

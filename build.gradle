@@ -23,13 +23,14 @@ task wrapper(type: Wrapper) {
 
 repositories {
     mavenCentral()
+    jcenter()
     maven {
         url "http://dl.bintray.com/nilskp/maven" 
     }
 }
 
 jar {
-    baseName = "ulysses_2.11"
+    baseName = "ulysses_$vScala"
     manifest {
         attributes "Implementation-Title": "ulysses", "Implementation-Version": version
     }
@@ -54,11 +55,11 @@ publishing {
             from components.java
             artifact sourceJar
             artifact docsJar
-            pom.withXml { xml ->
-                xml.asNode().dependencies.dependency.findAll{ ! ['boon','mail'].contains(it.artifactId.text()) }.each { dep ->
-                    dep.scope[0].value = "provided"
-                }
-            }
+//            pom.withXml { xml ->
+//                xml.asNode().dependencies.dependency.findAll{ ! ['boon','mail'].contains(it.artifactId.text()) }.each { dep ->
+//                    dep.scope[0].value = "provided"
+//                }
+//            }
         }
     }
 }
@@ -79,14 +80,17 @@ bintray {
 }
 
 dependencies {
-    testCompile "junit:junit:4.12"
-    testCompile "org.mockito:mockito-all:1.10.19"
+    testCompile "junit:junit:4.+"
+    testCompile "org.mockito:mockito-all:1.10.+"
+    testCompile "com.propensive:rapture-json-jackson_$vScala:$vRapture.+" 
+    testCompile "com.h2database:h2:$vH2.+"
+    testCompile "org.apache.derby:derby:$vDerby.+"
 
     //compile "nilskp:scuff_2.11:0.1.5-b1602271849"
-    compile "org.scala-lang:scala-reflect:2.11.8"
-    compile "org.mongodb:mongodb-driver-async:$vMongo"
-    compile "com.datastax.cassandra:cassandra-driver-core:$vCassandra"
-    compile "redis.clients:jedis:$vJedis"
+    compileOnly "org.scala-lang:scala-reflect:$vScala.8"
+    compileOnly "org.mongodb:mongodb-driver-async:$vMongo.+"
+    compileOnly "com.datastax.cassandra:cassandra-driver-core:$vCassandra.+"
+    compileOnly "redis.clients:jedis:$vJedis.+"
 }
 
 /*

@@ -15,7 +15,7 @@ import scuff.concurrent.StreamCallback
 import scala.collection.immutable.Seq
 import scala.collection.{ Seq => aSeq, Map => aMap }
 import org.bson.codecs.configuration.CodecRegistry
-import ulysses.EventContext
+import ulysses.EventCodec
 import org.bson.codecs.BsonArrayCodec
 import org.bson.BsonArray
 import scala.concurrent.ExecutionContext
@@ -51,12 +51,10 @@ object MongoEventStore {
   *   }
   * }}}
   */
-class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
-  dbColl: MongoCollection[Document])(implicit evtCtx: EventContext[EVT, CH, Document],
+class MongoEventStore[ID: Codec, EVT, CH: Codec](
+  dbColl: MongoCollection[Document])(implicit codec: EventCodec[EVT, Document],
                                      protected val exeCtx: ExecutionContext)
     extends ulysses.EventStore[ID, EVT, CH] {
-
-  protected final def getChannel(cls: Class[_ <: EVT]) = evtCtx.channel(cls)
 
   protected val store = {
     withBlockingCallback[String]()(dbColl.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _))
@@ -110,7 +108,9 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
     query(filter, OrderByRevision, callback)
   }
 
-  def record(channel: CH, stream: ID, revision: Int, tick: Long, events: aSeq[EVT], metadata: aMap[String, String]): Future[TXN] = {
+  def commit(
+    channel: CH, stream: ID, revision: Int, tick: Long,
+    events: aSeq[EVT], metadata: aMap[String, String]): Future[TXN] = {
     val txn = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
       store.insertOne(txn, callback)
@@ -149,8 +149,8 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
         import language.implicitConversions
         implicit def tag2class[T](tag: ClassTag[T]): Class[T] = tag.runtimeClass.asInstanceOf[Class[T]]
         def getEncoderClass = classOf[TXN]
-        val idCodec = registry.get(classTag[ID]).ensuring(_ != null, s"Codec for ${classTag[ID]} not found")
-        val catCodec = registry.get(classTag[CH]).ensuring(_ != null, s"Codec for ${classTag[CH]} not found")
+        val idCodec = implicitly[Codec[ID]]
+        val chCodec = implicitly[Codec[CH]]
 
         private def writeEntry(name: String, value: AnyRef, writer: BsonWriter)(implicit ctx: EncoderContext) {
           writer.writeName(name)
@@ -179,7 +179,7 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
             writer.writeInt32("rev", txn.revision)
           }
           writer.writeInt64("tick", txn.tick)
-          writer.writeName("channel"); catCodec.encode(writer, txn.channel, ctx)
+          writer.writeName("channel"); chCodec.encode(writer, txn.channel, ctx)
           if (txn.metadata.nonEmpty) {
             writeDocument(writer, "metadata") {
               txn.metadata.foreach {
@@ -191,9 +191,9 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
           writeArray("events", writer) {
             txn.events.foreach { evt =>
               writeDocument(writer) {
-                writeEntry("name", evtCtx.name(evt), writer)
-                writeEntry("v", Integer.valueOf(evtCtx.version(evt)), writer)
-                val data = evtCtx.encode(evt)
+                writeEntry("name", codec.name(evt), writer)
+                writeEntry("v", Integer.valueOf(codec.version(evt)), writer)
+                val data = codec.encode(evt)
                 writeEntry("data", data, writer)
               }
             }
@@ -235,7 +235,7 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
               val version = reader.readInt32("v").toShort
               reader.readName("data")
               val data = docCodec.decode(reader, ctx)
-              evtCtx.decode(name, version, data)
+              codec.decode(name, version, data)
             }
             readEvents(channel, reader, events :+ evt)
           }
@@ -250,7 +250,7 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
           val clock = reader.readInt64("tick")
           val channel = {
             reader.readName("channel")
-            catCodec.decode(reader, ctx)
+            chCodec.decode(reader, ctx)
           }
           val (metadata, events) = reader.readName match {
             case "metadata" =>
@@ -306,9 +306,10 @@ class MongoEventStore[ID: ClassTag, EVT, CH: ClassTag](
       case ByChannel(channels) =>
         docFilter.append("channel", new Document("$in", toJList(channels)))
       case ByEvent(evtTypes) =>
-        val channels = evtTypes.map(evtCtx.channel)
+
+        val channels = evtTypes.keys
         docFilter.append("channel", new Document("$in", toJList(channels)))
-        val evtNames = evtTypes.map(evtCtx.name)
+        val evtNames = evtTypes.values.flatten.map(codec.name)
         docFilter.append("events.name", new Document("$in", toJList(evtNames)))
       case ByStream(id, _) =>
         docFilter.append("_id.stream", id)

@@ -2,10 +2,10 @@ package ulysses.conv
 
 import scala.reflect.{ ClassTag, classTag }
 
-trait ColumnType[T] {
-  type REC
+trait StorageType[T] {
+  type Rec
+  type Ref
   def jvmType: Class[T]
-  def typeName: String
   def writeAs(value: T): AnyRef = value.asInstanceOf[AnyRef]
-  def readFrom(rec: REC, idx: Int): T
+  def readFrom(rec: Rec, ref: Ref): T
 }

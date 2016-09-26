@@ -8,24 +8,29 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import scuff.Memoizer
 
-class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val schema: String)(
-    implicit final val evtCtx: EventContext[EVT, CH, SF]) {
+class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val schema: Option[String])(
+    implicit final val codec: EventCodec[EVT, SF]) {
 
-  @inline
-  final def ct[T: ColumnType] = implicitly[ColumnType[T]]
+  def this(schema: String)(implicit codec: EventCodec[EVT, SF]) = this(Option(schema))
+
+  private[jdbc] def idType = implicitly[ColumnType[ID]]
+  private[jdbc] def chType = implicitly[ColumnType[CH]]
+  private[jdbc] def sfType = implicitly[ColumnType[SF]]
 
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = {
     Option(sqlEx.getSQLState).exists(_ startsWith "23") ||
       Option(sqlEx.getMessage).map(_.toLowerCase).exists { msg =>
         (msg contains "duplicate") ||
-          (msg contains "constraint")
+          (msg contains "constraint") ||
+          (msg contains "violation")
       }
   }
 
-  protected def streamTable = s"$schema.stream"
-  protected def transactionTable = s"$schema.transaction"
-  protected def eventTable = s"$schema.event"
-  protected def metadataTable = s"$schema.metadata"
+  protected def schemaPrefix = schema.map(_ + ".") getOrElse ""
+  protected def streamTable = s"${schemaPrefix}stream"
+  protected def transactionTable = s"${schemaPrefix}transaction"
+  protected def eventTable = s"${schemaPrefix}event"
+  protected def metadataTable = s"${schemaPrefix}metadata"
 
   protected def executeDDL(conn: Connection, ddl: String) {
     val stm = conn.createStatement()
@@ -36,28 +41,28 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
     }
   }
 
-  def schemaDDL: String = s"CREATE SCHEMA IF NOT EXISTS $schema"
-  def createSchema(conn: Connection): Unit = executeDDL(conn, schemaDDL)
+  protected def schemaDDL(schema: String): String = s"CREATE SCHEMA IF NOT EXISTS $schema"
+  def createSchema(conn: Connection): Unit = schema.foreach(schema => executeDDL(conn, schemaDDL(schema)))
 
-  def streamTableDDL: String = s"""
+  protected def streamTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $streamTable (
-      stream_id ${ct[ID].typeName} NOT NULL,
-      channel ${ct[CH].typeName} NOT NULL,
+      stream_id ${idType.typeName} NOT NULL,
+      channel ${chType.typeName} NOT NULL,
 
       PRIMARY KEY (stream_id)
     )
   """
   def createStreamTable(conn: Connection): Unit = executeDDL(conn, streamTableDDL)
 
-  def channelIndexDDL: String = s"""
+  protected def channelIndexDDL: String = s"""
     CREATE INDEX IF NOT EXISTS ${streamTable.replace(".", "_")}_channel
       ON $streamTable (channel)
   """
   def createChannelIndex(conn: Connection): Unit = executeDDL(conn, channelIndexDDL)
 
-  def transactionTableDDL: String = s"""
+  protected def transactionTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $transactionTable (
-      stream_id ${ct[ID].typeName} NOT NULL,
+      stream_id ${idType.typeName} NOT NULL,
       revision INT NOT NULL,
       tick BIGINT NOT NULL,
 
@@ -68,21 +73,21 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   """
   def createTransactionTable(conn: Connection): Unit = executeDDL(conn, transactionTableDDL)
 
-  def tickIndexDDL: String = s"""
+  protected def tickIndexDDL: String = s"""
     CREATE INDEX IF NOT EXISTS ${transactionTable.replace(".", "_")}_tick
       ON $transactionTable (tick)
   """
   def createTickIndex(conn: Connection): Unit = executeDDL(conn, tickIndexDDL)
 
   protected def eventNameType = "VARCHAR(255)"
-  def eventTableDDL: String = s"""
+  protected def eventTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $eventTable (
-      stream_id ${ct[ID].typeName} NOT NULL,
+      stream_id ${idType.typeName} NOT NULL,
       revision INT NOT NULL,
       event_idx TINYINT NOT NULL,
       event_name $eventNameType NOT NULL,
       event_version SMALLINT NOT NULL,
-      event_data ${ct[SF].typeName} NOT NULL,
+      event_data ${sfType.typeName} NOT NULL,
 
       PRIMARY KEY (stream_id, revision, event_idx),
       FOREIGN KEY (stream_id, revision)
@@ -91,7 +96,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   """
   def createEventTable(conn: Connection): Unit = executeDDL(conn, eventTableDDL)
 
-  def eventNameIndexDDL: String = s"""
+  protected def eventNameIndexDDL: String = s"""
     CREATE INDEX IF NOT EXISTS ${eventTable.replace(".", "_")}_event_name
       ON $eventTable (event_name)
   """
@@ -100,9 +105,9 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   protected def metadataKeyType = "VARCHAR(255)"
   protected def metadataValType = "VARCHAR(65535)"
 
-  def metadataTableDDL: String = s"""
+  protected def metadataTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $metadataTable (
-      stream_id ${ct[ID].typeName} NOT NULL,
+      stream_id ${idType.typeName} NOT NULL,
       revision INT NOT NULL,
       metadata_key $metadataKeyType NOT NULL,
       metadata_val $metadataValType NOT NULL,
@@ -115,7 +120,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   def createMetadataTable(conn: Connection): Unit = executeDDL(conn, metadataTableDDL)
 
   protected def setObject[T: ColumnType](ps: PreparedStatement)(colIdx: Int, value: T) {
-    ps.setObject(colIdx, ct[T].writeAs(value))
+    ps.setObject(colIdx, implicitly[ColumnType[T]].writeAs(value))
   }
   private def prepareStatement[R](sql: String)(thunk: PreparedStatement => R)(
     implicit conn: Connection): R = {
@@ -166,9 +171,9 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
       events.iterator.zipWithIndex.foreach {
         case (evt, idx) =>
           ps.setByte(3, idx.toByte)
-          ps.setString(4, evtCtx name evt)
-          ps.setShort(5, evtCtx version evt)
-          setObject(ps)(6, evtCtx encode evt)
+          ps.setString(4, codec name evt)
+          ps.setShort(5, codec version evt)
+          setObject(ps)(6, codec encode evt)
           ps.addBatch()
       }
       ps.executeUpdate()
@@ -195,7 +200,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   }
 
   private val StreamColumnsPrefixed = Seq(
-    "s.channel", "t.tick", "e.revision",
+    "s.channel", "t.tick", "t.revision",
     "e.event_idx", "e.event_name", "e.event_version", "e.event_data",
     "m.metadata_key", "m.metadata_val")
   private val TxnColumnsPrefixed = "s.stream_id" +: StreamColumnsPrefixed
@@ -205,8 +210,8 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   private def TxnColumnsSelect: String = TxnColumnsPrefixed.map { colName =>
     s"$colName AS ${colName.substring(2)}"
   }.mkString(",")
-  private val StreamColumnsIdx = Columns(StreamColumnsPrefixed.map(_.substring(2)).indexOf)
-  private val TxnColumnsIdx = Columns(TxnColumnsPrefixed.map(_.substring(2)).indexOf)
+  private val StreamColumnsIdx = Columns(StreamColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
+  private val TxnColumnsIdx = Columns(TxnColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
 
   private[jdbc] case class Columns(
     stream_id: Int, revision: Int,
@@ -229,24 +234,27 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
     }
   }
 
-  protected val txnSelect: String = s"""
-    SELECT $TxnColumnsSelect
-    FROM $streamTable s
-    JOIN $transactionTable t
-      ON t.stream_id = s.stream_id
-    JOIN $eventTable e
-      ON e.stream_id = t.stream_id
-      AND e.revision = t.revision
-    LEFT OUTER JOIN $metadataTable m
-      ON m.stream_id = t.stream_id
-      AND m.revision = t.revision
+  //  protected val txnSelect: String = s"""
+  //    SELECT $TxnColumnsSelect
+  //    FROM $streamTable s
+  //    JOIN $transactionTable t
+  //      ON t.stream_id = s.stream_id
+  //    JOIN $eventTable e
+  //      ON e.stream_id = t.stream_id
+  //      AND e.revision = t.revision
+  //    LEFT OUTER JOIN $metadataTable m
+  //      ON m.stream_id = t.stream_id
+  //      AND m.revision = t.revision
+  //    WHERE t.stream_id = ?
+  //    ORDER BY t.tick
+  //  """
+
+  protected val maxRevisionQuery = s"""
+    SELECT MAX(revision)
+    FROM $transactionTable
     WHERE stream_id = ?
-    ORDER BY t.tick
-  """
-
-  //  protected val transactionQuery
-
-  protected val maxRevisionQuery = s"SELECT MAX(revision) FROM $transactionTable WHERE stream_id = ?"
+    GROUP BY stream_id
+"""
   def selectMaxRevision(stream: ID)(implicit conn: Connection): Option[Int] = {
     prepareStatement(maxRevisionQuery) { ps =>
       ps.setFetchSize(1)
@@ -306,14 +314,15 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
       }
     }
   }
-  def selectTransactionsByEvents(events: Set[Class[_ <: EVT]], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByEvents(eventsByChannel: Map[CH, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
     thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
     val prefix = if (tickBound) {
       s"WHERE t.tick >= ? AND"
     } else "WHERE"
-    val channels = events.map(evtCtx.channel)
+    val channels = eventsByChannel.keys
+    val events = eventsByChannel.values.flatten
     val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size, events.size)}"
     val query = makeTxnQuery(WHERE)
     prepareStatement(query) { ps =>
@@ -323,7 +332,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
         setObject(ps)(colIdx.next, channel)
       }
       events foreach { evt =>
-        ps.setString(colIdx.next, evtCtx.name(evt))
+        ps.setString(colIdx.next, codec.name(evt))
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxnColumnsIdx)
@@ -372,7 +381,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
   protected def makeStreamQuery(AND: String = ""): String = s"""
     SELECT $StreamColumnsSelect
     $FromJoin
-    WHERE stream_id = ? $AND
+    WHERE t.stream_id = ? $AND
     ORDER BY e.revision, e.event_idx
   """
 
@@ -387,7 +396,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
     }
   }
 
-  private val streamQuerySingleRevision = makeStreamQuery("AND revision = ?")
+  private val streamQuerySingleRevision = makeStreamQuery("AND t.revision = ?")
   def selectStreamRevision(stream: ID, revision: Int)(thunk: (ResultSet, Columns) => Unit)(
     implicit conn: Connection): Unit = {
     prepareStatement(streamQuerySingleRevision) { ps =>
@@ -398,7 +407,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val sc
       }
     }
   }
-  private val streamQueryRevisionRange = makeStreamQuery("AND revision BETWEEN ? AND ?")
+  private val streamQueryRevisionRange = makeStreamQuery("AND t.revision BETWEEN ? AND ?")
   def selectStreamRange(stream: ID, range: Range)(thunk: (ResultSet, Columns) => Unit)(
     implicit conn: Connection): Unit = {
     prepareStatement(streamQueryRevisionRange) { ps =>

@@ -7,6 +7,8 @@ import org.junit.Assert._
 import scuff.concurrent.Threads
 import scuff.io.{ ByteInputStream, ByteOutputStream }
 import scuff.reflect.Surgeon
+import scuff.JavaSerializer
+import scala.concurrent.ExecutionContext
 
 sealed trait Event
 object Event {
@@ -17,34 +19,25 @@ case class User(name: String, age: Int)
 
 class TestEventStore {
 
-  private[this] val es = new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack, _ => "!") {
-    override def Transaction(
-      tick: Long,
-      channel: String,
-      stream: Symbol,
-      revision: Int,
-      metadata: Map[String, String],
-      events: Seq[Event]) = super.Transaction(tick, channel, stream, revision, metadata, events)
+  implicit object EvtCodec
+      extends EventCodec[Event, Array[Byte]]
+      with NoVersioning[Event, Array[Byte]] {
+
+    def name(cls: ClassEVT): String = cls.getName
+    def channel(cls: ClassEVT): String = cls.getSuperclass.getSimpleName
+
+    def encode(evt: Event): Array[Byte] =
+      JavaSerializer.encode(evt)
+    def decode(name: String, data: Array[Byte]): Event =
+      JavaSerializer.decode(data).asInstanceOf[Event]
   }
 
-//  @Before
-//  def setup {
-//    val tes = new util.TransientEventStore[Symbol, Event, String](Threads.PiggyBack) {
-//      override def Transaction(
-//        tick: Long,
-//        channel: String,
-//        stream: Symbol,
-//        revision: Int,
-//        metadata: Map[String, String],
-//        events: Seq[Event]) = super.Transaction(tick, channel, stream, revision, metadata, events)
-//    }
-//    new Surgeon(this).set('es, tes)
-//  }
+  private[this] val es = new util.TransientEventStore[Symbol, Event, String, Array[Byte]](ExecutionContext.global)
 
   @Test
   def serialization {
     val wallClock = System.currentTimeMillis
-    val txn = es.Transaction(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
+    val txn = new es.TXN(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), Vector(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
     val objOut = new ObjectOutputStream(out)
     objOut.writeObject(txn)

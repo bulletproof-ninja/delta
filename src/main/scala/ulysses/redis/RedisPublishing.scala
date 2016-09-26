@@ -84,7 +84,7 @@ trait RedisPublishing[ID, EVT, CH]
       case ByChannel(channels) =>
         subChannels.filter(cf => channels.contains(cf._1))
       case ByEvent(events) =>
-        val channels = events.map(getChannel)
+        val channels = events.keySet
         subChannels.filter(cf => channels.contains(cf._1))
       case ByStream(id, channel) =>
         subChannels.filter(cf => cf._1 == channel)

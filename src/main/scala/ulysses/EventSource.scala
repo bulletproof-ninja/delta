@@ -10,8 +10,6 @@ trait EventSource[ID, EVT, CH] {
 
   type TXN = Transaction[ID, EVT, CH]
 
-  protected def getChannel(evt: Class[_ <: EVT]): CH
-
   def currRevision(stream: ID): Future[Option[Int]]
   def lastTick(): Future[Option[Long]]
 

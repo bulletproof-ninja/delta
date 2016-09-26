@@ -48,16 +48,16 @@ package object cassandra {
     def readFrom(row: Row, col: Int): InetAddress = row.getInet(col)
   }
   implicit def JavaEnumColumn[T <: java.lang.Enum[T]: ClassTag] =
-    new ColumnType[T] with conv.JavaEnumColumn[T] {
+    new ColumnType[T] with conv.JavaEnumType[T] {
       def typeName = "ascii"
       def readFrom(row: Row, col: Int): T = byName(row.getString(col))
     }
-  implicit def ScalaEnumColumn[E <: Enumeration: ClassTag] =
-    new ColumnType[E#Value] with conv.ScalaEnumColumn[E] {
-      val enumType = classTag[E].runtimeClass.asInstanceOf[Class[E]]
-      def typeName = "ascii"
-      def readFrom(row: Row, col: Int) = byName(row.getString(col))
-    }
+  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
+      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
+    def typeName = "ascii"
+    def readFrom(row: Row, col: Int) = byName(row.getString(col))
+  }
+
   private abstract class AbstractMapColumn[K: ColumnType, V: ColumnType, M <: aMap[K, V]: ClassTag]
       extends ColumnType[M] {
     import collection.JavaConverters._
