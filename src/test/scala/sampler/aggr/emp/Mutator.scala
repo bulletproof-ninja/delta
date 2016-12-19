@@ -1,8 +1,7 @@
 package sampler.aggr.emp
 
-import sampler.aggr.EmpId
+import sampler._
 import ulysses.ddd.StateMutator
-import sampler.MyDate
 
 case class State(
   name: String,
@@ -11,16 +10,15 @@ case class State(
   salary: Int,
   title: String)
 
-class Mutator(
-  var state: State = null)
+class Mutator(var state: State = null)
     extends EmpEventHandler
     with StateMutator[EmpEvent, State] {
 
-  override def apply(evt: EmpEvent) = super.apply(evt)
+  def this(state: Option[State]) = this(state.orNull)
 
   type RT = Unit
 
-  def this(state: Option[State]) = this(state.orNull)
+  protected def process(evt: EmpEvent) = dispatch(evt)
 
   /** Genesis event. */
   def on(evt: EmployeeRegistered): RT = {

@@ -2,14 +2,14 @@ package sampler.aggr.dept
 
 import scala.{ SerialVersionUID => version }
 import scuff.DoubleDispatch
-import sampler.aggr.EmpId
+import sampler._
 import sampler.aggr.DomainEvent
 import scuff.ReplacedBy
 
-trait DeptEventHandler extends (DeptEvent => Any) {
+trait DeptEventHandler {
   type RT
 
-  def apply(evt: DeptEvent) = evt.dispatch(this)
+  def dispatch(evt: DeptEvent) = evt.dispatch(this)
 
   def on(evt: DeptCreated): RT
   def on(evt: EmployeeAdded): RT
@@ -17,8 +17,7 @@ trait DeptEventHandler extends (DeptEvent => Any) {
   def on(evt: NameChanged): RT
 }
 
-sealed abstract class DeptEvent
-  extends DomainEvent
+sealed abstract class DeptEvent extends DomainEvent
   with DoubleDispatch[DeptEventHandler]
 
 @version(1)

@@ -19,9 +19,9 @@ trait SnapshotStore[ID, S <: AnyRef] {
 
   /**
     * Should a snapshot be considered current? Defaults to `false`.
-    * Basically this should only be overridden if all snapshots
+    * Basically this should only return `true` if all snapshots
     * are saved (in non-local location if distributed environment).
-    * Assuming snapshots are current will prevent a query to event store.
+    * Assuming current snapshots (`true`) will prevent a query to event store.
     * If not true (due to race conditions or snapshots not always stored),
     * the event store will still be queried after detecting non-currency.
     * In other words, having this be `true` will still work, but will be

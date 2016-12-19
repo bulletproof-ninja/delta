@@ -6,44 +6,44 @@ import scuff.concurrent.Threads.PiggyBack
 import scala.util.control.NonFatal
 import scala.concurrent.ExecutionContext
 import ulysses.EventStore
+import ulysses.Clock
 
-class EntityRepository[ESID, EVT, CH, S <: AnyRef, RID <% ESID, AR](
+class EntityRepository[ESID, EVT, CH, S <: AnyRef, ARID <% ESID, AR](
+  exeCtx: ExecutionContext,
   clock: Clock,
-  aggr: AggregateRoot { type Id = RID; type State = S; type Event = EVT; type Channel = CH; type Entity = AR })(
+  aggr: AggregateRoot { type Id = ARID; type State = S; type Event = EVT; type Channel = CH; type Entity = AR })(
     eventStore: EventStore[ESID, _ >: EVT, CH],
-    snapshots: SnapshotStore[RID, S] = SnapshotStore.Disabled[RID, S])(
-      implicit ec: ExecutionContext)
-    extends Repository[RID, AR] {
+    snapshots: SnapshotStore[ARID, S] = SnapshotStore.Disabled[ARID, S])
+    extends Repository[ARID, AR] {
 
-  private val repo = new StateRepository[ESID, EVT, CH, S, RID](
-    clock, aggr.channel, eventStore, aggr.newMutator, snapshots)
+  private val repo = new EventStoreRepository[ESID, EVT, CH, S, ARID](
+      exeCtx, aggr.channel, clock, eventStore, aggr.newMutator, snapshots)
 
-  def exists(id: RID): Future[Option[Int]] = repo.exists(id)
+  def exists(id: ARID): Future[Option[Int]] = repo.exists(id)
 
-  def load(id: RID): Future[(AR, Int)] = {
+  def load(id: ARID): Future[(AR, Int)] = {
     repo.load(id).map {
       case ((state, _), revision) =>
-        aggr.init(state, Vector.empty) -> revision
-    }
+        aggr.init(state, Nil) -> revision
+    }(exeCtx)
   }
 
-  def update(id: RID, expectedRevision: Option[Int], metadata: Map[String, String])(
+  def update(id: ARID, expectedRevision: Option[Int], metadata: Map[String, String])(
     updateThunk: (AR, Int) => Future[AR]): Future[Int] = {
     repo.update(id, expectedRevision, metadata) {
       case ((state, mergeEvents), revision) =>
         val entity = aggr.init(state, mergeEvents)
         updateThunk(entity, revision).map { ar =>
-          val mutator = aggr.getMutator(ar)
+          val mutator = aggr.done(ar)
           aggr.checkInvariants(mutator.state)
-          val events = mutator.appliedEvents
-          mutator.state -> events
-        }
+          mutator.state -> mutator.appliedEvents
+        }(exeCtx)
     }
   }
 
-  def insert(id: RID, ar: AR, metadata: Map[String, String]): Future[Int] = {
+  def insert(id: ARID, ar: AR, metadata: Map[String, String]): Future[Int] = {
     try {
-      val mutator = aggr.getMutator(ar)
+      val mutator = aggr.done(ar)
       aggr.checkInvariants(mutator.state)
       repo.insert(id, mutator.state -> mutator.appliedEvents, metadata)
     } catch {

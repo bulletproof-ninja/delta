@@ -1,17 +1,18 @@
 package sampler.aggr.dept
 
-import sampler.aggr.EmpId
+import sampler._
 import ulysses.ddd.StateMutator
 
 case class State(
   name: String,
-  employees: Set[EmpId] = Set.empty
-)
+  employees: Set[EmpId] = Set.empty)
 
-class Mutator(
+class Mutator (
   var state: State = null)
     extends DeptEventHandler
     with StateMutator[DeptEvent, State] {
+
+  protected def process(evt: DeptEvent) = dispatch(evt)
 
   type RT = Unit
 

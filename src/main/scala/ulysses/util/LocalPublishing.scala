@@ -1,31 +1,28 @@
 package ulysses.util
 
-import scuff.Codec
-import scala.concurrent.ExecutionContext
 import scuff.Subscription
-import scuff.concurrent.Threads
-import ulysses.EventStore
-import ulysses.Publishing
-import scuff.PubSub
+import scala.concurrent._
 import scuff.concurrent.StreamCallback
-import ulysses.StreamFilter
+import ulysses.Publishing
 
+/**
+ * Local (JVM) scope Publishing.
+ */
 trait LocalPublishing[ID, EVT, CH]
     extends Publishing[ID, EVT, CH] {
 
-  private[this] lazy val pubSub = new PubSub[TXN, TXN]
+  private[this] val pubSub = new scuff.PubSub[TXN, TXN](publishCtx)
 
   protected def publish(txn: TXN) = pubSub.publish(txn)
 
-  def subscribe(
-    filter: StreamFilter[ID, EVT, CH] = StreamFilter.Everything())(
-      callback: StreamCallback[TXN]): Subscription = {
-    val subscription = pubSub.subscribe(filter.allowed)(callback)
-    new Subscription {
-      def cancel(): Unit = {
-        subscription.cancel()
-      }
+  def subscribe(selector: Selector)(
+    callback: TXN => Unit): Subscription = {
+    val sc = new StreamCallback[TXN] {
+      def onNext(txn: TXN) = callback(txn)
+      def onError(th: Throwable) = th.printStackTrace(System.err)
+      def onCompleted() = ()
     }
+    pubSub.subscribe(selector.include)(sc)
   }
 
 }

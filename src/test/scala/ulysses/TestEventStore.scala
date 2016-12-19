@@ -9,6 +9,7 @@ import scuff.io.{ ByteInputStream, ByteOutputStream }
 import scuff.reflect.Surgeon
 import scuff.JavaSerializer
 import scala.concurrent.ExecutionContext
+import ulysses.util.LocalPublishing
 
 sealed trait Event
 object Event {
@@ -23,8 +24,7 @@ class TestEventStore {
       extends EventCodec[Event, Array[Byte]]
       with NoVersioning[Event, Array[Byte]] {
 
-    def name(cls: ClassEVT): String = cls.getName
-    def channel(cls: ClassEVT): String = cls.getSuperclass.getSimpleName
+    def name(cls: EventClass): String = cls.getName
 
     def encode(evt: Event): Array[Byte] =
       JavaSerializer.encode(evt)
@@ -32,12 +32,15 @@ class TestEventStore {
       JavaSerializer.decode(data).asInstanceOf[Event]
   }
 
-  private[this] val es = new util.TransientEventStore[Symbol, Event, String, Array[Byte]](ExecutionContext.global)
+  private[this] val es = new util.TransientEventStore[Symbol, Event, String, Array[Byte]](
+      RandomDelayExecutionContext) with LocalPublishing[Symbol, Event, String] {
+    def publishCtx = RandomDelayExecutionContext
+  }
 
   @Test
   def serialization {
     val wallClock = System.currentTimeMillis
-    val txn = new es.TXN(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), Vector(Event.AgeChanged(100), Event.NameChanged("Hansi")))
+    val txn = new es.TXN(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
     val objOut = new ObjectOutputStream(out)
     objOut.writeObject(txn)

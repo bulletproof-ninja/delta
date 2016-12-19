@@ -3,9 +3,11 @@ package sampler.aggr
 import sampler.aggr.emp.EmpEvent
 import ulysses.ddd.StateMutator
 import sampler.aggr.emp.EmployeeRegistered
-import sampler.MyDate
+import sampler._
 import sampler.aggr.emp.EmployeeSalaryChange
 import sampler.aggr.emp.EmployeeTitleChange
+import ulysses.ddd.StateMutator
+import ulysses.ddd.AggregateRoot
 
 case class RegisterEmployee(
   name: String,
@@ -31,6 +33,20 @@ object Employee {
     emp.mutator(EmployeeRegistered(name, cmd.soch, cmd.dob, cmd.annualSalary, title))
     emp
   }
+
+  object Def extends AggregateRoot {
+    type Id = EmpId
+    type Channel = Aggr.Value
+    def channel = Aggr.Empl
+    type Entity = Employee
+    type Event = emp.EmpEvent
+    type State = emp.State
+    def newMutator(state: Option[State]) = new emp.Mutator(state)
+    def init(state: State, mergeEvents: List[Event]) = new Employee(new emp.Mutator(state), mergeEvents)
+    def done(employee: Employee) = employee.mutator
+    def checkInvariants(state: State): Unit = ()
+  }
+
 }
 
 class Employee private[aggr] (

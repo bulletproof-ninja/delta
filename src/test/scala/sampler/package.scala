@@ -1,28 +1,43 @@
-import sampler.aggr.{ Aggregate, DomainEvent, Id }
+
+import sampler.aggr.DomainEvent
 import scuff.serialVersionUID
 import ulysses.EventCodec
 import ulysses.util.ReflectiveDecoder
 import language.implicitConversions
-import ulysses.jdbc.ScalaEnumColumn
-import org.bson.Document
-import org.bson.codecs.EncoderContext
-import org.bson.BsonWriter
-import org.bson.codecs.DecoderContext
-import org.bson.BsonReader
+import sampler.aggr.dept.DeptEvent
+import sampler.aggr.emp.EmpEvent
+import sampler.aggr.Employee
+import sampler.aggr.Department
+import scala.util.Random
+import scala.concurrent._, duration._
 
 package object sampler {
 
+  val isDebug = java.lang.management.ManagementFactory
+    .getRuntimeMXBean
+    .getInputArguments
+    .toString.contains("jdwp")
+
+  val AwaitDuration = if (isDebug) 10.hours else 10.seconds
+
+  implicit class F[T](f: Future[T]) {
+    def await = Await.result(f, AwaitDuration)
+  }
+
   type JSON = String
 
-  implicit def id2uuid(id: Id[_]) = id.uuid
+  implicit def toFuture[T](t: T): Future[T] = Future successful t
+  
+  case class Id[T](int: Int = Random.nextInt)
+  type DeptId = Id[Department]
+  type EmpId = Id[Employee]
 
-  implicit object AggrRootEnum
-    extends ScalaEnumColumn[Aggregate.Root](Aggregate)
+  implicit def id2int(id: Id[_]) = id.int
 
   trait AbstractEventCodec[SF]
       extends EventCodec[DomainEvent, SF] {
 
-    private[this] val eventNames = new ClassValue[String] {
+    private[this] val evtName = new ClassValue[String] {
       def computeValue(cls: Class[_]) = {
         val fullName = cls.getName
         val sepIdx = fullName.lastIndexOf('.', fullName.lastIndexOf('.') - 1)
@@ -30,8 +45,8 @@ package object sampler {
       }
     }
 
-    def name(cls: ClassEVT): String = eventNames.get(cls)
-    def version(cls: ClassEVT): Short = serialVersionUID(cls).toShort
+    def name(cls: EventClass): String = evtName.get(cls)
+    def version(cls: EventClass): Byte = serialVersionUID(cls).toByte
 
   }
 
@@ -47,23 +62,6 @@ package object sampler {
       case evt: aggr.dept.DeptEvent => evt.dispatch(this)
       case evt: aggr.emp.EmpEvent => evt.dispatch(this)
     }
-  }
-
-  object RootBsonCodec extends org.bson.codecs.Codec[Aggregate.Root] {
-    val getEncoderClass = classOf[Aggregate.Value].asInstanceOf[Class[Aggregate.Root]]
-    def encode(writer: BsonWriter, aggr: Aggregate.Root, encoderContext: EncoderContext) {
-      writer.writeString(aggr.toString)
-    }
-    def decode(reader: BsonReader, decoderContext: DecoderContext): Aggregate.Root = {
-      Aggregate fromName reader.readString()
-    }
-  }
-
-  implicit object BsonDomainEventCodec
-      extends AbstractEventCodec[Document] {
-      def encode(evt: DomainEvent) = Document.parse(JsonDomainEventCodec.encode(evt))
-      def decode(name: String, version: Short, data: Document) =
-        JsonDomainEventCodec.decode(name, version, data.toJson)
   }
 
 }

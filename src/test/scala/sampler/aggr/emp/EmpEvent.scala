@@ -3,19 +3,19 @@ package sampler.aggr.emp
 import scuff.DoubleDispatch
 import sampler.MyDate
 import sampler.aggr.DomainEvent
+import ulysses.util.EventHandler
 
 trait EmpEventHandler {
-  def apply(evt: EmpEvent) = evt.dispatch(this)
-
   type RT
+ 
+  def dispatch(evt: EmpEvent) = evt.dispatch(this)
 
   def on(evt: EmployeeRegistered): RT
   def on(evt: EmployeeSalaryChange): RT
   def on(evt: EmployeeTitleChange): RT
 }
 
-sealed abstract class EmpEvent
-  extends DomainEvent
+sealed abstract class EmpEvent extends DomainEvent
   with DoubleDispatch[EmpEventHandler]
 
 @SerialVersionUID(1)

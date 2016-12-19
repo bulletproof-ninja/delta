@@ -2,10 +2,51 @@ plugins {
     id "com.jfrog.bintray" version "1.5"
 }
 
-apply plugin: "scala"
-apply plugin: "maven-publish"
-sourceCompatibility = 1.7
-version = "0.9.0-SNAPSHOT"
+ext {
+    vScala = System.properties.scalaVersion ?: '2.11'
+    vRapture = 2.0
+    vHz = 3.7
+}
+
+allprojects {
+    apply plugin: 'scala'
+    apply plugin: 'eclipse'
+    apply plugin: 'maven-publish'
+    version = "0.9.0-SNAPSHOT"
+
+    sourceCompatibility = 1.7
+    if (vScala == '2.11') {
+        targetCompatibility = 1.7
+    } else {
+        targetCompatibility = 1.8
+    }
+
+    repositories {
+        mavenCentral()
+        jcenter()
+        maven {
+            url "http://dl.bintray.com/nilskp/maven" 
+        }
+    }
+
+    dependencies {
+        testCompile "junit:junit:4.+"
+        testCompile "org.mockito:mockito-all:1.10.+"
+        testCompile "com.propensive:rapture-json-jackson_$vScala:$vRapture.+" 
+
+        compile "nilskp:scuff_$vScala:0.1.5-b1612132306"
+        compileOnly "org.scala-lang:scala-reflect:$vScala.+"
+    }
+}
+
+subprojects {
+    jar {
+        baseName = "${rootProject.name}-${project.name}_$vScala"
+    }
+    dependencies {
+        compile rootProject
+    }
+}
 
 def bintrayVersion = {
     if (version.endsWith('-SNAPSHOT')) {
@@ -18,19 +59,11 @@ def bintrayVersion = {
 }()
 
 task wrapper(type: Wrapper) {
-    gradleVersion = "2.14.1"
-}
-
-repositories {
-    mavenCentral()
-    jcenter()
-    maven {
-        url "http://dl.bintray.com/nilskp/maven" 
-    }
+    gradleVersion = "3.2.1"
 }
 
 jar {
-    baseName = "ulysses_$vScala"
+    baseName = "${rootProject.name}_$vScala"
     manifest {
         attributes "Implementation-Title": "ulysses", "Implementation-Version": version
     }
@@ -55,11 +88,6 @@ publishing {
             from components.java
             artifact sourceJar
             artifact docsJar
-//            pom.withXml { xml ->
-//                xml.asNode().dependencies.dependency.findAll{ ! ['boon','mail'].contains(it.artifactId.text()) }.each { dep ->
-//                    dep.scope[0].value = "provided"
-//                }
-//            }
         }
     }
 }
@@ -79,34 +107,25 @@ bintray {
     }
 }
 
-dependencies {
-    testCompile "junit:junit:4.+"
-    testCompile "org.mockito:mockito-all:1.10.+"
-    testCompile "com.propensive:rapture-json-jackson_$vScala:$vRapture.+" 
-    testCompile "com.h2database:h2:$vH2.+"
-    testCompile "org.apache.derby:derby:$vDerby.+"
-
-    //compile "nilskp:scuff_2.11:0.1.5-b1602271849"
-    compileOnly "org.scala-lang:scala-reflect:$vScala.8"
-    compileOnly "org.mongodb:mongodb-driver-async:$vMongo.+"
-    compileOnly "com.datastax.cassandra:cassandra-driver-core:$vCassandra.+"
-    compileOnly "redis.clients:jedis:$vJedis.+"
+project(':ulysses-cassandra') {
+    dependencies {
+        compile "com.datastax.cassandra:cassandra-driver-core:3.1.+"
+    }
 }
-
-/*
-compileScala {
-    scalaCompileOptions.additionalParameters = [
-        "-feature", "-optimise","–unchecked", "-deprecation","–explaintypes",
-        "–Xdisable-assertions", //"-Xfatal-warnings",
-        "-Ybackend:GenBCode", "-Yclosure-elim",
-    ]
+project(':ulysses-jdbc') {
+    dependencies {
+        testCompile "com.h2database:h2:1.4.+"
+        testCompile "org.apache.derby:derby:10.12.+"
+    }
 }
-
-compileTestScala {
-    scalaCompileOptions.additionalParameters = [
-        "-nowarn",
-        "-Xcheckinit", "-optimise",
-        "-Ybackend:GenBCode", "-Yclosure-elim",
-    ]
+project(':ulysses-mongodb') {
+    dependencies {
+        compile "org.mongodb:mongodb-driver-async:3.3.+"
+    }
 }
-*/
+project(':ulysses-hazelcast') {
+    dependencies {
+        compile "com.hazelcast:hazelcast:$vHz.+"
+        compile "com.hazelcast:hazelcast-scala_$vScala:$vHz.+"
+    }
+}

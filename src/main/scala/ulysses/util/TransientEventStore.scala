@@ -1,29 +1,26 @@
 package ulysses.util
 
-import ulysses._
-import scuff._
-import java.util.Date
-import concurrent._
-import scala.util._
-import java.util.concurrent.TimeUnit
-import scala.annotation.implicitNotFound
-import language.implicitConversions
-import scala.concurrent._
-import collection.{ Seq => aSeq, Map => aMap }
-import collection.concurrent.TrieMap
+import scala.collection.concurrent.TrieMap
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.language.implicitConversions
+import scala.util.{ Failure, Success }
+
+import scuff.concurrent.StreamCallback
+import ulysses.{ EventCodec, EventStore }
+import scala.util.Try
 
 /**
   * Non-persistent implementation, probably only useful for testing.
   */
-class TransientEventStore[ID, EVT, CH, SF](
-    execCtx: ExecutionContext)(implicit codec: EventCodec[EVT, SF])
+abstract class TransientEventStore[ID, EVT, CH, SF](
+  execCtx: ExecutionContext)(implicit codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT, CH] {
 
-  private def Txn(id: ID, rev: Int, ch: CH, tick: Long, metadata: Map[String, String], events: Seq[EVT]): Txn = {
+  private def Txn(id: ID, rev: Int, ch: CH, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
     val eventsSF = events.map { evt =>
       (codec.name(evt), codec.version(evt), codec.encode(evt))
     }
-    new Txn(id, rev, ch, tick, metadata, eventsSF.toVector)
+    new Txn(id, rev, ch, tick, metadata, eventsSF)
   }
   private class Txn(
       id: ID,
@@ -31,7 +28,7 @@ class TransientEventStore[ID, EVT, CH, SF](
       ch: CH,
       val tick: Long,
       metadata: Map[String, String],
-      eventsSF: Vector[(String, Short, SF)]) {
+      eventsSF: List[(String, Byte, SF)]) {
     def toTransaction: TXN = {
       val events = eventsSF.map {
         case (name, version, data) =>
@@ -43,8 +40,6 @@ class TransientEventStore[ID, EVT, CH, SF](
 
   @inline
   implicit private def ec = execCtx
-
-  protected def publishCtx = execCtx
 
   private[this] val txnMap = new TrieMap[ID, Vector[Txn]]
 
@@ -61,7 +56,7 @@ class TransientEventStore[ID, EVT, CH, SF](
 
   def commit(
     channel: CH, stream: ID, revision: Int, tick: Long,
-    events: aSeq[EVT], metadata: aMap[String, String]): Future[TXN] = Future {
+    events: List[EVT], metadata: Map[String, String]): Future[TXN] = Future {
     val transactions = txnMap.getOrElse(stream, Vector[Txn]())
     val expectedRev = transactions.size
     if (revision == expectedRev) {
@@ -84,11 +79,12 @@ class TransientEventStore[ID, EVT, CH, SF](
     }
   }
 
-  private def withCallback(callback: StreamCallback[TXN])(thunk: => Unit): Unit =
-    Future(thunk).onComplete {
+  private def withCallback(callback: StreamCallback[TXN])(thunk: => Unit): Unit = Future {
+    Try(thunk) match {
       case Success(_) => callback.onCompleted()
-      case Failure(t) => callback.onError(t)
+      case Failure(th) => callback.onError(th)
     }
+  }
 
   def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
     val txns = txnMap.getOrElse(stream, Vector.empty)
@@ -104,15 +100,17 @@ class TransientEventStore[ID, EVT, CH, SF](
     }
     sliced.map(_.toTransaction).foreach(callback.onNext)
   }
-  def replay(filter: StreamFilter[ID, EVT, CH])(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
-    txnMap.valuesIterator.flatten.map(_.toTransaction)
-      .filter(filter.allowed)
-      .toSeq.sortBy(_.tick)
-      .foreach(callback.onNext _)
+  def query(selector: Selector)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
+    txnMap.valuesIterator.flatten
+      .map(_.toTransaction)
+      .filter(selector.include)
+      .foreach(callback.onNext)
   }
-  def replaySince(sinceTick: Long, filter: StreamFilter[ID, EVT, CH])(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
-    txnMap.valuesIterator.flatten.map(_.toTransaction)
-      .filter(txn => filter.allowed(txn) && txn.tick >= sinceTick)
-      .toSeq.sortBy(_.tick).foreach(callback.onNext _)
+  def querySince(sinceTick: Long, selector: Selector)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
+    txnMap.valuesIterator.flatten
+      .filter(_.tick >= sinceTick)
+      .map(_.toTransaction)
+      .filter(selector.include)
+      .foreach(callback.onNext)
   }
 }

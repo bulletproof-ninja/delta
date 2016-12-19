@@ -10,14 +10,12 @@ import scala.util.control.NonFatal
  */
 trait FailSafeTransactionHandler[ID, EVT, CH] extends (Transaction[ID, EVT, CH]=> Unit) {
 
-  type TXN = Transaction[ID, EVT, CH]
-
   /** Determine if stream is failed. */
   protected def isFailed(stream: ID): Boolean
   /** Mark stream as failed. Re-throw exception if propagation desirable. */
   protected def markFailed(stream: ID, ch: CH, t: Throwable)
 
-  abstract override def apply(txn: TXN) {
+  abstract override def apply(txn: Transaction[ID, EVT, CH]) {
     if (!isFailed(txn.stream)) try {
       super.apply(txn)
     } catch {
