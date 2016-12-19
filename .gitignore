@@ -1,2 +1,8 @@
 /bin/
 /.*
+!/.gitignore
+*~
+/build/
+/*/build/
+/*/.*
+
