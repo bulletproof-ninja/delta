@@ -30,8 +30,7 @@ import ulysses.EventSource
 import scala.concurrent.Promise
 import ulysses.EventCodec
 import scuff.reflect.Surgeon
-import sampler.JsonDomainEventCodec
-import sampler.Aggr
+import sampler._
 
 object TestSampler {
   val h2Name = "h2db"
