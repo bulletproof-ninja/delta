@@ -144,7 +144,7 @@ class TestCollege {
       }
       txn.events.foreach(evtHandler)
     }
-    done.await
+    done.await(60.seconds)
     allStudents.values.foreach {
       case (_, name) => assertNotEquals(Unknown, name)
     }
