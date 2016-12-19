@@ -34,6 +34,8 @@ trait EventSource[ID, EVT, CH] {
     selector: Selector = Everything)(
       callback: TXN => Unit): Subscription
 
+  type CEVT = Class[_ <: EVT]
+
   sealed abstract class Selector {
     def include(txn: TXN): Boolean
   }
@@ -45,9 +47,9 @@ trait EventSource[ID, EVT, CH] {
     require(channels.nonEmpty)
     def include(txn: TXN) = channels.contains(txn.channel)
   }
-  case class EventSelector(byChannel: Map[CH, Set[C[EVT]]])
+  case class EventSelector(byChannel: Map[CH, Set[CEVT]])
       extends Selector {
-    def this(chEvt: (CH, Set[C[EVT]]), more: (CH, Set[C[EVT]])*) =
+    def this(chEvt: (CH, Set[CEVT]), more: (CH, Set[CEVT])*) =
       this(Map((chEvt :: more.toList): _*))
     require(byChannel.nonEmpty)
     require(byChannel.forall(_._2.nonEmpty), s"No events: ${byChannel.filter(_._2.isEmpty).map(_._1).mkString(", ")}")
@@ -59,10 +61,8 @@ trait EventSource[ID, EVT, CH] {
     def include(txn: TXN) = txn.stream == stream && txn.channel == channel
   }
 
-  type C[EVT] = Class[_ <: EVT]
-
   object Selector {
-    def apply(ch: CH, one: C[EVT], others: C[EVT]*) =
+    def apply(ch: CH, one: CEVT, others: CEVT*) =
       new EventSelector(Map(ch -> (one +: others).toSet))
     def apply(one: CH, others: CH*) =
       new ChannelSelector(one, others: _*)
