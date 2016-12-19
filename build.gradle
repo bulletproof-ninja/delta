@@ -8,6 +8,11 @@ ext {
     vHz = 3.7
 }
 
+tasks.withType(ScalaCompile) {
+    def args = System.properties.compilerArgs ?: "-feature -deprecation -explaintypes -unchecked -Xlint"
+    scalaCompileOptions.additionalParameters = args.split(" ").toList()
+}
+
 allprojects {
     apply plugin: 'scala'
     apply plugin: 'eclipse'
