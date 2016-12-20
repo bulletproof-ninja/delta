@@ -131,6 +131,5 @@ project(':ulysses-mongodb') {
 project(':ulysses-hazelcast') {
     dependencies {
         compile "com.hazelcast:hazelcast:3.7.4"
-        compile "com.hazelcast:hazelcast-scala_$vScala:3.7.4"
     }
 }
