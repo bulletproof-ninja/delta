@@ -1,15 +1,14 @@
-package ulysses
+package ulysses.testing
 
 import java.io.{ ObjectInputStream, ObjectOutputStream }
 import scala.language.implicitConversions
-import org.junit.{ Before, Test }
+import org.junit.Test
 import org.junit.Assert._
-import scuff.concurrent.Threads
 import scuff.io.{ ByteInputStream, ByteOutputStream }
-import scuff.reflect.Surgeon
 import scuff.JavaSerializer
-import scala.concurrent.ExecutionContext
 import ulysses.util.LocalPublishing
+import ulysses._
+import ulysses.NoVersioning
 
 sealed trait Event
 object Event {

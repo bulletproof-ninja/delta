@@ -37,7 +37,7 @@ import sampler.MyDate
 
 class TestSampler extends sampler.TestSampler {
 
-  override val es = {
+  override lazy val es = {
     import ulysses.mongo._
     import com.mongodb.async.client._
     val client = MongoClients.create()
@@ -49,5 +49,10 @@ class TestSampler extends sampler.TestSampler {
       txnCollection) with LocalPublishing[Int, DomainEvent, sampler.Aggr.Value] {
       def publishCtx = global
     }
+  }
+
+  @Test
+  def mock {
+    assertTrue(true)
   }
 }

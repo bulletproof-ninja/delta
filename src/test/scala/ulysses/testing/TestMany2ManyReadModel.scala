@@ -1,4 +1,4 @@
-package ulysses
+package ulysses.testing
 
 class TestMany2ManyReadModel {
 

@@ -11,28 +11,8 @@ import sampler.aggr.Department
 import scala.util.Random
 import scala.concurrent._, duration._
 
-package object sampler {
-
-  val isDebug = java.lang.management.ManagementFactory
-    .getRuntimeMXBean
-    .getInputArguments
-    .toString.contains("jdwp")
-
-  val AwaitDuration = if (isDebug) 10.hours else 10.seconds
-
-  implicit class F[T](f: Future[T]) {
-    def await = Await.result(f, AwaitDuration)
-  }
-
-  type JSON = String
-
-  implicit def toFuture[T](t: T): Future[T] = Future successful t
-  
+package sampler {
   case class Id[T](int: Int = Random.nextInt)
-  type DeptId = Id[Department]
-  type EmpId = Id[Employee]
-
-  implicit def id2int(id: Id[_]) = id.int
 
   trait AbstractEventCodec[SF]
       extends EventCodec[DomainEvent, SF] {
@@ -49,6 +29,30 @@ package object sampler {
     def version(cls: EventClass): Byte = serialVersionUID(cls).toByte
 
   }
+
+}
+
+package object sampler {
+
+  val isDebug = java.lang.management.ManagementFactory
+    .getRuntimeMXBean
+    .getInputArguments
+    .toString.contains("jdwp")
+
+  val AwaitDuration = if (isDebug) 60.hours else 60.seconds
+
+  implicit class F[T](f: Future[T]) {
+    def await = Await.result(f, AwaitDuration)
+  }
+
+  type JSON = String
+
+  implicit def toFuture[T](t: T): Future[T] = Future successful t
+
+  type DeptId = Id[Department]
+  type EmpId = Id[Employee]
+
+  implicit def id2int(id: Id[_]) = id.int
 
   implicit object JsonDomainEventCodec
       extends ReflectiveDecoder[DomainEvent, JSON]

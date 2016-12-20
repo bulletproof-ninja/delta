@@ -1,23 +1,17 @@
-package ulysses
+package ulysses.testing
 
 import scala.language.implicitConversions
-
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.{ MILLISECONDS, SECONDS }
-
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.Seq
 import scala.concurrent.{ Future, Promise }
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.{ Duration, DurationInt }
-import scala.reflect.classTag
 import scala.util.{ Failure, Success, Try }
-
 import org.junit._
 import org.junit.Assert._
-
-import rapture.data.ForcedConversion.forceConversion
 import rapture.json.jsonBackends.jackson._
 import rapture.json.jsonStringContext
 import scuff._
@@ -25,8 +19,12 @@ import scuff.ddd.{ Repository, UnknownIdException }
 import scuff.reflect.Surgeon
 import ulysses.ddd._
 import ulysses.util._
-import scala.{ SerialVersionUID => version }
 import ulysses.util.LocalPublishing
+import ulysses.EventCodec
+import ulysses.EventStore
+import ulysses.NoVersioning
+import ulysses.SystemClock
+import scala.{ SerialVersionUID => version }
 
 trait AggrEventHandler {
   type RT
@@ -50,8 +48,8 @@ final class AggrStateMutator(var state: AggrState = null)
     surgeon.getAll[List[AggrEvent]].head._2.reverse
   }
 
-//  def process(evt: AggrEvent) = dispatch(evt)
-  
+  //  def process(evt: AggrEvent) = dispatch(evt)
+
   type RT = Unit
 
   def on(evt: AggrCreated) {
@@ -86,8 +84,8 @@ abstract class AbstractEventStoreRepositoryTest {
     def decode(map: Map[String, String]): Timestamp = Timestamp.parseISO(map(name)).get
   }
 
-  var es: EventStore[String, AggrEvent, Unit] = _
-  var repo: Repository[String, Aggr] = _
+  @volatile var es: EventStore[String, AggrEvent, Unit] = _
+  @volatile var repo: Repository[String, Aggr] = _
 
   private def doAsync(f: Promise[Any] => Unit) {
     val something = Promise[Any]
@@ -409,7 +407,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   @Before
   def setup {
     es = new TransientEventStore[String, AggrEvent, Unit, String](
-        RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
+      RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
       def publishCtx = RandomDelayExecutionContext
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, SnapshotStore[String, AggrState]#Snapshot]

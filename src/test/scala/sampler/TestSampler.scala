@@ -30,10 +30,11 @@ import ulysses.util.TransientEventStore
 import sampler.aggr.emp.EmpEvent
 import sampler.aggr.emp.EmpEvent
 import sampler.aggr.dept.DeptEvent
+import ulysses.testing.RandomDelayExecutionContext
 
 class TestSampler {
 
-  val es: EventStore[Int, DomainEvent, Aggr.Value] =
+  lazy val es: EventStore[Int, DomainEvent, Aggr.Value] =
     new TransientEventStore[Int, DomainEvent, Aggr.Value, JSON](
       RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
     def publishCtx = RandomDelayExecutionContext

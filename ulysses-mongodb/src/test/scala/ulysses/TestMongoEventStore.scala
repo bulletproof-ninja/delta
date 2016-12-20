@@ -6,6 +6,7 @@ import ulysses.mongo.{ StringCodec, UnitCodec }
 import org.junit._, Assert._
 import ulysses.util._
 import ulysses.ddd._
+import ulysses.testing._
 import scuff.concurrent.Threads
 
 object TestMongoEventStore {
@@ -13,13 +14,13 @@ object TestMongoEventStore {
   import org.bson.Document
   import ulysses.mongo._
 
-  var coll: MongoCollection[Document] = _
-  private var client: MongoClient = _
+  @volatile var coll: MongoCollection[Document] = _
+  @volatile private var client: MongoClient = _
 
   @BeforeClass
   def setupClass {
-    val poolSettings = ConnectionPoolSettings.builder.maxWaitQueueSize(200).maxSize(3).build()
-    val settings = MongoClientSettings.builder.connectionPoolSettings(poolSettings).build()
+    val poolSettings = ConnectionPoolSettings.builder.maxWaitQueueSize(200).maxSize(3).build().ensuring(_ != null)
+    val settings = MongoClientSettings.builder.connectionPoolSettings(poolSettings).build().ensuring(_ != null)
     client = MongoClients.create(settings)
     coll = client.getDatabase("test").getCollection(getClass.getName)
   }
@@ -65,14 +66,14 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
 
   @Before
   def setup {
-    val result = deleteAll(coll)
+    val result = deleteAll()
     assertTrue(result.wasAcknowledged)
     es = new MongoEventStore[String, AggrEvent, Unit](coll) with LocalPublishing[String, AggrEvent, Unit] {
       def publishCtx = Threads.DefaultScheduler
     }
     repo = new EntityRepository(Threads.DefaultScheduler, SystemClock, TheOneAggr)(es)
   }
-  private def deleteAll(coll: MongoCollection[_]): DeleteResult = {
+  private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>
       coll.deleteMany(new Document, callback)
     }
@@ -80,7 +81,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   }
   @After
   def teardown {
-    val result = deleteAll(coll)
+    val result = deleteAll()
     assertTrue(result.wasAcknowledged)
   }
 }

@@ -11,11 +11,6 @@ import sampler.aggr.emp.EmpEvent
 
 package object jdbc {
 
-  implicit object AggrRootColumn
-      extends ulysses.jdbc.ColumnType[sampler.Aggr.Value] {
-    def typeName = "VARCHAR(255)"
-    def readFrom(rs: ResultSet, col: Int) =
-      Aggr withName rs.getString(col)
-  }
+  implicit object AggrRootColumn extends ScalaEnumColumn[sampler.Aggr.Value](sampler.Aggr)
 
 }

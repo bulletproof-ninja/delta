@@ -1,7 +1,8 @@
-package ulysses
+package ulysses.testing
 
 import scuff._
-import scala.concurrent._, duration._
+import scala.concurrent._
+import duration._
 import scala.util.Random
 
 object RandomDelayExecutionContext

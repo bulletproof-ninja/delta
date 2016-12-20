@@ -20,13 +20,14 @@ import scala.util.Try
 import scala.util.Failure
 import scala.util.Success
 import ulysses.util.LocalPublishing
+import ulysses.testing.RandomDelayExecutionContext
 
 class TestCollege {
 
   implicit def sem2fut(s: Semester): Future[Semester] = Future successful s
   implicit def stu2fut(s: Student): Future[Student] = Future successful s
 
-  val eventStore: EventStore[Int, CollegeEvent, String] =
+  lazy val eventStore: EventStore[Int, CollegeEvent, String] =
     new TransientEventStore[Int, CollegeEvent, String, Array[Byte]](
       RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] {
       def publishCtx = RandomDelayExecutionContext
@@ -58,7 +59,7 @@ class TestCollege {
         val student = Student(RegisterStudent(name))
         StudentRepository.insert(id, student).map(_ => id)
       }
-    Future.sequence(ids).await
+    Future.sequence(ids).await(60.seconds)
   }
   // Count not exact, since we can potentially generate id clashes
   private def addSemesters(approx: Int) = {

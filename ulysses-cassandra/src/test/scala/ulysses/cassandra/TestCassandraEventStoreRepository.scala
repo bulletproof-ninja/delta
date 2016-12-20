@@ -3,17 +3,17 @@ package ulysses.cassandra
 import org.junit._, Assert._
 
 import com.datastax.driver.core.{ Cluster, Session, SocketOptions }
-import ulysses.util.ReflectiveDecoder
+import ulysses.util._
 import scala.reflect.{ ClassTag, classTag }
 import concurrent.ExecutionContext.global
-import ulysses.util.LocalPublishing
 import ulysses.SystemClock
 import scala.util.Try
 import ulysses.ddd.EntityRepository
 import ulysses._
+import ulysses.testing._
 
 @Ignore
-class TestCassandraEventStoreRepository extends AbstractEventStoreRepositoryTest {
+class TestCassandraEventStoreRepository extends ulysses.testing.AbstractEventStoreRepositoryTest {
 
   implicit object AggrEventCodec
       extends ReflectiveDecoder[AggrEvent, String]
