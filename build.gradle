@@ -4,8 +4,6 @@ plugins {
 
 ext {
     vScala = System.properties.scalaVersion ?: '2.11'
-    vRapture = 2.0
-    vHz = 3.7
 }
 
 tasks.withType(ScalaCompile) {
@@ -49,7 +47,7 @@ allprojects {
         compileOnly "org.scala-lang:scala-reflect:$vScala.+"
         testCompile "junit:junit:4.+"
         testCompile "org.mockito:mockito-all:1.10.+"
-        testCompile "com.propensive:rapture-json-jackson_$vScala:$vRapture.+" 
+        testCompile "com.propensive:rapture-json-jackson_$vScala:2.0.+" 
     }
 
     jar {
@@ -116,7 +114,7 @@ task docsJar(type: Jar, dependsOn: scaladoc) {
 
 project(':ulysses-cassandra') {
     dependencies {
-        compile "com.datastax.cassandra:cassandra-driver-core:3.1.+"
+        compile "com.datastax.cassandra:cassandra-driver-core:3.1.2"
     }
 }
 project(':ulysses-jdbc') {
@@ -127,12 +125,12 @@ project(':ulysses-jdbc') {
 }
 project(':ulysses-mongodb') {
     dependencies {
-        compile "org.mongodb:mongodb-driver-async:3.3.+"
+        compile "org.mongodb:mongodb-driver-async:3.4.0"
     }
 }
 project(':ulysses-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:$vHz.+"
-        compile "com.hazelcast:hazelcast-scala_$vScala:$vHz.+"
+        compile "com.hazelcast:hazelcast:3.7.4"
+        compile "com.hazelcast:hazelcast-scala_$vScala:3.7.4"
     }
 }
