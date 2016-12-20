@@ -5,6 +5,7 @@ import scala.reflect._
 import java.math.BigInteger
 import java.sql.ResultSet
 import scuff.Numbers._
+import java.io.ByteArrayInputStream
 
 package object jdbc {
   object UUIDBinaryColumn extends ColumnType[UUID] {
@@ -42,6 +43,14 @@ package object jdbc {
     def typeName = "NUMERIC"
     def readFrom(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
     override def writeAs(bint: BigInt) = new java.math.BigDecimal(bint.underlying)
+  }
+  implicit object ByteArrayColumn extends ColumnType[Array[Byte]] {
+    def typeName = "BLOB"
+    def readFrom(row: ResultSet, col: Int): Array[Byte] = {
+      val blob = row.getBlob(col)
+      blob.getBytes(0L, blob.length.toInt)
+    }
+    override def writeAs(bytes: Array[Byte]) = new ByteArrayInputStream(bytes)
   }
   implicit object UnitColumn extends ColumnType[Unit] {
     private[this] final val Zero = java.lang.Byte.valueOf(0.asInstanceOf[Byte])
