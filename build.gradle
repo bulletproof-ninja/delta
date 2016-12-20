@@ -33,15 +33,17 @@ allprojects {
             url "http://dl.bintray.com/nilskp/maven" 
         }
     }
-
     dependencies {
-        testCompile "junit:junit:4.+"
-        testCompile "org.mockito:mockito-all:1.10.+"
-        testCompile "com.propensive:rapture-json-jackson_$vScala:$vRapture.+" 
-
-        compile "nilskp:scuff_$vScala:0.1.5-b1612132306"
+        compileOnly "org.scala-lang:scala-library:$vScala.+"
         compileOnly "org.scala-lang:scala-reflect:$vScala.+"
+	    testCompile "junit:junit:4.+"
+	    testCompile "org.mockito:mockito-all:1.10.+"
+	    testCompile "com.propensive:rapture-json-jackson_$vScala:$vRapture.+" 
     }
+}
+
+dependencies {
+    compile "nilskp:scuff_$vScala:0.1.5-b1612132306"
 }
 
 subprojects {
@@ -49,6 +51,7 @@ subprojects {
         baseName = "${rootProject.name}-${project.name}_$vScala"
     }
     dependencies {
+        testCompile rootProject.sourceSets.test.output
         compile rootProject
     }
 }
@@ -64,7 +67,7 @@ def bintrayVersion = {
 }()
 
 task wrapper(type: Wrapper) {
-    gradleVersion = "3.2.1"
+    gradleVersion = '3.2.1'
 }
 
 jar {
