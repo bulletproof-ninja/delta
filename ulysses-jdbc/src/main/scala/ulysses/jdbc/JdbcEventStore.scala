@@ -223,7 +223,6 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
 
   def query(selector: Selector)(callback: StreamCallback[TXN]): Unit =
     future(callback) {
-      import Selector._
       forQuery { implicit conn =>
         val select = selector match {
           case Everything => dialect.selectTransactions() _
