@@ -8,9 +8,12 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import scuff._
 
-class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]( final val schema: Option[String]) {
+object DefaultDialect {
+  def apply[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null) =
+    new Dialect[ID, EVT, CH, SF](schema.optional)
+}
 
-  def this(schema: String) = this(schema.optional)
+class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] protected[jdbc] ( final val schema: Option[String]) {
 
   private[jdbc] def idType = implicitly[ColumnType[ID]]
   private[jdbc] def chType = implicitly[ColumnType[CH]]
