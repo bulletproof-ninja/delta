@@ -16,6 +16,7 @@ import ulysses.jdbc.h2.H2Dialect
 import ulysses.util.LocalPublishing
 import ulysses.testing.RandomDelayExecutionContext
 import scala.util.Random
+import java.sql.Connection
 
 object TestSampler {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
@@ -32,8 +33,12 @@ final class TestSampler extends sampler.TestSampler {
     val sql = new H2Dialect[Int, DomainEvent, Aggr.Value, JSON](None)
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${TestSampler.h2Name}")
-    new JdbcEventStore(ds, sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
+    new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
       def publishCtx = RandomDelayExecutionContext
+      protected def useConnection[R](thunk: Connection => R): R = {
+        val conn = ds.getConnection
+        try thunk(conn) finally conn.close()
+      }
     }
   }
 

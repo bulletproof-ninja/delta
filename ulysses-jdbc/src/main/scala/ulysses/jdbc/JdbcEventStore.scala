@@ -1,18 +1,12 @@
 package ulysses.jdbc
 
-import ulysses._
-import scala.reflect.{ ClassTag, classTag }
-import java.util.{ UUID, List => JList, ArrayList }
-import scuff.concurrent._
-import scala.concurrent._
-import scala.util.{ Try, Success, Failure }
-import collection.JavaConverters._
-import java.sql.Connection
-import javax.sql.DataSource
-import java.sql.PreparedStatement
-import scala.util.control.NonFatal
-import java.sql.SQLException
-import java.sql.ResultSet
+import java.sql.{ Connection, ResultSet, SQLException }
+
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.{ Failure, Success, Try }
+
+import scuff.concurrent.{ StreamCallback, Threads }
+import ulysses.{ EventCodec, EventStore }
 
 private object JdbcEventStore {
   lazy val DefaultThreadPool = {
@@ -23,11 +17,12 @@ private object JdbcEventStore {
 }
 
 abstract class JdbcEventStore[ID, EVT, CH, SF](
-  dataSource: DataSource,
   dialect: Dialect[ID, EVT, CH, SF],
   blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool,
   ensureSchema: Boolean = true)(implicit codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT, CH] {
+
+  protected def useConnection[R](thunk: Connection => R): R
 
   if (ensureSchema) ensureSchema()
 
@@ -51,14 +46,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
   protected def prepareQuery(conn: Connection) {
     conn.setReadOnly(true)
   }
-  protected def useConnection[R](thunk: Connection => R): R = {
-    val conn = dataSource.getConnection
-    try {
-      thunk(conn)
-    } finally {
-      conn.close()
-    }
-  }
+
   protected def forUpdate[R](thunk: Connection => R): R = {
     useConnection { conn =>
       prepareUpdate(conn)
