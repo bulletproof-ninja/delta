@@ -1,11 +1,11 @@
 package ulysses.hazelcast
 
-import com.hazelcast.core._
-import ulysses.Publishing
-import scala.util.control.NonFatal
-import scuff.Subscription
 import scala.util.Try
-import ulysses.EventCodec
+
+import com.hazelcast.core.{ ITopic, Message, MessageListener }
+
+import scuff.Subscription
+import ulysses.Publishing
 import concurrent.blocking
 
 trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
