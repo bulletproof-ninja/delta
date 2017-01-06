@@ -6,13 +6,16 @@ import scala.util.control.NonFatal
 import scuff.Subscription
 import scala.util.Try
 import ulysses.EventCodec
+import concurrent.blocking
 
 trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
 
   protected def allChannels: Set[CH]
   protected def getTopic(ch: CH): ITopic[TXN]
 
-  protected def publish(txn: TXN): Unit = getTopic(txn.channel).publish(txn)
+  protected def publish(txn: TXN): Unit = blocking {
+    getTopic(txn.channel).publish(txn)
+  }
 
   private class Subscriber(selector: Selector, callback: TXN => Unit)
       extends MessageListener[TXN] {
