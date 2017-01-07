@@ -116,13 +116,12 @@ class EventStoreRepository[ESID, EVT, CH, S <: AnyRef, RID <% ESID](
         Future failed new IllegalStateException(s"Nothing to insert, $id has no events.")
       } else {
         val tick = clock.nextTick()
-        val committedRevision = eventStore.commit(channel, id, 0, tick, events, metadata).map(_.revision).recoverWith {
+        val committedRevision = eventStore.commit(channel, id, 0, tick, events, metadata).map(_.revision) recover {
           case eventStore.DuplicateRevisionException(ct) =>
-            if (ct.events == events) {
-              // Idempotent insert
-              Future successful ct.revision
+            if (ct.events == events) { // Idempotent insert
+              ct.revision
             } else {
-              Future failed new DuplicateIdException(id)
+              throw new DuplicateIdException(id)
             }
         }
         committedRevision.foreach(rev => snapshots.save(id, new Snapshot(state, rev, tick)))
