@@ -59,6 +59,7 @@ package object jdbc {
     def readFrom(row: ResultSet, col: Int) = row.getBytes(col)
   }
 
+  object BlobColumn extends ColumnType[Array[Byte]] {
     def typeName = "BLOB"
     def readFrom(row: ResultSet, col: Int): Array[Byte] = {
       val blob = row.getBlob(col)
@@ -66,6 +67,7 @@ package object jdbc {
     }
     override def writeAs(bytes: Array[Byte]) = new ByteArrayInputStream(bytes)
   }
+
   implicit object UnitColumn extends ColumnType[Unit] {
     private[this] final val Zero = java.lang.Byte.valueOf(0.asInstanceOf[Byte])
     def typeName = "TINYINT"
