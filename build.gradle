@@ -88,7 +88,7 @@ allprojects {
 }
 
 dependencies {
-    compile "nilskp:scuff_$vScala:0.1.5-b1612132306"
+    compile "nilskp:scuff_$vScala:0.1.5-b1701061638"
 }
 
 subprojects {
