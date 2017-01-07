@@ -1,7 +1,8 @@
 package ulysses.jdbc.mysql
 
-import ulysses.jdbc.ColumnType
 import ulysses.EventCodec
+import ulysses.jdbc._
+
 import java.sql.Connection
 import java.sql.SQLException
 
@@ -11,7 +12,7 @@ import java.sql.SQLException
 class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]
     extends ulysses.jdbc.Dialect[ID, EVT, CH, SF](None) {
 
-  override def metadataValType = "VARCHAR(32767)"
+  override val metadataValType = new VarCharColumn(Short.MaxValue).typeName
 
   override def channelIndexDDL = super.channelIndexDDL.replace("IF NOT EXISTS ", "")
   override def tickIndexDDL = super.channelIndexDDL.replace("IF NOT EXISTS ", "")
