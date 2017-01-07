@@ -154,7 +154,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
         val name = rs.getString(col.event_name)
         val version = rs.getByte(col.event_version)
         val data = dialect.sfType.readFrom(rs, col.event_data)
-        events :+= codec.decode(name, version, data)
+        events = codec.decode(name, version, data) :: events
       }
       lastEvtIdx = evtIdx
       val nextRow =
@@ -166,7 +166,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       }
       continue = nextRow.isDefined
     } while (continue && nextTxnKey.isEmpty)
-    onNext(Transaction(tick, channel, stream, revision, metadata, events))
+    onNext(Transaction(tick, channel, stream, revision, metadata, events.reverse))
     nextTxnKey match {
       case Some((stream, revision)) =>
         processTransactions(singleStream, onNext)(stream, revision, rs, col)
