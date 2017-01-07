@@ -121,6 +121,7 @@ project(':ulysses-jdbc') {
     dependencies {
         testCompile "com.h2database:h2:1.4.+"
         testCompile "org.apache.derby:derby:10.12.+"
+        testCompile "mysql:mysql-connector-java:5.1.40"
     }
 }
 project(':ulysses-mongodb') {
