@@ -35,8 +35,14 @@ package object jdbc {
     def typeName = "INT"
     def readFrom(row: ResultSet, col: Int) = row.getInt(col)
   }
-  implicit object StringColumn extends ColumnType[String] {
-    def typeName = "VARCHAR"
+
+  class VarCharColumn(len: String = "") extends ColumnType[String] {
+    def this(maxLen: Int) = this(maxLen.toString)
+    val typeName = len match {
+      case "" => "VARCHAR"
+      case _ => s"VARCHAR($len)"
+    }
+
     def readFrom(row: ResultSet, col: Int) = row.getString(col)
   }
   implicit object BigIntColumn extends ColumnType[BigInt] {
@@ -44,7 +50,15 @@ package object jdbc {
     def readFrom(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
     override def writeAs(bint: BigInt) = new java.math.BigDecimal(bint.underlying)
   }
-  implicit object ByteArrayColumn extends ColumnType[Array[Byte]] {
+  class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
+    def this(maxLen: Int) = this(maxLen.toString)
+    val typeName = len match {
+      case "" => "VARBINARY"
+      case _ => s"VARBINARY($len)"
+    }
+    def readFrom(row: ResultSet, col: Int) = row.getBytes(col)
+  }
+
     def typeName = "BLOB"
     def readFrom(row: ResultSet, col: Int): Array[Byte] = {
       val blob = row.getBlob(col)
