@@ -118,7 +118,7 @@ class EventStoreRepository[ESID, EVT, CH, S <: AnyRef, RID <% ESID](
         val tick = clock.nextTick()
         val committedRevision = eventStore.commit(channel, id, 0, tick, events, metadata).map(_.revision).recoverWith {
           case eventStore.DuplicateRevisionException(ct) =>
-            if (ct.events == events && ct.metadata == metadata) {
+            if (ct.events == events) {
               // Idempotent insert
               Future successful ct.revision
             } else {
