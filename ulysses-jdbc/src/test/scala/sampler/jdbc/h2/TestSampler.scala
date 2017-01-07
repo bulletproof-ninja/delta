@@ -12,7 +12,7 @@ import sampler.aggr.DomainEvent
 import sampler.jdbc.AggrRootColumn
 import scuff.concurrent.Threads
 import ulysses.jdbc._
-import ulysses.jdbc.h2.H2Dialect
+import ulysses.jdbc.h2._
 import ulysses.util.LocalPublishing
 import ulysses.testing.RandomDelayExecutionContext
 import scala.util.Random
@@ -25,14 +25,17 @@ object TestSampler {
   def cleanup {
     h2File.delete()
   }
+  implicit object StringColumn extends VarCharColumn
 }
 
 final class TestSampler extends sampler.TestSampler {
 
+  import TestSampler._
+
   override lazy val es = {
     val sql = new H2Dialect[Int, DomainEvent, Aggr.Value, JSON](None)
     val ds = new JdbcDataSource
-    ds.setURL(s"jdbc:h2:./${TestSampler.h2Name}")
+    ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
       def publishCtx = RandomDelayExecutionContext
       protected def useConnection[R](thunk: Connection => R): R = {
