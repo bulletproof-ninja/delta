@@ -36,11 +36,7 @@ class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] protected[jdb
 
   protected def executeDDL(conn: Connection, ddl: String) {
     val stm = conn.createStatement()
-    try {
-      stm.execute(ddl)
-    } finally {
-      stm.close()
-    }
+    try stm.execute(ddl) finally stm.close()
   }
 
   protected def schemaDDL(schema: String): String = s"CREATE SCHEMA IF NOT EXISTS $schema"
