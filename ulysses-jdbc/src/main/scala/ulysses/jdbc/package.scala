@@ -45,6 +45,13 @@ package object jdbc {
 
     def readFrom(row: ResultSet, col: Int) = row.getString(col)
   }
+  object ClobColumn extends ColumnType[String] {
+    def typeName = "CLOB"
+    def readFrom(row: ResultSet, col: Int) = {
+      val clob = row.getClob(col)
+      clob.getSubString(1L, clob.length.toInt)
+    }
+  }
   implicit object BigIntColumn extends ColumnType[BigInt] {
     def typeName = "NUMERIC"
     def readFrom(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
