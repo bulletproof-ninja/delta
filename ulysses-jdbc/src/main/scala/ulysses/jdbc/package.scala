@@ -62,7 +62,7 @@ package object jdbc {
     def typeName = "BLOB"
     def readFrom(row: ResultSet, col: Int): Array[Byte] = {
       val blob = row.getBlob(col)
-      blob.getBytes(0L, blob.length.toInt)
+      blob.getBytes(1L, blob.length.toInt)
     }
     override def writeAs(bytes: Array[Byte]) = new ByteArrayInputStream(bytes)
   }
