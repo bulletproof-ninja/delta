@@ -10,6 +10,9 @@ tasks.withType(ScalaCompile) {
     def args = System.properties.compilerArgs ?: "-feature -deprecation -explaintypes -unchecked -Xlint"
     scalaCompileOptions.additionalParameters = args.split(" ").toList()
 }
+tasks.withType(Jar) {
+    baseName = "${project.name}_$vScala"
+}
 
 version = "0.9.0-SNAPSHOT"
 def bintrayVersion = {
@@ -51,7 +54,6 @@ allprojects {
     }
 
     jar {
-        baseName = "${project.name}_$vScala"
         manifest {
             attributes "Implementation-Title": project.name, "Implementation-Version": project.version
         }
