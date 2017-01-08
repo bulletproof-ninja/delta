@@ -59,20 +59,28 @@ allprojects {
         }
     }
 
+	task sourceJar(type: Jar) {
+	    classifier "sources"
+	    from project.sourceSets.main.allScala
+	}
+	task docsJar(type: Jar, dependsOn: scaladoc) {
+	    classifier "docs"
+	    from project.scaladoc.destinationDir
+	}
+
     publishing {
         publications {
             maven(MavenPublication) {
                 groupId 'nilskp'
                 artifactId jar.baseName
                 version bintrayVersion
-    
+
                 from components.java
                 artifact sourceJar
                 artifact docsJar
             }
         }
     }
-
     bintray {
         user = System.properties.bintrayUser ?: "n/a"
         key = System.properties.bintrayApiKey ?: "n/a"
@@ -103,15 +111,6 @@ subprojects {
 
 task wrapper(type: Wrapper) {
     gradleVersion = '3.3'
-}
-
-task sourceJar(type: Jar) {
-    classifier "sources"
-    from sourceSets.main.allScala
-}
-task docsJar(type: Jar, dependsOn: scaladoc) {
-    classifier "docs"
-    from scaladoc.destinationDir
 }
 
 project(':ulysses-cassandra') {
