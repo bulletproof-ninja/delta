@@ -159,6 +159,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def insertEvents(stream: ID, rev: Int, events: List[EVT])(
     implicit conn: Connection, codec: EventCodec[EVT, SF]) {
     prepareStatement(eventInsert) { ps =>
+      val isBatch = events.tail.nonEmpty
       setObject(ps)(1, stream)
       ps.setInt(2, rev)
       events.iterator.zipWithIndex.foreach {
@@ -167,9 +168,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
           ps.setString(4, codec name evt)
           ps.setByte(5, codec version evt)
           setObject(ps)(6, codec encode evt)
-          ps.addBatch()
+          if (isBatch) ps.addBatch()
       }
-      ps.executeUpdate()
+      if (isBatch) ps.executeBatch()
+      else ps.executeUpdate()
     }
   }
   protected val metadataInsert: String = s"""
@@ -180,15 +182,17 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def insertMetadata(stream: ID, rev: Int, metadata: Map[String, String])(
     implicit conn: Connection) = if (metadata.nonEmpty) {
     prepareStatement(metadataInsert) { ps =>
+      val isBatch = metadata.size > 1
       setObject(ps)(1, stream)
       ps.setInt(2, rev)
       metadata.foreach {
         case (key, value) =>
           ps.setString(3, key)
           ps.setString(4, value)
-          ps.addBatch()
+          if (isBatch) ps.addBatch()
       }
-      ps.executeUpdate()
+      if (isBatch) ps.executeBatch()
+      else ps.executeUpdate()
     }
   }
 
