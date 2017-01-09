@@ -30,6 +30,7 @@ trait EventSource[ID, EVT, CH] {
   /** Query across streams, optionally providing a selector to filter results. */
   def querySince(sinceTick: Long, selector: Selector = Everything)(callback: StreamCallback[TXN]): Unit
 
+  /** Subscribe to published transactions. */
   def subscribe(
     selector: Selector = Everything)(
       callback: TXN => Unit): Subscription
