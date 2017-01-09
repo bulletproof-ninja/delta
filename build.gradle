@@ -59,14 +59,14 @@ allprojects {
         }
     }
 
-	task sourceJar(type: Jar) {
-	    classifier "sources"
-	    from project.sourceSets.main.allScala
-	}
-	task docsJar(type: Jar, dependsOn: scaladoc) {
-	    classifier "docs"
-	    from project.scaladoc.destinationDir
-	}
+    task sourceJar(type: Jar) {
+        classifier "sources"
+        from project.sourceSets.main.allScala
+    }
+    task docsJar(type: Jar, dependsOn: scaladoc) {
+        classifier "docs"
+        from project.scaladoc.destinationDir
+    }
 
     publishing {
         publications {
@@ -81,6 +81,7 @@ allprojects {
             }
         }
     }
+
     bintray {
         user = System.properties.bintrayUser ?: "n/a"
         key = System.properties.bintrayApiKey ?: "n/a"
@@ -95,6 +96,7 @@ allprojects {
             }
         }
     }
+
 }
 
 dependencies {
