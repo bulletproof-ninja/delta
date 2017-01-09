@@ -159,7 +159,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
         (stream_id, revision, event_idx, event_name, event_version, event_data)
         VALUES (?, ?, ?, ?, ?, ?)
   """
-  def insertEvents(stream: ID, rev: Int, events: aSeq[EVT])(
+  def insertEvents(stream: ID, rev: Int, events: List[EVT])(
     implicit conn: Connection, codec: EventCodec[EVT, SF]) {
     prepareStatement(eventInsert) { ps =>
       setObject(ps)(1, stream)
@@ -180,7 +180,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       (stream_id, revision, metadata_key, metadata_val)
       VALUES (?, ?, ?, ?)
   """
-  def insertMetadata(stream: ID, rev: Int, metadata: aMap[String, String])(
+  def insertMetadata(stream: ID, rev: Int, metadata: Map[String, String])(
     implicit conn: Connection) = if (metadata.nonEmpty) {
     prepareStatement(metadataInsert) { ps =>
       setObject(ps)(1, stream)
