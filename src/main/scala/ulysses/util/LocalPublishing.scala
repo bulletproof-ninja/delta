@@ -13,7 +13,7 @@ trait LocalPublishing[ID, EVT, CH]
 
   private[this] val pubSub = new scuff.PubSub[TXN, TXN](publishCtx)
 
-  protected def publish(txn: TXN) = pubSub.publish(txn)
+  protected def publish(txn: PublishTXN) = pubSub.publish(txn)
 
   def subscribe(selector: Selector)(
     callback: TXN => Unit): Subscription = {

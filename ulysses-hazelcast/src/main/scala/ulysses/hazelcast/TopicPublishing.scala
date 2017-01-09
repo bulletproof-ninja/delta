@@ -7,20 +7,26 @@ import com.hazelcast.core.{ ITopic, Message, MessageListener }
 import scuff.Subscription
 import ulysses.Publishing
 import concurrent.blocking
+import scuff.Codec
 
+/**
+  * Publishing implementation using a
+  * Hazelcast `ITopic`.
+  *
+  */
 trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
 
   protected def allChannels: Set[CH]
-  protected def getTopic(ch: CH): ITopic[TXN]
+  protected def getTopic(ch: CH): ITopic[PublishTXN]
 
-  protected def publish(txn: TXN): Unit = blocking {
-    getTopic(txn.channel).publish(txn)
+  protected def publish(txn: PublishTXN): Unit = blocking {
+    getTopic(txn.channel).publish(publishCodec encode txn)
   }
 
   private class Subscriber(selector: Selector, callback: TXN => Unit)
-      extends MessageListener[TXN] {
-    def onMessage(msg: Message[TXN]): Unit = {
-      val txn = msg.getMessageObject
+      extends MessageListener[PublishTXN] {
+    def onMessage(msg: Message[PublishTXN]): Unit = {
+      val txn = publishCodec decode msg.getMessageObject
       if (selector.include(txn)) callback(txn)
     }
   }

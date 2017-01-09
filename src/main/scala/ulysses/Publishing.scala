@@ -7,6 +7,7 @@ import scala.util.Success
 import scala.util.control.NonFatal
 import scuff.concurrent.StreamCallback
 import scuff.Subscription
+import scuff.Codec
 
 /**
   * Enable pub/sub of transactions.
@@ -14,9 +15,14 @@ import scuff.Subscription
 trait Publishing[ID, EVT, CH]
     extends EventStore[ID, EVT, CH] {
 
+  /** Publish format. Defaults to the `Transaction` type itself. */
+  protected type PublishTXN = TXN
+  /** Publish format codec. */
+  protected def publishCodec: Codec[TXN, PublishTXN] = Codec.noop
+
   private def publish(txn: Future[TXN]): Unit = {
     txn.foreach { txn =>
-      try publish(txn) catch {
+      try publish(publishCodec encode txn) catch {
         case NonFatal(e) => publishCtx reportFailure e
       }
     }(publishCtx)
@@ -33,9 +39,9 @@ trait Publishing[ID, EVT, CH]
   protected def publishCtx: ExecutionContext
 
   /**
-   * Publish transaction. This will happen on
-   * the `publishCtx` execution context.
-   */
-  protected def publish(txn: TXN): Unit
+    * Publish transaction. This will happen on
+    * the `publishCtx` execution context.
+    */
+  protected def publish(txn: PublishTXN): Unit
 
 }
