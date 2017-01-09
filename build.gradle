@@ -72,7 +72,7 @@ allprojects {
         publications {
             maven(MavenPublication) {
                 groupId 'nilskp'
-                artifactId jar.baseName
+                artifactId "${project.name}_$vScala"
                 version bintrayVersion
 
                 from components.java
