@@ -22,7 +22,7 @@ trait Publishing[ID, EVT, CH]
 
   private def publish(txn: Future[TXN]): Unit = {
     txn.foreach { txn =>
-      try publish(publishCodec encode txn) catch {
+      try publish(txn.channel, publishCodec encode txn) catch {
         case NonFatal(e) => publishCtx reportFailure e
       }
     }(publishCtx)
@@ -42,6 +42,6 @@ trait Publishing[ID, EVT, CH]
     * Publish transaction. This will happen on
     * the `publishCtx` execution context.
     */
-  protected def publish(txn: PublishTXN): Unit
+  protected def publish(channel: CH, txn: PublishTXN): Unit
 
 }

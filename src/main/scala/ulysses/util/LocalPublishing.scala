@@ -4,6 +4,7 @@ import scuff.Subscription
 import scala.concurrent._
 import scuff.concurrent.StreamCallback
 import ulysses.Publishing
+import scuff.Codec
 
 /**
  * Local (JVM) scope Publishing.
@@ -16,7 +17,7 @@ trait LocalPublishing[ID, EVT, CH]
 
   private[this] val pubSub = new scuff.PubSub[TXN, TXN](publishCtx)
 
-  protected def publish(txn: PublishTXN) = pubSub.publish(txn)
+  protected def publish(ch: CH, txn: PublishTXN) = pubSub.publish(txn)
 
   def subscribe(selector: Selector)(
     callback: TXN => Unit): Subscription = {

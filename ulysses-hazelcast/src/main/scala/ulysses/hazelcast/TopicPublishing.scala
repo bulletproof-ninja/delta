@@ -19,8 +19,8 @@ trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
   protected def allChannels: Set[CH]
   protected def getTopic(ch: CH): ITopic[PublishTXN]
 
-  protected def publish(txn: PublishTXN): Unit = blocking {
-    getTopic(txn.channel).publish(publishCodec encode txn)
+  protected def publish(channel: CH, txn: PublishTXN): Unit = blocking {
+    getTopic(channel).publish(txn)
   }
 
   private class Subscriber(selector: Selector, callback: TXN => Unit)
