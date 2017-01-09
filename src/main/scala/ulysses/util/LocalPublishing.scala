@@ -11,6 +11,9 @@ import ulysses.Publishing
 trait LocalPublishing[ID, EVT, CH]
     extends Publishing[ID, EVT, CH] {
 
+  protected type PublishTXN = TXN
+  protected def publishCodec: Codec[TXN, PublishTXN] = Codec.noop
+
   private[this] val pubSub = new scuff.PubSub[TXN, TXN](publishCtx)
 
   protected def publish(txn: PublishTXN) = pubSub.publish(txn)

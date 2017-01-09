@@ -15,10 +15,10 @@ import scuff.Codec
 trait Publishing[ID, EVT, CH]
     extends EventStore[ID, EVT, CH] {
 
-  /** Publish format. Defaults to the `Transaction` type itself. */
-  protected type PublishTXN = TXN
+  /** Publish format. */
+  protected type PublishTXN <: AnyRef
   /** Publish format codec. */
-  protected def publishCodec: Codec[TXN, PublishTXN] = Codec.noop
+  protected def publishCodec: Codec[TXN, PublishTXN]
 
   private def publish(txn: Future[TXN]): Unit = {
     txn.foreach { txn =>
