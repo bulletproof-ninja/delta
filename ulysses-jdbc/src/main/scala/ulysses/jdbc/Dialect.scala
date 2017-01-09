@@ -1,12 +1,9 @@
 package ulysses.jdbc
 
-import ulysses._
-import collection.{ Seq => aSeq, Map => aMap }
-import java.sql.Connection
-import java.sql.SQLException
-import java.sql.PreparedStatement
-import java.sql.ResultSet
+import java.sql._
+
 import scuff._
+import ulysses.EventCodec
 
 class DefaultDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
   extends Dialect[ID, EVT, CH, SF](schema.optional)
