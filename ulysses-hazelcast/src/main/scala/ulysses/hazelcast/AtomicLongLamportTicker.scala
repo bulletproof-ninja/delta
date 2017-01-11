@@ -1,17 +1,20 @@
 package ulysses.hazelcast
 
-import scuff.LamportClock.CASLong
-import com.hazelcast.core.IAtomicLong
-import ulysses.EventSource
-import scuff.concurrent._
-import concurrent.duration._
+import scala.concurrent.duration.DurationInt
 
-object LamportClock {
-  def apply(al: IAtomicLong, es: EventSource[_, _, _]): ulysses.LamportClock = {
+import com.hazelcast.core.IAtomicLong
+
+import scuff.LamportClock
+import scuff.LamportClock.CASLong
+import scuff.concurrent.ScuffScalaFuture
+import ulysses.EventSource
+
+object AtomicLongLamportTicker {
+  def apply(al: IAtomicLong, es: EventSource[_, _, _]): ulysses.LamportTicker = {
     val cas = new AtomicCAS(al)
-    val lc = new scuff.LamportClock(cas)
+    val lc = new LamportClock(cas)
     es.lastTick().await(111.seconds).foreach(lc.sync)
-    ulysses.LamportClock(lc)
+    ulysses.LamportTicker(lc)
   }
 }
 
