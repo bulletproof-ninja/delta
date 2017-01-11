@@ -7,7 +7,6 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.Seq
 import scala.concurrent.{ Future, Promise }
 import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.{ Duration, DurationInt }
 import scala.util.{ Failure, Success, Try }
 import org.junit._
@@ -23,7 +22,7 @@ import ulysses.util.LocalPublishing
 import ulysses.EventCodec
 import ulysses.EventStore
 import ulysses.NoVersioning
-import ulysses.SystemClock
+import ulysses.SysClockTicker
 import scala.{ SerialVersionUID => version }
 
 trait AggrEventHandler {
@@ -78,6 +77,9 @@ case class StatusChanged(newStatus: String)
   extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
 
 abstract class AbstractEventStoreRepositoryTest {
+
+  implicit def ec = RandomDelayExecutionContext
+  implicit def ticker = SysClockTicker
 
   class TimestampCodec(name: String) extends Codec[Timestamp, Map[String, String]] {
     def encode(ts: Timestamp): Map[String, String] = Map(name -> ts.toString)
@@ -311,18 +313,16 @@ class Aggr(val stateMutator: AggrStateMutator, val mergeEvents: Seq[AggrEvent]) 
   def numbers = aggr.numbers
 }
 
-object TheOneAggr extends AggregateRoot {
+object TheOneAggr extends Entity {
 
   type Id = String
-  type Channel = Unit
-  def channel = ()
-  type Entity = Aggr
+  type Type = Aggr
   type Event = AggrEvent
   type State = AggrState
 
   def newMutator(state: Option[State]): StateMutator[Event, State] = new AggrStateMutator(state.orNull)
-  def init(state: State, mergeEvents: List[Event]): Entity = new Aggr(new AggrStateMutator(state), mergeEvents)
-  def done(entity: Entity): StateMutator[Event, State] = entity.stateMutator
+  def init(state: State, mergeEvents: List[Event]): Type = new Aggr(new AggrStateMutator(state), mergeEvents)
+  def done(entity: Type): StateMutator[Event, State] = entity.stateMutator
   def checkInvariants(state: State): Unit = {
     require(state.numbers.filter(_ < 0).isEmpty, "Cannot contain negative numbers")
   }
@@ -360,11 +360,12 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
 
   @Before
   def setup {
+
     es = new TransientEventStore[String, AggrEvent, Unit, String](
       RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
-      def publishCtx = RandomDelayExecutionContext
+      def publishCtx = ec
     }
-    repo = new EntityRepository(global, SystemClock, TheOneAggr)(es)
+    repo = new EntityRepository((), TheOneAggr)(es)
   }
 
 }
@@ -406,13 +407,14 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
   @Before
   def setup {
+    def ?[T](implicit t: T) = implicitly[T]
     es = new TransientEventStore[String, AggrEvent, Unit, String](
       RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
       def publishCtx = RandomDelayExecutionContext
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, SnapshotStore[String, AggrState]#Snapshot]
     val snapshotStore = new MapSnapshotStore[Aggr, String, AggrEvent, AggrState](snapshotMap)
-    repo = new EntityRepository(global, SystemClock, TheOneAggr)(es, snapshotStore)
+    repo = new EntityRepository((), TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
   }
 
 }

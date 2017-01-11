@@ -5,7 +5,7 @@ import org.junit._, Assert._
 import ulysses._
 import ulysses.ddd._
 import ulysses.util._
-import scala.concurrent.ExecutionContext, ExecutionContext.Implicits.global
+//import scala.concurrent.ExecutionContext
 import college.student._
 import college.semester._
 
@@ -33,19 +33,16 @@ class TestCollege {
       def publishCtx = RandomDelayExecutionContext
     }
 
-  lazy val clock = LamportClock(eventStore)
+  implicit def ec = RandomDelayExecutionContext
+  implicit lazy val ticker = LamportTicker(eventStore)
 
   type TXN = eventStore.TXN
 
-  lazy val StudentRepository: student.Repository = new EntityRepository(
-    RandomDelayExecutionContext,
-    clock,
-    student.Student)(eventStore)
+  lazy val StudentRepository: student.Repository =
+    new EntityRepository("Student", student.Student)(eventStore)
 
-  lazy val SemesterRepository: semester.Repository = new EntityRepository(
-    RandomDelayExecutionContext,
-    clock,
-    semester.Semester)(eventStore)
+  lazy val SemesterRepository: semester.Repository =
+    new EntityRepository("Semester", semester.Semester)(eventStore)
 
   private def randomName(): String = (
     rand.nextInRange('A' to 'Z') +: (1 to rand.nextInRange(2 to 12)).map(_ => rand.nextInRange('a' to 'z'))).mkString
@@ -114,8 +111,8 @@ class TestCollege {
       }
     }
     val enrollmentQuery = eventStore.query(eventStore.EventSelector(Map(
-      Student.channel -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
-      Semester.channel -> Set(classOf[StudentEnrolled])))) _
+      "Student" -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
+      "Semester" -> Set(classOf[StudentEnrolled])))) _
 
     val allStudents = new TrieMap[StudentId, (Set[SemesterId], String)].withDefaultValue(Set.empty -> Unknown)
     val readModel = new TrieMap[SemesterId, Map[StudentId, String]].withDefaultValue(Map.empty)
@@ -140,8 +137,8 @@ class TestCollege {
           case StudentChangedName(newName) => studentNameChange(newName, studentId)
         }
       val evtHandler = txn.channel match {
-        case Student.channel => onStudent(new StudentId(txn.stream)) _
-        case Semester.channel => onSemester(new SemesterId(txn.stream)) _
+        case "Student" => onStudent(new StudentId(txn.stream)) _
+        case "Semester" => onSemester(new SemesterId(txn.stream)) _
       }
       txn.events.foreach(evtHandler)
     }

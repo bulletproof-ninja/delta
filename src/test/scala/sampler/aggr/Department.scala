@@ -1,14 +1,12 @@
 package sampler.aggr
 
 import collection.immutable.Seq
+import scuff.ddd._
+import ulysses.ddd._
+
 import sampler._
-import sampler.aggr.dept.DeptEvent
-import sampler.aggr.dept.DeptCreated
-import sampler.aggr.dept.EmployeeAdded
-import sampler.aggr.dept.EmployeeRemoved
-import scuff.ddd.Repository
+import sampler.aggr.dept._
 import scala.concurrent.Future
-import ulysses.ddd.AggregateRoot
 
 /** Genesis command. */
 case class CreateDepartment(name: String)
@@ -33,11 +31,9 @@ object Department {
     repo.insert(id, dept, metadata)
   }
 
-  object Def extends AggregateRoot {
+  object Def extends Entity {
     type Id = DeptId
-    type Channel = Aggr.Value
-    def channel = Aggr.Dept
-    type Entity = Department
+    type Type = Department
     type Event = dept.DeptEvent
     type State = dept.State
     def newMutator(state: Option[State]) = new dept.Mutator(state.orNull)

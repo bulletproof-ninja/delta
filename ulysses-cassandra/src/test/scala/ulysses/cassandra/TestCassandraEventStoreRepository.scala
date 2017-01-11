@@ -5,8 +5,6 @@ import org.junit._, Assert._
 import com.datastax.driver.core.{ Cluster, Session, SocketOptions }
 import ulysses.util._
 import scala.reflect.{ ClassTag, classTag }
-import concurrent.ExecutionContext.global
-import ulysses.SystemClock
 import scala.util.Try
 import ulysses.ddd.EntityRepository
 import ulysses._
@@ -65,10 +63,10 @@ class TestCassandraEventStoreRepository extends ulysses.testing.AbstractEventSto
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, Unit, String](
-      global, session, TableDescriptor) with LocalPublishing[String, AggrEvent, Unit] {
-      def publishCtx = global
+      session, TableDescriptor) with LocalPublishing[String, AggrEvent, Unit] {
+      def publishCtx = ec
     }
-    repo = new EntityRepository(global, SystemClock, TheOneAggr)(es)
+    repo = new EntityRepository((), TheOneAggr)(es)
   }
   private def deleteAll(session: Session): Unit = {
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))

@@ -16,7 +16,6 @@ import org.junit.Assert._
 import sampler.aggr._
 import scuff._
 import scuff.ddd.Repository
-import ulysses.{ EventStore, LamportClock }
 import ulysses.ddd.EntityRepository
 import ulysses.util.LocalPublishing
 import scuff.ddd.DuplicateIdException

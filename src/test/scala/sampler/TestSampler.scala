@@ -3,7 +3,6 @@ package sampler
 import java.io.File
 import java.sql.ResultSet
 import scala.concurrent.{ Await, ExecutionContext }
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.util.{ Failure, Random, Success, Try }
@@ -15,7 +14,7 @@ import scuff._
 import scuff.ddd.Repository
 import ulysses.EventStore
 import ulysses.ddd.{ EntityRepository }
-import ulysses.LamportClock
+import ulysses.SysClockTicker
 import ulysses.util.LocalPublishing
 import scuff.ddd.DuplicateIdException
 import scuff.concurrent.{
@@ -41,10 +40,14 @@ class TestSampler {
       RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
       def publishCtx = RandomDelayExecutionContext
     }
+
+  implicit def ec = RandomDelayExecutionContext
+  implicit lazy val ticker = LamportTicker(es)
+
   lazy val EmployeeRepo: Repository[EmpId, Employee] =
-    new EntityRepository(global, LamportClock(es), Employee.Def)(es)
+    new EntityRepository(Aggr.Empl, Employee.Def)(es)
   lazy val DepartmentRepo: Repository[DeptId, Department] =
-    new EntityRepository(global, LamportClock(es), Department.Def)(es)
+    new EntityRepository(Aggr.Dept, Department.Def)(es)
 
   @Test
   def inserting {

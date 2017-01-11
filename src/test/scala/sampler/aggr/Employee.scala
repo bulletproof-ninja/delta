@@ -1,13 +1,9 @@
 package sampler.aggr
 
-import sampler.aggr.emp.EmpEvent
-import ulysses.ddd.StateMutator
-import sampler.aggr.emp.EmployeeRegistered
+import ulysses.ddd._
+
 import sampler._
-import sampler.aggr.emp.EmployeeSalaryChange
-import sampler.aggr.emp.EmployeeTitleChange
-import ulysses.ddd.StateMutator
-import ulysses.ddd.AggregateRoot
+import sampler.aggr.emp._
 
 case class RegisterEmployee(
   name: String,
@@ -34,11 +30,9 @@ object Employee {
     emp
   }
 
-  object Def extends AggregateRoot {
+  object Def extends Entity {
     type Id = EmpId
-    type Channel = Aggr.Value
-    def channel = Aggr.Empl
-    type Entity = Employee
+    type Type = Employee
     type Event = emp.EmpEvent
     type State = emp.State
     def newMutator(state: Option[State]) = new emp.Mutator(state)

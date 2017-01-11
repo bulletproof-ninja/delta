@@ -71,7 +71,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     es = new MongoEventStore[String, AggrEvent, Unit](coll) with LocalPublishing[String, AggrEvent, Unit] {
       def publishCtx = Threads.DefaultScheduler
     }
-    repo = new EntityRepository(Threads.DefaultScheduler, SystemClock, TheOneAggr)(es)
+    repo = new EntityRepository((), TheOneAggr)(es)
   }
   private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>

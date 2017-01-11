@@ -1,18 +1,14 @@
 package college.student
 
-import ulysses.ddd.StateMutator
-import ulysses.ddd.AggregateRoot
+import ulysses.ddd._
 import college.StudentId
 
-object Student extends AggregateRoot {
+object Student extends Entity {
 
   type Id = StudentId
-  type Channel = String
-  type Entity = Student
+  type Type = Student
   type Event = StudentEvent
   type State = college.student.State
-
-  val channel: Channel = "Student"
 
   def newMutator(state: Option[State]) = new Student(state.orNull)
 

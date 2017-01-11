@@ -1,10 +1,9 @@
 package college.semester
 
 import college._
-import ulysses.ddd.StateMutator
-import ulysses.ddd.AggregateRoot
+import ulysses.ddd._
 
-object Semester extends AggregateRoot {
+object Semester extends Entity {
   def apply(cmd: CreateClass): Semester = {
     val semester = new Semester
     semester(cmd)
@@ -12,22 +11,19 @@ object Semester extends AggregateRoot {
   }
 
   type Id = SemesterId
-  type Channel = String
-  type Entity = Semester
+  type Type = Semester
   type Event = SemesterEvent
   type State = college.semester.State
 
-  val channel = "Semester"
-
   def newMutator(state: Option[State]): StateMutator[Event, State] = new SemesterMutator(state.orNull)
 
-  def init(state: State, mergeEvents: List[Event]): Entity = new Semester(state)
+  def init(state: State, mergeEvents: List[Event]): Type = new Semester(state)
 
   /**
     * Get the mutator used for the entity instance.
     * @param entity The instance to get mutator from
     */
-  def done(entity: Entity): StateMutator[Event, State] = entity.mutator
+  def done(instance: Type): StateMutator[Event, State] = instance.mutator
 
   def checkInvariants(state: State): Unit = ()
 
