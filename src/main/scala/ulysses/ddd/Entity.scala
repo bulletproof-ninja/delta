@@ -1,17 +1,14 @@
 package ulysses.ddd
 
 /**
-  * Type-class for aggregate root entity.
+  * Type-class for entity.
   */
-trait AggregateRoot {
+trait Entity {
 
+  type Type
   type Id
-  type Entity
   type Event
   type State <: AnyRef
-  type Channel
-
-  def channel: Channel
 
   /**
     * Instantiate new mutator, with existing state or from scratch.
@@ -20,18 +17,18 @@ trait AggregateRoot {
   def newMutator(state: Option[State]): StateMutator[Event, State]
 
   /**
-    * Initialize entity.
+    * Initialize entity instance.
     * @param state The internal state
     * @param mergeEvents Any potential events to merge
     * @return The Entity instance
     */
-  def init(state: State, mergeEvents: List[Event]): Entity
+  def init(state: State, mergeEvents: List[Event]): Type
 
   /**
     * Get the mutator used for the entity instance.
-    * @param entity The instance to get mutator from
+    * @param instance The instance to get mutator from
     */
-  def done(entity: Entity): StateMutator[Event, State]
+  def done(instance: Type): StateMutator[Event, State]
 
   /**
     * Convenience method for ensuring invariants
