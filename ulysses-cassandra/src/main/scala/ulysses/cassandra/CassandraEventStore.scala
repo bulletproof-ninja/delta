@@ -83,9 +83,8 @@ trait TableDescriptor {
   * @param td The table descriptor
   */
 abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
-  exeCtx: ExecutionContext,
   session: Session,
-  td: TableDescriptor)(implicit codec: EventCodec[EVT, SF])
+  td: TableDescriptor)(implicit exeCtx: ExecutionContext, codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT, CH] {
 
   import CassandraEventStore._
@@ -153,7 +152,6 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
         rss.filterNot(_.isExhausted)
       }
 
-      implicit def ec = exeCtx
     val resultSets = stms.map { stm =>
       execute(stm)(identity)
     }

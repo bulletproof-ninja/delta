@@ -7,7 +7,7 @@ import scuff.concurrent.{ StreamCallback, StreamPromise }
 import scuff.ddd.{ DuplicateIdException, Repository, UnknownIdException }
 import ulysses.EventStore
 import scala.util.control.NonFatal
-import ulysses.Clock
+import ulysses.Ticker
 import ulysses.Transaction
 import SnapshotStore._
 
@@ -20,17 +20,15 @@ import SnapshotStore._
   * @tparam RID Repository id type
   */
 class EventStoreRepository[ESID, EVT, CH, S <: AnyRef, RID <% ESID](
-  exeCtx: ExecutionContext,
   channel: CH,
-  clock: Clock,
-  es: EventStore[ESID, _ >: EVT, CH],
   newMutator: Option[S] => StateMutator[EVT, S],
-  snapshots: SnapshotStore[RID, S] = SnapshotStore.Disabled)
+  snapshots: SnapshotStore[RID, S] = SnapshotStore.Disabled)(
+    es: EventStore[ESID, _ >: EVT, CH])(
+      implicit exeCtx: ExecutionContext, ticker: Ticker)
     extends Repository[RID, (S, List[EVT])] {
 
   private[this] val eventStore = es.asInstanceOf[EventStore[ESID, EVT, CH]]
 
-  private implicit def ec = exeCtx
   private type Events = List[EVT]
   private type RepoType = (S, Events)
 
@@ -115,7 +113,7 @@ class EventStoreRepository[ESID, EVT, CH, S <: AnyRef, RID <% ESID](
       if (events.isEmpty) {
         Future failed new IllegalStateException(s"Nothing to insert, $id has no events.")
       } else {
-        val tick = clock.nextTick()
+        val tick = ticker.nextTick()
         val committedRevision = eventStore.commit(channel, id, 0, tick, events, metadata).map(_.revision) recover {
           case eventStore.DuplicateRevisionException(ct) =>
             if (ct.events == events) { // Idempotent insert
@@ -157,7 +155,7 @@ class EventStoreRepository[ESID, EVT, CH, S <: AnyRef, RID <% ESID](
             if (newEvents.isEmpty || mergeEvents == newEvents) {
               Future successful snapshot.revision
             } else {
-              val now = clock.nextTick(snapshot.tick)
+              val now = ticker.nextTick(snapshot.tick)
               recordUpdate(id, state, snapshot.revision + 1, newEvents, metadata, now).recoverWith {
                 case eventStore.DuplicateRevisionException(conflict) =>
                   val mutator = newMutator(Some(snapshot.state))
