@@ -51,11 +51,11 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
   }
 
   def decode(name: String, version: Byte, data: SF): EVT = {
-    val decoderMethod = decoderMethods.get(name) getOrElse decoderNotFound(name, noVersion = false)
+    val decoderMethod = decoderMethods.getOrElse(name, decoderNotFound(name, noVersion = false))
     decoderMethod.invoke(this, Byte box version, data).asInstanceOf[EVT]
   }
   def decode(name: String, data: SF) = {
-    val decoderMethod = decoderMethods.get(name) getOrElse decoderNotFound(name, noVersion = true)
+    val decoderMethod = decoderMethods.getOrElse(name, decoderNotFound(name, noVersion = true))
     decoderMethod.invoke(this, data).asInstanceOf[EVT]
   }
 }
