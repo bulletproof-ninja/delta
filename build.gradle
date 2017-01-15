@@ -86,8 +86,8 @@ allprojects {
     bintray {
         user = System.properties.bintrayUser ?: "dryrun"
         key = System.properties.bintrayApiKey ?: "dryrun"
-        dryRun = (user == "dryrun" || key == "dryrun" || version.startsWith('SNAPSHOT'))
-        publish = true
+        dryRun = (user == "dryrun" || key == "dryrun")
+        publish = !version.startsWith('SNAPSHOT')
         publications = ['maven']
         pkg {
             repo = "maven"
