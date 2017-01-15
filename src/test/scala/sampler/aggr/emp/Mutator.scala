@@ -1,7 +1,8 @@
 package sampler.aggr.emp
 
 import sampler._
-import ulysses.ddd.StateMutator
+import delta.ddd.StateMutator
+import delta.ddd.Fold
 
 case class State(
   name: String,
@@ -10,28 +11,34 @@ case class State(
   salary: Int,
   title: String)
 
-class Mutator(var state: State = null)
-    extends EmpEventHandler
-    with StateMutator[EmpEvent, State] {
+private class StateHandler(state: State = null)
+    extends EmpEventHandler {
 
-  def this(state: Option[State]) = this(state.orNull)
+  type RT = State
 
-  type RT = Unit
-
-  protected def process(evt: EmpEvent) = dispatch(evt)
-
-  /** Genesis event. */
   def on(evt: EmployeeRegistered): RT = {
     require(state == null)
-    state = State(name = evt.name, soch = evt.soch, dob = evt.dob, salary = evt.annualSalary, title = evt.title)
+    State(name = evt.name, soch = evt.soch, dob = evt.dob, salary = evt.annualSalary, title = evt.title)
   }
 
   def on(evt: EmployeeSalaryChange): RT = {
-    state = state.copy(salary = evt.newSalary)
+    state.copy(salary = evt.newSalary)
   }
 
   def on(evt: EmployeeTitleChange): RT = {
-    state = state.copy(title = evt.newTitle)
+    state.copy(title = evt.newTitle)
+  }
+
+}
+
+private[aggr] class Mutator extends StateMutator {
+
+  type Event = EmpEvent
+  type State = sampler.aggr.emp.State
+
+  protected val fold = new Fold[State, Event] {
+    def init(evt: Event) = new StateHandler().dispatch(evt)
+    def next(state: State, evt: Event) = new StateHandler(state).dispatch(evt)
   }
 
 }

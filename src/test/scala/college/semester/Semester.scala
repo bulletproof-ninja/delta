@@ -1,7 +1,8 @@
 package college.semester
 
 import college._
-import ulysses.ddd._
+import delta.ddd._
+import delta.ddd.Fold
 
 object Semester extends Entity {
   def apply(cmd: CreateClass): Semester = {
@@ -12,49 +13,66 @@ object Semester extends Entity {
 
   type Id = SemesterId
   type Type = Semester
-  type Event = SemesterEvent
-  type State = college.semester.State
+  type Mutator = SemesterMutator
+//  type Event = SemesterEvent
+//  type State = college.semester.State
 
-  def newMutator(state: Option[State]): StateMutator[Event, State] = new SemesterMutator(state.orNull)
+  def newMutator = new SemesterMutator
 
-  def init(state: State, mergeEvents: List[Event]): Type = new Semester(state)
+  def init(mutator: SemesterMutator, mergeEvents: List[SemesterEvent]): Type = new Semester
 
   /**
     * Get the mutator used for the entity instance.
     * @param entity The instance to get mutator from
     */
-  def done(instance: Type): StateMutator[Event, State] = instance.mutator
-
-  def checkInvariants(state: State): Unit = ()
+  def done(instance: Type) = instance.mutator
 
 }
 
-private class SemesterMutator(private var semester: State = null)
-    extends StateMutator[SemesterEvent, State] {
+private[semester] class SemesterMutator
+    extends StateMutator {
 
-  protected def process(evt: SemesterEvent) {
-    evt match {
-      case ClassCreated(name) =>
-        semester = new State(name)
+  type Event = SemesterEvent
+  type State = college.semester.State
+
+//  protected def process(evt: SemesterEvent) {
+//    evt match {
+//      case ClassCreated(name) =>
+//        semester = new State(name)
+//      case StudentEnrolled(studentId) =>
+//        val enrolled = semester.enrolled + studentId
+//        semester = semester.copy(enrolled = enrolled)
+//      case StudentCancelled(studentId) =>
+//        val without = semester.enrolled - studentId
+//        semester = semester.copy(enrolled = without)
+//    }
+//  }
+  //  def state = semester
+  private def semester = state
+  protected val fold = new Fold[State, SemesterEvent] {
+    def init(evt: SemesterEvent) = evt match {
+      case ClassCreated(name) => new State(name)
+    }
+    def next(state: State, evt: SemesterEvent) = evt match {
       case StudentEnrolled(studentId) =>
         val enrolled = semester.enrolled + studentId
-        semester = semester.copy(enrolled = enrolled)
+        semester.copy(enrolled = enrolled)
       case StudentCancelled(studentId) =>
         val without = semester.enrolled - studentId
-        semester = semester.copy(enrolled = without)
+        semester.copy(enrolled = without)
     }
+
   }
-  def state = semester
 }
 
 class Semester private (
     private[Semester] val mutator: SemesterMutator = new SemesterMutator) {
 
-  private def this(state: State) = this(new SemesterMutator(state))
+//  private def this(state: State) = this(new SemesterMutator(state))
 
   private def semester = mutator.state
 
-  def apply(cmd: CreateClass) {
+  private def apply(cmd: CreateClass) {
     require(semester == null)
     mutator(ClassCreated(cmd.className))
   }

@@ -3,9 +3,9 @@ import language.implicitConversions
 
 import college.semester._
 import college.student._
-import ulysses._
-import ulysses.util._
-import ulysses.ddd.EntityRepository
+import delta._
+import delta.util._
+import delta.ddd.EntityRepository
 import scuff.JavaSerializer
 import java.io.ByteArrayOutputStream
 import scala.concurrent.ExecutionContext

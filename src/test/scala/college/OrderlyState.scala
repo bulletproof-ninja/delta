@@ -1,6 +1,6 @@
 //package college
 //
-//import ulysses.Transaction
+//import delta.Transaction
 //
 //object SafeModel {
 //  def apply(builder: ModelBuilder[M, TXN],

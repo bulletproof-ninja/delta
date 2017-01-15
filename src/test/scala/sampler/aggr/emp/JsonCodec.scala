@@ -2,7 +2,7 @@ package sampler.aggr.emp
 
 import rapture.json._, jsonBackends.jackson._
 import java.util.UUID
-import ulysses.util.ReflectiveDecoder
+import delta.util.ReflectiveDecoder
 import sampler._
 import scuff.Codec
 

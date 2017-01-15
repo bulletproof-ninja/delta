@@ -1,7 +1,7 @@
 //package college.readmodels
 //
-//import ulysses.util.DurableConsumer
-//import ulysses.util.CatchUpConsumer
+//import delta.util.DurableConsumer
+//import delta.util.CatchUpConsumer
 //
 //import college._
 //import college.student._

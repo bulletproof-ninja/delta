@@ -14,16 +14,18 @@ tasks.withType(Jar) {
     baseName = "${project.name}_$vScala"
 }
 
-version = "0.9.0-SNAPSHOT"
-def bintrayVersion = {
-    if (version.endsWith('-SNAPSHOT')) {
-        java.text.SimpleDateFormat format = new java.text.SimpleDateFormat('yyMMddHHmm')
-        format.setCalendar(Calendar.getInstance(TimeZone.getTimeZone('UTC')))
-        return version.replace('SNAPSHOT', "b" + format.format(new Date()))
-    } else {
-        return version
-    }
-}()
+if (version == '') {
+    version = 'SNAPSHOT'
+}
+if (version == 'SNAPSHOT') {
+    version = tsVersion(version)
+}
+
+def tsVersion(version) {
+    java.text.SimpleDateFormat tsFmt = new java.text.SimpleDateFormat('yyMMddHHmm')
+    tsFmt.setCalendar(Calendar.getInstance(TimeZone.getTimeZone('UTC')))
+    return "${version}-b${tsFmt.format(new Date())}"
+}
 
 allprojects {
     apply plugin: 'scala'
@@ -55,7 +57,7 @@ allprojects {
 
     jar {
         manifest {
-            attributes "Implementation-Title": project.name, "Implementation-Version": project.version
+            attributes "Implementation-Title": project.name, "Implementation-Version": version
         }
     }
 
@@ -73,7 +75,6 @@ allprojects {
             maven(MavenPublication) {
                 groupId 'nilskp'
                 artifactId "${project.name}_$vScala"
-                version bintrayVersion
 
                 from components.java
                 artifact sourceJar
@@ -83,17 +84,14 @@ allprojects {
     }
 
     bintray {
-        user = System.properties.bintrayUser ?: "n/a"
-        key = System.properties.bintrayApiKey ?: "n/a"
-        dryRun = (user == "n/a" || key == "n/a")
+        user = System.properties.bintrayUser ?: "dryrun"
+        key = System.properties.bintrayApiKey ?: "dryrun"
+        dryRun = (user == "dryrun" || key == "dryrun" || version.startsWith('SNAPSHOT'))
         publish = true
         publications = ['maven']
         pkg {
             repo = "maven"
-            name = "Ulysses"
-            version {
-                name = bintrayVersion
-            }
+            name = "Delta"
         }
     }
 
@@ -115,24 +113,24 @@ task wrapper(type: Wrapper) {
     gradleVersion = '3.3'
 }
 
-project(':ulysses-cassandra') {
+project(':delta-cassandra') {
     dependencies {
         compile "com.datastax.cassandra:cassandra-driver-core:3.1.2"
     }
 }
-project(':ulysses-jdbc') {
+project(':delta-jdbc') {
     dependencies {
         testCompile "com.h2database:h2:1.4.+"
         testCompile "org.apache.derby:derby:10.12.+"
         testCompile "mysql:mysql-connector-java:5.1.40"
     }
 }
-project(':ulysses-mongodb') {
+project(':delta-mongodb') {
     dependencies {
         compile "org.mongodb:mongodb-driver-async:3.4.0"
     }
 }
-project(':ulysses-hazelcast') {
+project(':delta-hazelcast') {
     dependencies {
         compile "com.hazelcast:hazelcast:3.7.4"
     }

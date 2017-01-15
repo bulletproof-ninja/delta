@@ -1,35 +1,44 @@
 package sampler.aggr.dept
 
 import sampler._
-import ulysses.ddd.StateMutator
+import delta.ddd.StateMutator
+import delta.ddd.Fold
 
 case class State(
   name: String,
   employees: Set[EmpId] = Set.empty)
 
-class Mutator (
-  var state: State = null)
-    extends DeptEventHandler
-    with StateMutator[DeptEvent, State] {
+private class StateHandler(state: State = null)
+    extends DeptEventHandler {
 
-  protected def process(evt: DeptEvent) = dispatch(evt)
-
-  type RT = Unit
-
-  def this(state: Option[State]) = this(state.orNull)
+  type RT = State
 
   def on(evt: DeptCreated): RT = {
     require(state == null)
-    state = new State(evt.name)
+    new State(evt.name)
   }
   def on(evt: EmployeeAdded): RT = {
-    state = state.copy(employees = state.employees + evt.id)
+    state.copy(employees = state.employees + evt.id)
   }
   def on(evt: EmployeeRemoved): RT = {
-    state = state.copy(employees = state.employees - evt.id)
+    state.copy(employees = state.employees - evt.id)
   }
   def on(evt: NameChanged): RT = {
-    state = state.copy(name = evt.newName)
+    state.copy(name = evt.newName)
   }
+
+}
+
+private[aggr] class Mutator
+    extends StateMutator
+    with Fold[State, DeptEvent] {
+
+  protected def fold = this
+
+  type Event = DeptEvent
+  type State = sampler.aggr.dept.State
+
+  def init(evt: DeptEvent): State = new StateHandler().dispatch(evt)
+  def next(state: State, evt: DeptEvent): State = new StateHandler(state).dispatch(evt)
 
 }

@@ -2,7 +2,7 @@ package sampler.aggr.dept
 
 import rapture.json._, jsonBackends.jackson._
 import sampler._
-import ulysses.util.ReflectiveDecoder
+import delta.util.ReflectiveDecoder
 
 trait JsonCodec
     extends DeptEventHandler {

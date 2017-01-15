@@ -2,9 +2,9 @@ package college
 
 import org.junit._, Assert._
 
-import ulysses._
-import ulysses.ddd._
-import ulysses.util._
+import delta._
+import delta.ddd._
+import delta.util._
 //import scala.concurrent.ExecutionContext
 import college.student._
 import college.semester._
@@ -19,8 +19,8 @@ import scala.collection.concurrent.TrieMap
 import scala.util.Try
 import scala.util.Failure
 import scala.util.Success
-import ulysses.util.LocalPublishing
-import ulysses.testing.RandomDelayExecutionContext
+import delta.util.LocalPublishing
+import delta.testing.RandomDelayExecutionContext
 
 class TestCollege {
 

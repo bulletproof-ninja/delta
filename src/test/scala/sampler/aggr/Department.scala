@@ -2,7 +2,7 @@ package sampler.aggr
 
 import collection.immutable.Seq
 import scuff.ddd._
-import ulysses.ddd._
+import delta.ddd._
 
 import sampler._
 import sampler.aggr.dept._
@@ -34,14 +34,12 @@ object Department {
   object Def extends Entity {
     type Id = DeptId
     type Type = Department
-    type Event = dept.DeptEvent
-    type State = dept.State
-    def newMutator(state: Option[State]) = new dept.Mutator(state.orNull)
-    def init(state: State, mergeEvents: List[Event]) = new Impl(new dept.Mutator(state), mergeEvents)
+    type Mutator = dept.Mutator
+    def newMutator = new Mutator
+    def init(state: Mutator, mergeEvents: List[DeptEvent]) = new Impl(state, mergeEvents)
     def done(dept: Department) = dept match {
       case dept: Impl => dept.mutator
     }
-    def checkInvariants(state: State): Unit = ()
   }
 
   private[aggr] class Impl(val mutator: dept.Mutator = new dept.Mutator, mergeEvents: Seq[DeptEvent] = Nil)

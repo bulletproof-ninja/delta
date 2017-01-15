@@ -1,6 +1,6 @@
 package sampler.aggr
 
-import ulysses.ddd._
+import delta.ddd._
 
 import sampler._
 import sampler.aggr.emp._
@@ -33,12 +33,10 @@ object Employee {
   object Def extends Entity {
     type Id = EmpId
     type Type = Employee
-    type Event = emp.EmpEvent
-    type State = emp.State
-    def newMutator(state: Option[State]) = new emp.Mutator(state)
-    def init(state: State, mergeEvents: List[Event]) = new Employee(new emp.Mutator(state), mergeEvents)
+    type Mutator = emp.Mutator
+    def newMutator = new emp.Mutator
+    def init(state: Mutator, mergeEvents: List[EmpEvent]) = new Employee(state, mergeEvents)
     def done(employee: Employee) = employee.mutator
-    def checkInvariants(state: State): Unit = ()
   }
 
 }

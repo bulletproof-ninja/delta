@@ -1,8 +1,8 @@
 
 import sampler.aggr.DomainEvent
 import scuff.serialVersionUID
-import ulysses.EventCodec
-import ulysses.util.ReflectiveDecoder
+import delta.EventCodec
+import delta.util.ReflectiveDecoder
 import language.implicitConversions
 import sampler.aggr.dept.DeptEvent
 import sampler.aggr.emp.EmpEvent

@@ -1,1 +1,1 @@
-include 'ulysses-cassandra', 'ulysses-jdbc', 'ulysses-mongodb', 'ulysses-hazelcast'
+include 'delta-cassandra', 'delta-jdbc', 'delta-mongodb', 'delta-hazelcast'

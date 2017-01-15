@@ -12,24 +12,24 @@ import org.junit.Assert._
 import sampler.aggr._
 import scuff._
 import scuff.ddd.Repository
-import ulysses.EventStore
-import ulysses.ddd.{ EntityRepository }
-import ulysses.SysClockTicker
-import ulysses.util.LocalPublishing
+import delta.EventStore
+import delta.ddd.{ EntityRepository }
+import delta.SysClockTicker
+import delta.util.LocalPublishing
 import scuff.ddd.DuplicateIdException
 import scuff.concurrent.{
   StreamCallback,
   StreamPromise
 }
-import ulysses.EventSource
+import delta.EventSource
 import scala.concurrent.Promise
-import ulysses._
+import delta._
 import scuff.reflect.Surgeon
-import ulysses.util.TransientEventStore
+import delta.util.TransientEventStore
 import sampler.aggr.emp.EmpEvent
 import sampler.aggr.emp.EmpEvent
 import sampler.aggr.dept.DeptEvent
-import ulysses.testing.RandomDelayExecutionContext
+import delta.testing.RandomDelayExecutionContext
 
 class TestSampler {
 
