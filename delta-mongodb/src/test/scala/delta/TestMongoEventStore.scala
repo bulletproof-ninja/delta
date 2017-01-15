@@ -31,7 +31,7 @@ object TestMongoEventStore {
   }
 }
 
-//@Ignore
+@Ignore
 class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   import TestMongoEventStore._
   import com.mongodb.async.client._

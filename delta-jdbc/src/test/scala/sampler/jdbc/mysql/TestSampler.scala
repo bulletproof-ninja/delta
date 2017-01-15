@@ -34,7 +34,6 @@ object TestSampler {
   }
 }
 
-@Ignore
 final class TestSampler extends sampler.TestSampler {
 
   implicit object JsonColumn extends VarCharColumn(Short.MaxValue)

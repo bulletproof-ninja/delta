@@ -33,7 +33,6 @@ object TestCollege {
   }
 }
 
-@Ignore
 class TestCollege extends college.TestCollege {
 
   import TestCollege._
