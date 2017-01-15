@@ -40,6 +40,8 @@ allprojects {
         targetCompatibility = 1.8
     }
 
+    version = rootProject.version
+
     repositories {
         mavenCentral()
         jcenter()
@@ -102,7 +104,6 @@ dependencies {
 }
 
 subprojects {
-    version = rootProject.version
     dependencies {
         testCompile rootProject.sourceSets.test.output
         compile rootProject
