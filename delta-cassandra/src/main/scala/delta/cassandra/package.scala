@@ -3,7 +3,7 @@ package delta
 import java.util.UUID
 import scala.reflect._
 import com.datastax.driver.core.Row
-import java.math.BigInteger
+
 import java.net.InetAddress
 import collection.immutable._
 import collection.{ Map => aMap, Seq => aSeq, Set => aSet }

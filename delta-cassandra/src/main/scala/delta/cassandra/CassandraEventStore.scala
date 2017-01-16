@@ -485,7 +485,6 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
   }
 
   private def resolve(selector: Selector, sinceTick: Option[Long]): Either[(ID, BoundStatement), Seq[BoundStatement]] = {
-    import Selector._
 
     selector match {
       case Everything => Right {
