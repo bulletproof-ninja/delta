@@ -21,8 +21,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
   blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool,
   ensureSchema: Boolean = true)(implicit codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT, CH] {
-
-  protected def useConnection[R](thunk: Connection => R): R
+  cp: ConnectionProvider =>
 
   if (ensureSchema) ensureSchema()
 
