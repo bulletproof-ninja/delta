@@ -28,6 +28,9 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   protected def transactionTable = s"${schemaPrefix}transaction"
   protected def eventTable = s"${schemaPrefix}event"
   protected def metadataTable = s"${schemaPrefix}metadata"
+  protected def channelIndex = s"${streamTable.replace(".", "_")}_channel"
+  protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_name"
+  protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick"
 
   protected def executeDDL(conn: Connection, ddl: String) {
     val stm = conn.createStatement()
@@ -48,7 +51,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def createStreamTable(conn: Connection): Unit = executeDDL(conn, streamTableDDL)
 
   protected def channelIndexDDL: String = s"""
-    CREATE INDEX IF NOT EXISTS ${streamTable.replace(".", "_")}_channel
+    CREATE INDEX IF NOT EXISTS $channelIndex
       ON $streamTable (channel)
   """
   def createChannelIndex(conn: Connection): Unit = executeDDL(conn, channelIndexDDL)
@@ -67,7 +70,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def createTransactionTable(conn: Connection): Unit = executeDDL(conn, transactionTableDDL)
 
   protected def tickIndexDDL: String = s"""
-    CREATE INDEX IF NOT EXISTS ${transactionTable.replace(".", "_")}_tick
+    CREATE INDEX IF NOT EXISTS $tickIndex
       ON $transactionTable (tick)
   """
   def createTickIndex(conn: Connection): Unit = executeDDL(conn, tickIndexDDL)
@@ -90,7 +93,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def createEventTable(conn: Connection): Unit = executeDDL(conn, eventTableDDL)
 
   protected def eventNameIndexDDL: String = s"""
-    CREATE INDEX IF NOT EXISTS ${eventTable.replace(".", "_")}_event_name
+    CREATE INDEX IF NOT EXISTS $eventNameIndex
       ON $eventTable (event_name)
   """
   def createEventNameIndex(conn: Connection): Unit = executeDDL(conn, eventNameIndexDDL)
