@@ -33,13 +33,16 @@ trait ReadModelMapStore[K, D]
     if (revUpdated.nonEmpty) updateRevisions(revUpdated)
   }
 
-  def load(key: K): ReadModelState[D, Any] = new ReadModelState(loadModel(key))
+  def load(key: K): ReadModelState[D, Any] = loadModel(key) match {
+    case Some(model) => new ReadModelState(model)
+    case _ => null
+  }
   def loadAll(keys: Collection[K]) = {
     val models = loadModels(keys.asScala)
     models.mapValues(m => new ReadModelState[D, Any](m)).asJava
   }
 
-  def loadModel(key: K): ReadModel[D]
+  def loadModel(key: K): Option[ReadModel[D]]
   def storeModel(key: K, model: ReadModel[D]): Unit
   def updateRevision(key: K, revision: Int, tick: Long)
   def loadModels(keys: Iterable[K]): Map[K, ReadModel[D]]
