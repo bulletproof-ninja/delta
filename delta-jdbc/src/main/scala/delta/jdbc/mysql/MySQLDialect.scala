@@ -10,6 +10,8 @@ import delta.jdbc._
 class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]
     extends delta.jdbc.Dialect[ID, EVT, CH, SF](None) {
 
+  import MySQLDialect._
+
   override val metadataValType = new VarCharColumn(Short.MaxValue).typeName
 
   override def channelIndexDDL = super.channelIndexDDL.replace("IF NOT EXISTS ", "")
@@ -17,11 +19,15 @@ class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType]
   override def eventNameIndexDDL = super.eventNameIndexDDL.replace("IF NOT EXISTS ", "")
 
   private def ignoreAlreadyExists(thunk: => Unit) = try thunk catch {
-    case sqlEx: SQLException if sqlEx.getErrorCode == 1061 => // Already exists, ignore
+    case sqlEx: SQLException if isIndexAlreadyExists(sqlEx) => // Already exists, ignore
   }
 
   override def createChannelIndex(conn: Connection) = ignoreAlreadyExists(super.createChannelIndex(conn))
   override def createTickIndex(conn: Connection) = ignoreAlreadyExists(super.createTickIndex(conn))
   override def createEventNameIndex(conn: Connection) = ignoreAlreadyExists(super.createEventNameIndex(conn))
 
+}
+
+private[mysql] object MySQLDialect {
+  def isIndexAlreadyExists(sqlEx: SQLException): Boolean = sqlEx.getErrorCode == 1061
 }
