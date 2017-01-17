@@ -1,10 +1,8 @@
 package delta.jdbc.mysql
 
-import delta.EventCodec
-import delta.jdbc._
+import java.sql.{ Connection, SQLException }
 
-import java.sql.Connection
-import java.sql.SQLException
+import delta.jdbc._
 
 /**
   * MySQL dialect. Doesn't support schema.
