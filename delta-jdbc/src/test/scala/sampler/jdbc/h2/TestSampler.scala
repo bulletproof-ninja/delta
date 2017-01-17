@@ -36,12 +36,9 @@ final class TestSampler extends sampler.TestSampler {
     val sql = new H2Dialect[Int, DomainEvent, Aggr.Value, JSON](None)
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${h2Name}")
-    new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
-      def publishCtx = RandomDelayExecutionContext
-      protected def useConnection[R](thunk: Connection => R): R = {
-        val conn = ds.getConnection
-        try thunk(conn) finally conn.close()
-      }
+    new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] with DataSourceConnectionProvider {
+      protected def publishCtx = RandomDelayExecutionContext
+      protected def dataSource = ds
     }
   }
 
