@@ -10,6 +10,7 @@ ext {
 
     vScala = System.properties.scalaVersion ?: '2.11'
     vScalaFull = getScalaFull[vScala]
+    vScuff = '1.0.0'
 }
 
 tasks.withType(ScalaCompile) {
@@ -105,7 +106,7 @@ allprojects {
 }
 
 dependencies {
-    compile "nilskp:scuff_$vScala:0.1.5-b1701061638"
+    compile "nilskp:scuff_$vScala:$vScuff"
 }
 
 subprojects {
