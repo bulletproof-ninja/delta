@@ -99,7 +99,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def createEventNameIndex(conn: Connection): Unit = executeDDL(conn, eventNameIndexDDL)
 
   protected def metadataKeyType = "VARCHAR(255)"
-  protected def metadataValType = "VARCHAR(65535)"
+  protected def metadataValType = "VARCHAR(32767)"
 
   protected def metadataTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $metadataTable (
