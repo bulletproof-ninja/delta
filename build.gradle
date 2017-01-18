@@ -3,7 +3,13 @@ plugins {
 }
 
 ext {
+    getScalaFull = [
+        '2.11': '2.11.8',
+        '2.12': '2.12.1'
+    ]
+
     vScala = System.properties.scalaVersion ?: '2.11'
+    vScalaFull = getScalaFull[vScala]
 }
 
 tasks.withType(ScalaCompile) {
@@ -49,8 +55,8 @@ allprojects {
         }
     }
     dependencies {
-        compileOnly "org.scala-lang:scala-library:$vScala.8"
-        compileOnly "org.scala-lang:scala-reflect:$vScala.8"
+        compileOnly "org.scala-lang:scala-reflect:$vScalaFull"
+        testCompile "org.scala-lang:scala-reflect:$vScalaFull"
         testCompile "junit:junit:4.+"
         testCompile "org.mockito:mockito-all:1.10.+"
         testCompile "com.propensive:rapture-json-jackson_$vScala:2.0.+" 
