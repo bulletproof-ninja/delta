@@ -31,7 +31,6 @@ allprojects {
     apply plugin: 'scala'
     apply plugin: 'eclipse'
     apply plugin: 'maven-publish'
-    apply plugin: 'com.jfrog.bintray'
 
     sourceCompatibility = 1.7
     if (vScala == '2.11') {
