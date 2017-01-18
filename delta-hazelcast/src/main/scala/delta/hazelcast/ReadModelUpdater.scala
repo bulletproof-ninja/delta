@@ -9,11 +9,7 @@ import com.hazelcast.map.AbstractEntryProcessor
 
 import delta.Transaction
 import delta.ddd.Fold
-
-case class ReadModel[D](
-  data: D,
-  revision: Int,
-  tick: Long)
+import delta.cqrs.ReadModel
 
 case class ReadModelState[D, EVT](
   model: ReadModel[D],
