@@ -26,16 +26,16 @@ trait Transaction
 }
 
 trait ReadModel
-    extends StreamSerializer[delta.hazelcast.ReadModel[Any]] {
+    extends StreamSerializer[delta.cqrs.ReadModel[Any]] {
 
-  def write(out: ObjectDataOutput, rm: delta.hazelcast.ReadModel[Any]): Unit = {
+  def write(out: ObjectDataOutput, rm: delta.cqrs.ReadModel[Any]): Unit = {
     out writeObject rm.data
     out writeInt rm.revision
     out writeLong rm.tick
   }
 
   def read(inp: ObjectDataInput) = {
-    new delta.hazelcast.ReadModel(
+    new delta.cqrs.ReadModel(
       data = inp.readObject[Any],
       revision = inp.readInt,
       tick = inp.readLong)
@@ -73,11 +73,10 @@ trait ModelUpdateResult
   }
   def read(inp: ObjectDataInput): delta.hazelcast.ModelUpdateResult = inp.readByte match {
     case 0 =>
-      new Updated(inp.readObject[delta.hazelcast.ReadModel[Any]])
+      new Updated(inp.readObject[delta.cqrs.ReadModel[Any]])
     case 1 =>
       IgnoredDuplicate
     case 2 =>
       new MissingRevisions(new Range(inp.readInt, inp.readInt, 1))
   }
 }
-  
