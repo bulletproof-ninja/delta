@@ -6,8 +6,8 @@ import com.datastax.driver.core.Row
 
 import java.net.InetAddress
 import collection.immutable._
-import collection.{ Map => aMap, Seq => aSeq, Set => aSet }
-import collection.mutable.{ Map => mMap, Seq => mSeq, Set => mSet }
+import collection.{ Map => aMap, Seq => aSeq }
+import collection.mutable.{ Map => mMap }
 
 package object cassandra {
   object TimeUUIDColumn extends ColumnType[UUID] {

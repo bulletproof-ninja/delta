@@ -1,25 +1,16 @@
 package delta
 
 import java.util.concurrent.ArrayBlockingQueue
+
 import scala.concurrent.{ Future, Promise, TimeoutException }
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+import scala.reflect.{ ClassTag, classTag }
 import scala.util.{ Failure, Success, Try }
-import com.mongodb.async.SingleResultCallback
-import org.bson.codecs.configuration.CodecRegistry
-import scala.reflect._
-import org.bson.Document
-import org.bson.codecs.Codec
-import com.mongodb.async.client._
-import scala.collection.concurrent.TrieMap
-import org.bson.types.ObjectId
-import java.util.UUID
-import org.bson.BsonWriter
-import org.bson.BsonReader
+
+import org.bson.{ BsonReader, BsonWriter, UuidRepresentation }
 import org.bson.codecs._
-import org.bson.UuidRepresentation
-import org.bson.types.Binary
-import org.bson.BsonBinarySubType
-import scuff.Numbers
+
+import com.mongodb.async.SingleResultCallback
 
 package object mongo {
 
