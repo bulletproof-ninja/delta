@@ -17,7 +17,7 @@ trait DurableConsumer[ID, EVT, CH] {
 
   protected def liveSwitchProcessingTimeout = 33.seconds
   protected def selector[T <: ES](es: T): T#Selector
-  protected def newConsumer: CatchUpConsumer[TXN]
+  protected def newProcessor(es: ES): TwoPhaseProcessor[TXN]
 
   /**
     * Resume consumption.
@@ -27,17 +27,17 @@ trait DurableConsumer[ID, EVT, CH] {
   def resume(es: ES, maxTickSkew: Int)(implicit ec: ExecutionContext): Future[Subscription] = {
     require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
     es.lastTick.flatMap { lastTickAtStart =>
-      val catchUpConsumer = newConsumer
-      val catchUpQuery = catchUpConsumer.lastProcessedTick match {
+      val processor = newProcessor(es)
+      val catchUpQuery = processor.lastProcessedTick match {
         case None =>
           es.query(selector(es)) _
         case Some(lastSeen) =>
           es.querySince(lastSeen - maxTickSkew, selector(es)) _
       }
-      val catchUpFuture = StreamPromise.foreach(catchUpQuery)(catchUpConsumer)
+      val catchUpFuture = StreamPromise.foreach(catchUpQuery)(processor.historic)
       catchUpFuture.map { _ =>
         val switcher = {
-          new SafeCatchUpSwitcher(catchUpConsumer.liveConsumer)
+          new SafeCatchUpSwitcher(processor.live)
         }
         val liveSubscription = es.subscribe(selector(es))(switcher.live)
         lastTickAtStart match {
