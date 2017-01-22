@@ -2,7 +2,7 @@ package sampler.aggr.dept
 
 import sampler._
 import delta.ddd.StateMutator
-import delta.ddd.Fold
+import delta.Fold
 
 case class State(
   name: String,

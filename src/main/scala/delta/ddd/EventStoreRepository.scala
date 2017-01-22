@@ -7,7 +7,7 @@ import scuff.ddd.{ DuplicateIdException, Repository, UnknownIdException }
 import delta.EventStore
 import scala.util.control.NonFatal
 import delta.Ticker
-import SnapshotStore._
+import delta.SnapshotStore
 
 /**
   * [[delta.EventStore]]-based [[scuff.ddd.Repository]] implementation.
@@ -16,15 +16,29 @@ import SnapshotStore._
   * @tparam CH Channel type
   * @tparam S Repository state type
   * @tparam RID Repository id type
+  * @param channel The channel
+  * @param newMutator StateMutator constructor
+  * @param snapshots Snapshot store. Defaults to no-op.
+  * @param assumeCurrentSnapshots Can snapshots from the snapshot store
+  * be assumed to be current? I.e. are the snapshots available to all
+  * running processes, or isolated to this process, and if the latter,
+  * is this process exclusively snapshotting the available ids?
+  * NOTE: This is a performance switch. Regardless of setting, it will
+  * not affect correctness.
+  * @param es The event store implementation
+  * @param exeCtx ExecutionContext for basic Future transformations
+  * @param ticker Ticker implementation
   */
 class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   channel: CH,
   newMutator: => StateMutator { type Event = EVT; type State = S },
-  snapshots: SnapshotStore[RID, S] = SnapshotStore.Disabled)(
+  snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
+  assumeCurrentSnapshots: Boolean = false)(
     es: EventStore[ESID, _ >: EVT, CH])(
       implicit exeCtx: ExecutionContext, ticker: Ticker)
     extends Repository[RID, (S, List[EVT])] {
 
+  private type Snapshot = delta.Snapshot[S]
   private type Mutator = StateMutator { type Event = EVT; type State = S }
 
   private[this] val eventStore = es.asInstanceOf[EventStore[ESID, EVT, CH]]
@@ -32,25 +46,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   private type Events = List[EVT]
   private type RepoType = (S, Events)
 
-  import snapshots.Snapshot
-
   def exists(id: RID): Future[Option[Int]] = eventStore.currRevision(id)
 
   private type TXN = eventStore.TXN
-
-  //  private[this] def loadRevision(id: RID, revision: Int): Future[(S, Int)] = {
-  //    val futureState = StreamPromise.fold(eventStore.replayStreamTo(id, revision))(None: Option[(S, Int)]) {
-  //      case (stateRev, txn) =>
-  //        txn.events.foldLeft(stateRev.map(_._1)) {
-  //          case (Some(state), evt) => Some(mutator.next(state, evt))
-  //          case (None, evt) => Some(mutator.init(evt))
-  //        }.map(_ -> txn.revision)
-  //    }
-  //    futureState.map {
-  //      case Some(stateRev) => stateRev
-  //      case None => throw new UnknownIdException(id)
-  //    }
-  //  }
 
   private def buildCurrentSnapshot(
     snapshot: Option[Snapshot],
@@ -58,7 +56,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     replay: StreamCallback[TXN] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
     //    case class Builder(applyEventsAfter: Int, stateOrNull: S, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
     case class Builder(applyEventsAfter: Int, mutator: Mutator, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
-    val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.state)))
+    val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.content)))
     val futureBuilt = StreamPromise.fold(replay)(initBuilder) {
       case (b, txn) =>
         if (txn.revision > b.applyEventsAfter) {
@@ -73,7 +71,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
       case b @ Builder(_, _, _, null) =>
         snapshot.map(_ -> Nil)
       case b @ Builder(_, mutator, concurrentUpdates, lastTxn) =>
-        Some(Snapshot(mutator.state, lastTxn.revision, lastTxn.tick) -> concurrentUpdates)
+        Some(new Snapshot(mutator.state, lastTxn.revision, lastTxn.tick) -> concurrentUpdates)
     }
   }
 
@@ -95,18 +93,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     futureState.map(opt => opt.getOrElse(throw new UnknownIdException(id)))
   }
 
-  final def load(id: RID): Future[((S, Nil.type), Int)] = loadLatest(id, snapshots.load(id), false, None).map {
-    case (snapshot, _) => snapshot.state -> Nil -> snapshot.revision
+  final def load(id: RID): Future[((S, Nil.type), Int)] = loadLatest(id, snapshots.get(id), false, None).map {
+    case (snapshot, _) => snapshot.content -> Nil -> snapshot.revision
   }
-
-  //  final def load(id: RID): Future[(RepoType, Int)] = load(id, None).map {
-  //    case (ar, rev) => ar -> Nil -> rev
-  //  }
-
-  //  def load(id: RID, revision: Option[Int]): Future[(S, Int)] = revision match {
-  //    case Some(revision) => loadRevision(id, revision)
-  //    case None => loadLatest(id, snapshots.load(id), false, None).map(t => t._1._1 -> t._2.revision)
-  //  }
 
   def insert(id: RID, stEvt: RepoType, metadata: Map[String, String]): Future[Int] = stEvt match {
     case (state, events) =>
@@ -122,14 +111,14 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
               throw new DuplicateIdException(id)
             }
         }
-        committedRevision.foreach(rev => snapshots.save(id, new Snapshot(state, rev, tick)))
+        committedRevision.foreach(rev => snapshots.set(id, new Snapshot(state, rev, tick)))
         committedRevision
       }
   }
 
   private def recordUpdate(id: RID, state: S, newRevision: Int, events: List[EVT], metadata: Map[String, String], tick: Long): Future[Int] = {
     val committedRevision = eventStore.commit(channel, id, newRevision, tick, events, metadata).map(_.revision)
-    committedRevision.foreach(rev => snapshots.save(id, new Snapshot(state, rev, tick)))
+    committedRevision.foreach(rev => snapshots.set(id, new Snapshot(state, rev, tick)))
     committedRevision
   }
 
@@ -150,7 +139,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
 
     loadLatest(id, maybeSnapshot, assumeSnapshotCurrent, expectedRevision).flatMap {
       case (snapshot, mergeEvents) =>
-        updateThunk((snapshot.state, mergeEvents.asInstanceOf[Events]), snapshot.revision).flatMap {
+        updateThunk((snapshot.content, mergeEvents.asInstanceOf[Events]), snapshot.revision).flatMap {
           case (state, newEvents) =>
             if (newEvents.isEmpty || mergeEvents == newEvents) {
               Future successful snapshot.revision
@@ -158,9 +147,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
               val now = ticker.nextTick(snapshot.tick)
               recordUpdate(id, state, snapshot.revision + 1, newEvents, metadata, now).recoverWith {
                 case eventStore.DuplicateRevisionException(conflict) =>
-                  val mutator = newMutator.init(snapshot.state)
+                  val mutator = newMutator.init(snapshot.content)
                   conflict.events.foreach(mutator.mutate)
-                  val latestSnapshot = Future successful Some(Snapshot(mutator.state, conflict.revision, conflict.tick))
+                  val latestSnapshot = Future successful Some(new Snapshot(mutator.state, conflict.revision, conflict.tick))
                   onUpdateCollision(id, conflict.revision, conflict.channel)
                   loadAndUpdate(id, expectedRevision, metadata, latestSnapshot, true, updateThunk)
               }
@@ -172,7 +161,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   def update(
     id: RID, expectedRevision: Option[Int], metadata: Map[String, String])(
       updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
-    loadAndUpdate(id, expectedRevision, metadata, snapshots.load(id), snapshots.assumeSnapshotCurrent, updateThunk)
+    loadAndUpdate(id, expectedRevision, metadata, snapshots.get(id), assumeCurrentSnapshots, updateThunk)
   } catch {
     case NonFatal(th) => Future failed th
   }

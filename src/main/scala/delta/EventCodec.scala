@@ -1,11 +1,13 @@
 package delta
 
+import scuff.Codec
+
 trait EventCodec[EVT, SF] {
 
   type EventClass = Class[_ <: EVT]
 
-  private[delta] def name(evt: EVT): String = name(evt.getClass)
-  private[delta] def version(evt: EVT): Byte = version(evt.getClass)
+  def name(evt: EVT): String = name(evt.getClass)
+  def version(evt: EVT): Byte = version(evt.getClass)
 
   /** Unique name of event. */
   def name(cls: EventClass): String
@@ -39,5 +41,18 @@ trait NoVersioning[EVT, SF] {
     decode(name, data)
   }
   def decode(name: String, data: SF): EVT
+
+}
+
+class EventCodecAdapter[EVT, A, B](
+  fmtCodec: Codec[B, A])(
+    implicit evtCodec: EventCodec[EVT, B])
+    extends EventCodec[EVT, A] {
+
+  def name(cls: EventClass) = evtCodec name cls
+  def version(cls: EventClass) = evtCodec version cls
+
+  def encode(evt: EVT): A = fmtCodec encode evtCodec.encode(evt)
+  def decode(name: String, version: Byte, data: A): EVT = evtCodec.decode(name, version, fmtCodec decode data)
 
 }

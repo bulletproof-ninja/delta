@@ -88,6 +88,9 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     withBlockingCallback[String]() {
       store.createIndex(new Document("channel", 1), _)
     }
+    withBlockingCallback[String]() {
+      store.createIndex(new Document("events.name", 1), _)
+    }
     store
   }
 
@@ -258,7 +261,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     def decode(reader: BsonReader, ctx: DecoderContext): TXN = {
         implicit def decCtx = ctx
       reader.readStartDocument()
-      val (id: ID, rev: Int) = readDocument(reader, "_id") {
+      val (id, rev) = readDocument(reader, "_id") {
         reader.readName("stream")
         idCodec.decode(reader, ctx) -> reader.readInt32("rev")
       }

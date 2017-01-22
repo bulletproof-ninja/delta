@@ -22,6 +22,7 @@ import scala.util.Success
 import delta.util.LocalPublishing
 import delta.testing.RandomDelayExecutionContext
 
+// FIXME: Something's not right with the test case. Code coverage is incomplete.
 class TestCollege {
 
   implicit def sem2fut(s: Semester): Future[Semester] = Future successful s

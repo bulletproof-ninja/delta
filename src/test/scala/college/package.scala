@@ -21,7 +21,7 @@ package object college {
 
   trait CollegeEvent
 
-  implicit object Codec
+  implicit object CollegeEventCodec
       extends EventCodec[CollegeEvent, Array[Byte]]
       with NoVersioning[CollegeEvent, Array[Byte]] {
 

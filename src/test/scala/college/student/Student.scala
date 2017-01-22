@@ -2,7 +2,7 @@ package college.student
 
 import delta.ddd._
 import college.StudentId
-import delta.ddd.Fold
+import delta.Fold
 
 object Student extends Entity {
 

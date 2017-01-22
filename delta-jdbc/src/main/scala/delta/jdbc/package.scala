@@ -52,10 +52,15 @@ package object jdbc {
       clob.getSubString(1L, clob.length.toInt)
     }
   }
-  implicit object BigIntColumn extends ColumnType[BigInt] {
+  implicit object BigIntegerColumn extends ColumnType[BigInteger] {
     def typeName = "NUMERIC"
-    def readFrom(row: ResultSet, col: Int): BigInt = row.getBigDecimal(col).toBigInteger
-    override def writeAs(bint: BigInt) = new java.math.BigDecimal(bint.underlying)
+    def readFrom(row: ResultSet, col: Int): BigInteger = row.getBigDecimal(col).toBigInteger
+    override def writeAs(bint: BigInteger) = new java.math.BigDecimal(bint)
+  }
+  implicit object BigIntColumn extends ColumnType[BigInt] {
+    def typeName = BigIntegerColumn.typeName
+    def readFrom(row: ResultSet, col: Int): BigInt = BigIntegerColumn.readFrom(row, col)
+    override def writeAs(bint: BigInt) = BigIntegerColumn.writeAs(bint.underlying)
   }
   class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
     def this(maxLen: Int) = this(maxLen.toString)

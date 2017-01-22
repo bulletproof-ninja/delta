@@ -1,11 +1,11 @@
 package delta.jdbc.mysql
 
-import delta.jdbc.AbstractJdbcReadModelStore
+import delta.jdbc.AbstractJdbcSnapshotStore
 import java.sql.Connection
 import java.sql.SQLException
 
-trait MySQLReadModelStore {
-  store: AbstractJdbcReadModelStore[_, _] =>
+trait MySQLSnapshotStore {
+  store: AbstractJdbcSnapshotStore[_, _] =>
 
   override def createTickIndexDDL: String = store.createTickIndexDDL.replace("IF NOT EXISTS", "")
   override def createIndex(conn: Connection): Unit = {

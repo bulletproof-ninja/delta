@@ -1,38 +1,14 @@
 package sampler.mongo
 
-import java.io.File
-import java.sql.ResultSet
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
-import scala.concurrent.{ Await, ExecutionContext }
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
-import scala.concurrent.duration.DurationInt
-import scala.util.{ Failure, Random, Success, Try }
-
-import org.junit.{ Before, Test }
-import org.junit.AfterClass
-import org.junit.Assert._
-
-import sampler.aggr._
-import scuff._
-import scuff.ddd.Repository
-import delta.ddd.EntityRepository
-import delta.util.LocalPublishing
-import scuff.ddd.DuplicateIdException
-import scuff.concurrent.{
-  StreamCallback,
-  StreamPromise
-}
-import delta.EventSource
-import com.mongodb.async.client.MongoClient
-import delta.mongo.MongoEventStore
-import com.mongodb.async.SingleResultCallback
-import scala.concurrent.Promise
-import org.bson.codecs.configuration.CodecRegistry
 import com.mongodb.MongoNamespace
-import delta.EventCodec
-import scuff.reflect.Surgeon
-import sampler.MyDate
+
+import delta.mongo.MongoEventStore
+import delta.testing.RandomDelayExecutionContext
+import delta.util.LocalPublishing
+import sampler.aggr.DomainEvent
 
 class TestSampler extends sampler.TestSampler {
 
@@ -46,7 +22,7 @@ class TestSampler extends sampler.TestSampler {
       implicit def evtCdc = BsonDomainEventCodec
     new MongoEventStore[Int, DomainEvent, sampler.Aggr.Value](
       txnCollection) with LocalPublishing[Int, DomainEvent, sampler.Aggr.Value] {
-      def publishCtx = global
+      def publishCtx = RandomDelayExecutionContext
     }
   }
 

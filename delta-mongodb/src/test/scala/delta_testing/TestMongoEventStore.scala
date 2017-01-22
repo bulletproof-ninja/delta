@@ -1,13 +1,15 @@
-package delta
+package delta_testing
 
 import com.mongodb.client.result.DeleteResult
 import com.mongodb.connection.ConnectionPoolSettings
 import delta.mongo.{ StringCodec, UnitCodec }
-import org.junit._, Assert._
+import org.junit._
+import org.junit.Assert._
 import delta.util._
 import delta.ddd._
 import delta.testing._
 import scuff.concurrent.Threads
+import delta.EventCodec
 
 object TestMongoEventStore {
   import com.mongodb.async.client._
@@ -31,7 +33,7 @@ object TestMongoEventStore {
   }
 }
 
-@Ignore
+//@Ignore
 class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   import TestMongoEventStore._
   import com.mongodb.async.client._

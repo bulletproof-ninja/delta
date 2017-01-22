@@ -1,6 +1,6 @@
-package delta.cqrs
+package delta
 
-case class ReadModel[D](
-  data: D,
+case class Snapshot[T](
+  content: T,
   revision: Int,
   tick: Long)

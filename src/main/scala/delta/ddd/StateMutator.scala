@@ -1,5 +1,7 @@
 package delta.ddd
 
+import delta.Fold
+
 /**
   * This trait represents encapsulation and transformation
   * of domain state, based on events.

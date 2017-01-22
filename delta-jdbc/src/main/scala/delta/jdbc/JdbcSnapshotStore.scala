@@ -4,23 +4,23 @@ import scuff._
 import collection.Map
 import java.sql.Connection
 import scala.util.Try
-import delta.cqrs.ReadModelStore
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext
-import delta.cqrs.ReadModel
+import scala.concurrent.{ Future, ExecutionContext }
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import delta.SnapshotStore
+import delta.Snapshot
 
-abstract class AbstractJdbcReadModelStore[K, D: ColumnType] protected (
+abstract class AbstractJdbcSnapshotStore[K, D >: Null: ColumnType] protected (
   table: String, schema: Option[String])(
-    implicit jdbcExeCtx: ExecutionContext)
-    extends ReadModelStore[K, D] {
+    implicit jdbcCtx: ExecutionContext)
+    extends SnapshotStore[K, D] {
   cp: ConnectionProvider =>
 
-  def ensureTable(): Unit =
+  def ensureTable(): this.type =
     useConnection { conn =>
       createTable(conn)
       createIndex(conn)
+      this
     }
 
   protected case class ColumnDef(name: String, colTypeName: String)
@@ -109,55 +109,43 @@ abstract class AbstractJdbcReadModelStore[K, D: ColumnType] protected (
     } finally Try(stm.close)
   }
 
-  def lastTick(): Future[Option[Long]] = Future {
-    useConnection { conn =>
-      val stm = conn.createStatement()
-      try {
-        val rs = stm.executeQuery(s"SELECT MAX(tick) FROM $tableRef")
-        if (rs.next) {
-          val maxTick = rs.getLong(1)
-          if (rs.wasNull) None
-          else Some(maxTick)
-        } else None
-      } finally Try(stm.close)
-    }
-  }
-
-  private def getReadModel(rs: ResultSet): ReadModel[D] = {
+  private def getSnapshot(rs: ResultSet): Snapshot[D] = {
     val data = colType[D].readFrom(rs, 1)
     val revision = rs.getInt(2)
     val tick = rs.getLong(3)
-    new ReadModel(data, revision, tick)
+    new Snapshot(data, revision, tick)
   }
-  private def setReadModel(ps: PreparedStatement, rm: ReadModel[D]): PreparedStatement = {
-    ps.setObject(1, colType[D].writeAs(rm.data))
-    ps.setInt(2, rm.revision)
-    ps.setLong(3, rm.tick)
+  private def setSnapshot(ps: PreparedStatement, s: Snapshot[D]): PreparedStatement = {
+    ps.setObject(1, colType[D].writeAs(s.content))
+    ps.setInt(2, s.revision)
+    ps.setLong(3, s.tick)
     ps
   }
 
-  def get(key: K): Future[Option[ReadModel[D]]] = getAll(List(key)).map(_.get(key))
-  def getAll(keys: Iterable[K]): Future[Map[K, ReadModel[D]]] = Future {
+  def get(key: K): Future[Option[Snapshot[D]]] = getAll(List(key)).map(_.get(key))
+  def getAll(keys: Iterable[K]): Future[Map[K, Snapshot[D]]] = Future {
     useConnection { conn =>
       val ps = conn.prepareStatement(selectOneSQL)
       try {
-        keys.flatMap { key =>
-          val rs = setKeyParms(ps, key).executeQuery()
-          try {
-            if (rs.next) Some(key -> getReadModel(rs))
-            else None
-          } finally Try(rs.close)
-        }.toMap
+        keys.foldLeft(Map.empty[K, Snapshot[D]]) {
+          case (map, key) =>
+            val rs = setKeyParms(ps, key).executeQuery()
+            try {
+              if (rs.next) {
+                map.updated(key, getSnapshot(rs))
+              } else map
+            } finally Try(rs.close)
+        }
       } finally Try(ps.close)
     }
   }
 
-  def set(key: K, data: ReadModel[D]): Future[Unit] = Future {
+  def set(key: K, data: Snapshot[D]): Future[Unit] = Future {
     useConnection { conn =>
       set(conn)(key, data)
     }
   }
-  private def set(conn: Connection)(key: K, data: ReadModel[D]): Unit = {
+  private def set(conn: Connection)(key: K, data: Snapshot[D]): Unit = {
     if (data.revision == 0) { // Definitely insert
       insert(conn)(key, data)
     } else { // Who knows? Assume common case, which is update, but insert if not
@@ -167,19 +155,19 @@ abstract class AbstractJdbcReadModelStore[K, D: ColumnType] protected (
       }
     }
   }
-  protected def insert(conn: Connection)(key: K, data: ReadModel[D]): Unit = {
+  protected def insert(conn: Connection)(key: K, data: Snapshot[D]): Unit = {
     val ps = conn.prepareStatement(insertOneSQL)
     try {
-      setKeyParms(setReadModel(ps, data), key, offset = 3).executeUpdate()
+      setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate()
     } finally Try(ps.close)
   }
-  protected def update(conn: Connection)(key: K, data: ReadModel[D]): Int = {
+  protected def update(conn: Connection)(key: K, data: Snapshot[D]): Int = {
     val ps = conn.prepareStatement(updateDataRevTickSQL)
     try {
-      setKeyParms(setReadModel(ps, data), key, offset = 3).executeUpdate()
+      setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate()
     } finally Try(ps.close)
   }
-  def setAll(map: Map[K, ReadModel[D]]): Future[Unit] =
+  def setAll(map: Map[K, Snapshot[D]]): Future[Unit] =
     if (map.isEmpty) Future successful Unit
     else Future {
       useConnection { conn =>
@@ -211,37 +199,37 @@ abstract class AbstractJdbcReadModelStore[K, D: ColumnType] protected (
 
 }
 
-class JdbcReadModelStore1[PK1: ColumnType, D: ColumnType](
+class JdbcSnapshotStore[PK: ColumnType, D >: Null: ColumnType](
   table: String, schema: Option[String] = None)(
-    implicit jdbcExeCtx: ExecutionContext)
-    extends AbstractJdbcReadModelStore[PK1, D](table, schema) {
+    implicit jdbcCtx: ExecutionContext)
+    extends AbstractJdbcSnapshotStore[PK, D](table, schema) {
   cp: ConnectionProvider =>
 
   def this(table: String, schema: String)(
     implicit jdbcExeCtx: ExecutionContext) = this(table, schema.optional)
 
-  protected def pk1Name = "pk1"
+  protected def pkName = "id"
 
-  protected val pkColumns = List(ColumnDef(pk1Name, colType[PK1].typeName))
+  protected val pkColumns = List(ColumnDef(pkName, colType[PK].typeName))
 
-  protected def setKeyParms(ps: PreparedStatement, k: PK1, offset: Int): PreparedStatement = {
-    ps.setObject(1 + offset, colType[PK1].writeAs(k))
+  protected def setKeyParms(ps: PreparedStatement, k: PK, offset: Int): PreparedStatement = {
+    ps.setObject(1 + offset, colType[PK].writeAs(k))
     ps
   }
 
 }
 
-class JdbcReadModelStore2[PK1: ColumnType, PK2: ColumnType, D: ColumnType](
+class JdbcSnapshotStore2[PK1: ColumnType, PK2: ColumnType, D >: Null: ColumnType](
   table: String, schema: Option[String] = None)(
-    implicit jdbcExeCtx: ExecutionContext)
-    extends AbstractJdbcReadModelStore[(PK1, PK2), D](table, schema) {
+    implicit jdbcCtx: ExecutionContext)
+    extends AbstractJdbcSnapshotStore[(PK1, PK2), D](table, schema) {
   cp: ConnectionProvider =>
 
   def this(table: String, schema: String)(
-    implicit jdbcExeCtx: ExecutionContext) = this(table, schema.optional)
+    implicit jdbcCtx: ExecutionContext) = this(table, schema.optional)
 
-  protected def pk1Name = "pk1"
-  protected def pk2Name = "pk2"
+  protected def pk1Name = "id_1"
+  protected def pk2Name = "id_2"
 
   protected val pkColumns = List(
     ColumnDef(pk1Name, colType[PK1].typeName),
@@ -250,33 +238,6 @@ class JdbcReadModelStore2[PK1: ColumnType, PK2: ColumnType, D: ColumnType](
   protected def setKeyParms(ps: PreparedStatement, k: (PK1, PK2), offset: Int): PreparedStatement = {
     ps.setObject(1 + offset, colType[PK1].writeAs(k._1))
     ps.setObject(2 + offset, colType[PK2].writeAs(k._2))
-    ps
-  }
-
-}
-
-class JdbcReadModelStore3[PK1: ColumnType, PK2: ColumnType, PK3: ColumnType, D: ColumnType](
-  table: String, schema: Option[String] = None)(
-    implicit jdbcExeCtx: ExecutionContext)
-    extends AbstractJdbcReadModelStore[(PK1, PK2, PK3), D](table, schema) {
-  cp: ConnectionProvider =>
-
-  def this(table: String, schema: String)(
-    implicit jdbcExeCtx: ExecutionContext) = this(table, schema.optional)
-
-  protected def pk1Name = "pk1"
-  protected def pk2Name = "pk2"
-  protected def pk3Name = "pk3"
-
-  protected val pkColumns = List(
-    ColumnDef(pk1Name, colType[PK1].typeName),
-    ColumnDef(pk2Name, colType[PK2].typeName),
-    ColumnDef(pk3Name, colType[PK3].typeName))
-
-  protected def setKeyParms(ps: PreparedStatement, k: (PK1, PK2, PK3), offset: Int): PreparedStatement = {
-    ps.setObject(1 + offset, colType[PK1].writeAs(k._1))
-    ps.setObject(2 + offset, colType[PK2].writeAs(k._2))
-    ps.setObject(3 + offset, colType[PK3].writeAs(k._3))
     ps
   }
 

@@ -18,14 +18,12 @@ private object JdbcEventStore {
 
 abstract class JdbcEventStore[ID, EVT, CH, SF](
   dialect: Dialect[ID, EVT, CH, SF],
-  blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool,
-  ensureSchema: Boolean = true)(implicit codec: EventCodec[EVT, SF])
+  blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)(
+    implicit codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT, CH] {
   cp: ConnectionProvider =>
 
-  if (ensureSchema) ensureSchema()
-
-  protected def ensureSchema(): Unit = {
+  def ensureSchema(): this.type = {
     forUpdate { conn =>
       dialect.createSchema(conn)
       dialect.createStreamTable(conn)
@@ -36,6 +34,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       dialect.createEventNameIndex(conn)
       dialect.createMetadataTable(conn)
     }
+    this
   }
 
   protected def prepareUpdate(conn: Connection) {
@@ -159,9 +158,12 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       val nextRow =
         if (singleStream) nextRevision(rs, col).map(stream -> _)
         else nextTransactionKey(rs, col)
-      nextRow.foreach {
-        case (nextStream, nextRev) if revision != nextRev || stream != nextStream =>
-          nextTxnKey = nextRow
+      nextRow match {
+        case Some((nextStream, nextRev)) =>
+          if (revision != nextRev || stream != nextStream) {
+            nextTxnKey = nextRow
+          }
+        case _ => // Ignore
       }
       continue = nextRow.isDefined
     } while (continue && nextTxnKey.isEmpty)

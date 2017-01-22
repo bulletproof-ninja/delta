@@ -1,6 +1,5 @@
 package delta.testing
 
-import scala.language.implicitConversions
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.{ MILLISECONDS, SECONDS }
 import scala.collection.concurrent.TrieMap
@@ -11,7 +10,6 @@ import scala.concurrent.duration.{ Duration, DurationInt }
 import scala.util.{ Failure, Success, Try }
 import org.junit._
 import org.junit.Assert._
-import rapture.json.jsonBackends.jackson._
 import rapture.json.jsonStringContext
 import scuff._
 import scuff.ddd.{ Repository, UnknownIdException }
@@ -24,6 +22,8 @@ import delta.EventStore
 import delta.NoVersioning
 import delta.SysClockTicker
 import scala.{ SerialVersionUID => version }
+import delta.Fold
+import delta.Snapshot
 
 trait AggrEventHandler {
   type RT
@@ -420,8 +420,8 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
       RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
       def publishCtx = RandomDelayExecutionContext
     }
-    val snapshotMap = new collection.concurrent.TrieMap[String, SnapshotStore[String, AggrState]#Snapshot]
-    val snapshotStore = new MapSnapshotStore[Aggr, String, AggrEvent, AggrState](snapshotMap)
+    val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
+    val snapshotStore = new MapSnapshotStore[String, AggrState](snapshotMap)
     repo = new EntityRepository((), TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
   }
 

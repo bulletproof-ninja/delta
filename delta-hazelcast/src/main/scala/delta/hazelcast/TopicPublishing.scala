@@ -7,7 +7,6 @@ import com.hazelcast.core.{ ITopic, Message, MessageListener }
 import scuff.Subscription
 import delta.Publishing
 import concurrent.blocking
-import scuff.Codec
 
 /**
   * Publishing implementation using a

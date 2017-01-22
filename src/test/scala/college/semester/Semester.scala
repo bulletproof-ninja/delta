@@ -2,7 +2,7 @@ package college.semester
 
 import college._
 import delta.ddd._
-import delta.ddd.Fold
+import delta.Fold
 
 object Semester extends Entity {
   def apply(cmd: CreateClass): Semester = {

@@ -1,31 +1,58 @@
-package delta.ddd
+package delta.util
 
-import concurrent._
+import collection.Map
+import scala.concurrent.Future
+import scala.util.control.NonFatal
+
+import delta.{ SnapshotStore, Snapshot }
 
 /**
- * Trait that stores snapshots in a a [[scala.collection.concurrent.Map]]. Should probably be
- * used in conjunction with a limiter, something to determine if a given
- * revision should be snapshotted, e.g. [[FixedIntervalSnapshots]] or [[LoadTimeSnapshots]],
- * unless memory consumption is a non-issue.
- */
-class MapSnapshotStore[AR, ID, EVT, S >: Null](map: collection.concurrent.Map[ID, SnapshotStore[ID, S]#Snapshot])(implicit ec: ExecutionContext)
-    extends SnapshotStore[ID, S] {
+  * Trait that stores snapshots in a [[scala.collection.concurrent.Map]].
+  */
+class MapSnapshotStore[K, V >: Null](
+  cmap: collection.concurrent.Map[K, Snapshot[V]])
+    extends SnapshotStore[K, V] {
 
   @annotation.tailrec
-  private def trySave(id: ID, snapshot: Snapshot) {
-    map.putIfAbsent(id, snapshot) match {
+  private def trySave(id: K, snapshot: Snapshot[V]) {
+    cmap.putIfAbsent(id, snapshot) match {
       case None => // Success
       case Some(other) =>
         if (snapshot.revision > other.revision) { // replace with later revision
-          if (!map.replace(id, other, snapshot)) {
+          if (!cmap.replace(id, other, snapshot)) {
             trySave(id, snapshot)
           }
         }
     }
   }
-  def save(id: ID, snapshot: Snapshot) = Future(trySave(id, snapshot)).onFailure {
-    case t => ec.reportFailure(t)
+  def set(id: K, snapshot: Snapshot[V]) = try {
+    trySave(id, snapshot)
+    SnapshotStore.UnitFuture
+  } catch {
+    case NonFatal(th) => Future failed th
   }
-  def load(id: ID): Future[Option[Snapshot]] = Future(map.get(id))
+  def get(id: K): Future[Option[Snapshot[V]]] = Future successful cmap.get(id)
+
+  def getAll(keys: Iterable[K]): Future[Map[K, Snapshot[V]]] = {
+    Future successful keys.flatMap(key => cmap.get(key).map(key -> _)).toMap
+  }
+  def setAll(map: Map[K, Snapshot[V]]): Future[Unit] = {
+    map.foreach {
+      case (id, snapshot) => set(id, snapshot)
+    }
+    SnapshotStore.UnitFuture
+  }
+  def update(key: K, revision: Int, tick: Long): Future[Unit] = {
+    cmap.get(key).foreach { snapshot =>
+      set(key, snapshot.copy(revision = revision, tick = tick))
+    }
+    SnapshotStore.UnitFuture
+  }
+  def updateAll(revisions: Map[K, (Int, Long)]): Future[Unit] = {
+    revisions.foreach {
+      case (key, (revision, tick)) => update(key, revision, tick)
+    }
+    SnapshotStore.UnitFuture
+  }
 
 }

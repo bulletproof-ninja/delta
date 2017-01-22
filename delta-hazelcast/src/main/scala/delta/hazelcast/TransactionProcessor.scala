@@ -7,44 +7,67 @@ import scala.collection.immutable.TreeMap
 
 import com.hazelcast.map.AbstractEntryProcessor
 
-import delta.Transaction
-import delta.ddd.Fold
-import delta.cqrs.ReadModel
+import delta.{ Fold, Snapshot, Transaction }
 
-case class ReadModelState[D, EVT](
-  model: ReadModel[D],
-  dataUpdated: Boolean = false,
+case class EntryState[D, EVT](
+  snapshot: Snapshot[D],
+  contentUpdated: Boolean = false,
   unapplied: TreeMap[Int, Transaction[_, EVT, _]] = TreeMap.empty[Int, Transaction[_, EVT, _]])
 
-sealed trait ModelUpdateResult
-case object IgnoredDuplicate extends ModelUpdateResult
-case class MissingRevisions(range: Range) extends ModelUpdateResult
-case class Updated[D](model: ReadModel[D]) extends ModelUpdateResult
+sealed abstract class EntryUpdateResult
+case object IgnoredDuplicate extends EntryUpdateResult
+case class MissingRevisions(range: Range) extends EntryUpdateResult
+case class Updated[D](snapshot: Snapshot[D]) extends EntryUpdateResult
 
-final class ReadModelUpdater[K, D >: Null, EVT](
+final class EntryStateUpdater[K, D, EVT](val snapshot: Snapshot[D])
+    extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
+
+  type S = EntryState[D, EVT]
+
+  def process(entry: Entry[K, S]): Object = {
+    entry.getValue match {
+      case null =>
+        entry setValue new EntryState(snapshot, contentUpdated = true)
+
+      case EntryState(null, _, unapplied) =>
+        val remainingUnapplied = unapplied.dropWhile(_._1 <= snapshot.revision)
+        entry setValue new EntryState(snapshot, contentUpdated = remainingUnapplied.isEmpty, remainingUnapplied)
+
+      case EntryState(Snapshot(_, revision, _), _, unapplied) if snapshot.revision > revision =>
+        val remainingUnapplied = unapplied.dropWhile(_._1 <= snapshot.revision)
+        entry setValue new EntryState(snapshot, contentUpdated = remainingUnapplied.isEmpty, remainingUnapplied)
+
+      case _ => // Ignore
+    }
+    null
+  }
+
+}
+
+final class TransactionProcessor[K, D >: Null, EVT](
   val txn: Transaction[K, EVT, _],
-  val modelUpdater: Fold[D, EVT])
-    extends AbstractEntryProcessor[K, ReadModelState[D, EVT]](true) {
+  val stateFold: Fold[D, EVT])
+    extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
 
-  type S = ReadModelState[D, EVT]
+  type S = EntryState[D, EVT]
 
   private def apply(events: List[EVT], dataOrNull: D): D = events match {
     case Nil => dataOrNull.ensuring(_ != null)
     case evt :: tail => dataOrNull match {
-      case null => apply(tail, modelUpdater.init(evt))
-      case data => apply(tail, modelUpdater.next(data, evt))
+      case null => apply(tail, stateFold.init(evt))
+      case data => apply(tail, stateFold.next(data, evt))
     }
   }
 
   def process(entry: Entry[K, S]): Object = processTransaction(entry, this.txn)
 
   @tailrec
-  private def processTransaction(entry: Entry[K, S], txn: Transaction[_, EVT, _]): ModelUpdateResult = {
+  private def processTransaction(entry: Entry[K, S], txn: Transaction[_, EVT, _]): EntryUpdateResult = {
     entry.getValue match {
 
       case null => // First transaction seen
         if (txn.revision == 0) { // First transaction, as expected
-          val model = new ReadModel(apply(txn.events, null), txn.revision, txn.tick)
+          val model = new Snapshot(apply(txn.events, null), txn.revision, txn.tick)
           entry setValue new S(model, true)
           Updated(model)
         } else { // Not first, so missing some
@@ -52,9 +75,9 @@ final class ReadModelUpdater[K, D >: Null, EVT](
           MissingRevisions(0 until txn.revision)
         }
 
-      case ReadModelState(null, _, unapplied) => // Un-applied transactions exists, no model yet
+      case EntryState(null, _, unapplied) => // Un-applied transactions exists, no model yet
         if (txn.revision == 0) { // This transaction is first, so apply
-          val model = new ReadModel(apply(txn.events, null), txn.revision, txn.tick)
+          val model = new Snapshot(apply(txn.events, null), txn.revision, txn.tick)
           entry setValue new S(model, true, unapplied.tail)
           processTransaction(entry, unapplied.head._2)
         } else { // Still not first transaction
@@ -63,13 +86,13 @@ final class ReadModelUpdater[K, D >: Null, EVT](
           MissingRevisions(0 until state.unapplied.head._1)
         }
 
-      case ReadModelState(model, _, unapplied) =>
+      case EntryState(model, _, unapplied) =>
         val expectedRev = model.revision + 1
         if (txn.revision == expectedRev) { // Expected revision, apply
-          val updModel = new ReadModel(apply(txn.events, model.data), txn.revision, txn.tick)
+          val updModel = new Snapshot(apply(txn.events, model.content), txn.revision, txn.tick)
           unapplied.headOption match {
             case None =>
-              val dataUpdated = model.data != updModel.data
+              val dataUpdated = model.content != updModel.content
               entry setValue new S(updModel, dataUpdated)
               Updated(updModel)
             case Some((_, unappliedTxn)) =>

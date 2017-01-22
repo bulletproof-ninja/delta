@@ -1,16 +1,16 @@
 package delta.testing.mysql
 
-import delta.testing.TestReadModelStore
+import delta.testing.TestSnapshotStore
 import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
 import org.junit._
-import delta.cqrs.ReadModelStore
-import delta.jdbc.JdbcReadModelStore3
+import delta.SnapshotStore
+import delta.jdbc.JdbcSnapshotStore2
 import delta.jdbc.DataSourceConnectionProvider
 import delta.testing.RandomDelayExecutionContext
 import delta.jdbc.VarCharColumn
-import delta.jdbc.mysql.MySQLReadModelStore
+import delta.jdbc.mysql.MySQLSnapshotStore
 
-object TestJdbcReadModelStore {
+object TestJdbcSnapshotStore {
 
   implicit def ec = RandomDelayExecutionContext
 
@@ -34,21 +34,15 @@ object TestJdbcReadModelStore {
   implicit object StringColumn extends VarCharColumn(255)
 }
 
-class TestJdbcReadModelStore
-    extends TestReadModelStore {
-  import TestJdbcReadModelStore._
+class TestJdbcSnapshotStore
+    extends TestSnapshotStore {
+  import TestJdbcSnapshotStore._
 
-  val store: ReadModelStore[(String, Long, Int), String] =
-    new JdbcReadModelStore3[String, Long, Int, String]("readmodel_test"
-        ) with DataSourceConnectionProvider with MySQLReadModelStore {
+  override val store: SnapshotStore[(Long, Int), String] =
+    new JdbcSnapshotStore2[Long, Int, String](
+      "readmodel_test") with DataSourceConnectionProvider with MySQLSnapshotStore {
       val dataSource = ds
-    }
-
-  @Before def setup {
-    store match {
-      case store: JdbcReadModelStore3[_, _, _, _] => store.ensureTable()
-    }
-  }
+    }.ensureTable()
 
   @Test
   def mock() {}
