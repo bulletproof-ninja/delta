@@ -9,7 +9,7 @@ import delta.{ SnapshotStore, Snapshot }
 /**
   * Trait that stores snapshots in a [[scala.collection.concurrent.Map]].
   */
-class MapSnapshotStore[K, V >: Null](
+class MapSnapshotStore[K, V](
   cmap: collection.concurrent.Map[K, Snapshot[V]])
     extends SnapshotStore[K, V] {
 

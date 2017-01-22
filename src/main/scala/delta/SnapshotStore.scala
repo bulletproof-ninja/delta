@@ -3,7 +3,7 @@ package delta
 import collection.Map
 import scala.concurrent.Future
 
-trait SnapshotStore[K, T >: Null] {
+trait SnapshotStore[K, T] {
   def get(key: K): Future[Option[Snapshot[T]]]
   def set(key: K, snapshot: Snapshot[T]): Future[Unit]
   def getAll(keys: Iterable[K]): Future[Map[K, Snapshot[T]]]
@@ -25,5 +25,5 @@ private[delta] object SnapshotStore {
     def updateAll(revisions: Map[Any, (Int, Long)]): Future[Unit] = UnitFuture
   }
 
-  def empty[K, T >: Null] = Empty.asInstanceOf[SnapshotStore[K, T]]
+  def empty[K, T] = Empty.asInstanceOf[SnapshotStore[K, T]]
 }

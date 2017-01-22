@@ -10,7 +10,7 @@ import java.sql.ResultSet
 import delta.SnapshotStore
 import delta.Snapshot
 
-abstract class AbstractJdbcSnapshotStore[K, D >: Null: ColumnType] protected (
+abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   table: String, schema: Option[String])(
     implicit jdbcCtx: ExecutionContext)
     extends SnapshotStore[K, D] {
@@ -199,7 +199,7 @@ abstract class AbstractJdbcSnapshotStore[K, D >: Null: ColumnType] protected (
 
 }
 
-class JdbcSnapshotStore[PK: ColumnType, D >: Null: ColumnType](
+class JdbcSnapshotStore[PK: ColumnType, D: ColumnType](
   table: String, schema: Option[String] = None)(
     implicit jdbcCtx: ExecutionContext)
     extends AbstractJdbcSnapshotStore[PK, D](table, schema) {
@@ -219,7 +219,7 @@ class JdbcSnapshotStore[PK: ColumnType, D >: Null: ColumnType](
 
 }
 
-class JdbcSnapshotStore2[PK1: ColumnType, PK2: ColumnType, D >: Null: ColumnType](
+class JdbcSnapshotStore2[PK1: ColumnType, PK2: ColumnType, D: ColumnType](
   table: String, schema: Option[String] = None)(
     implicit jdbcCtx: ExecutionContext)
     extends AbstractJdbcSnapshotStore[(PK1, PK2), D](table, schema) {

@@ -20,7 +20,7 @@ import scala.concurrent.Future
   * NOTE: The `ImapAsSnapshotStore` is not a suitable implementation,
   * and is not allowed.
   */
-class SnapshotStoreAsHzMapStore[K, T >: Null](
+class SnapshotStoreAsHzMapStore[K, T](
   store: SnapshotStore[K, T],
   preloadKeys: Iterable[K] = Set.empty[K],
   awaitTimeout: FiniteDuration = 11.seconds)

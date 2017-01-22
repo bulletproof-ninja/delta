@@ -13,7 +13,7 @@ import delta.{ SnapshotStore, Snapshot }
   * [[delta.SnapshotStore]] implementation, backed
   * by a Hazelcast `IMap`.
   */
-class IMapAsSnapshotStore[K, V >: Null](
+class IMapAsSnapshotStore[K, V](
   imap: IMap[K, Snapshot[V]],
   logger: ILogger)(implicit ec: ExecutionContext)
     extends SnapshotStore[K, V] {
