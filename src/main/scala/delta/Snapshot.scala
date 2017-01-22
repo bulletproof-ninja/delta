@@ -1,6 +1,6 @@
 package delta
 
-case class Snapshot[T](
-  content: T,
+case class Snapshot[Content](
+  content: Content,
   revision: Int,
   tick: Long)
