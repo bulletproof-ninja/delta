@@ -7,8 +7,6 @@ trait Entity {
 
   type Type
   type Id
-//  type Event
-//  type State >: Null
   type Mutator <: StateMutator
 
   private[ddd] def getMutator(e: Type): Mutator = {
