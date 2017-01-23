@@ -291,6 +291,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
     val query = makeTxnQuery(WHERE)
     prepareStatement(query) { ps =>
       val colIdx = Iterator.from(1)
+      if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
         setObject(ps)(colIdx.next, channel)
       }
