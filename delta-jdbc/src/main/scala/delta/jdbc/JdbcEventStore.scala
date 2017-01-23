@@ -123,11 +123,12 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     else None
   }
 
-  private def future(cb: StreamCallback[TXN])(thunk: => Unit): Unit =
+  private def FutureWith(cb: StreamCallback[TXN])(thunk: => Unit): Unit = Future {
     Try(thunk) match {
       case Success(_) => cb.onCompleted()
       case Failure(th) => cb onError th
     }
+  }(blockingJdbcCtx)
 
   @annotation.tailrec
   private def processTransactions(singleStream: Boolean, onNext: TXN => Unit)(
@@ -175,7 +176,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
   }
 
   def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit =
-    future(callback) {
+    FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamFull(stream) {
           case (rs, col) =>
@@ -186,7 +187,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       }
     }
   def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamCallback[TXN]): Unit =
-    future(callback) {
+    FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamRange(stream, revisionRange) {
           case (rs, col) =>
@@ -198,7 +199,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     }
   def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit =
     if (fromRevision == 0) replayStream(stream)(callback)
-    else future(callback) {
+    else FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamRange(stream, fromRevision to Int.MaxValue) {
           case (rs, col) =>
@@ -210,7 +211,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     }
 
   def query(selector: Selector)(callback: StreamCallback[TXN]): Unit =
-    future(callback) {
+    FutureWith(callback) {
       forQuery { implicit conn =>
         val select = selector match {
           case Everything => dialect.selectTransactions() _
@@ -228,9 +229,8 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       }
     }
   def querySince(sinceTick: Long, selector: Selector)(callback: StreamCallback[TXN]): Unit =
-    future(callback) {
+    FutureWith(callback) {
       forQuery { implicit conn =>
-        import Selector._
         val (singleStream, onNext, select) = selector match {
           case Everything =>
             (None, (callback.onNext _), dialect.selectTransactions(sinceTick) _)
