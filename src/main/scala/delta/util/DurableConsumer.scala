@@ -42,9 +42,9 @@ trait DurableConsumer[ID, EVT, CH] {
         val liveSubscription = es.subscribe(selector(es))(switcher.live)
         lastTickAtStart match {
           case None =>
-            es.query(selector(es))(switcher.catchUp)
+            es.query(selector(es))(switcher.callback(ec.reportFailure))
           case Some(lastTickAtStart) =>
-            es.querySince(lastTickAtStart - maxTickSkew, selector(es))(switcher.catchUp)
+            es.querySince(lastTickAtStart - maxTickSkew, selector(es))(switcher.callback(ec.reportFailure))
         }
 
         liveSubscription
@@ -69,9 +69,9 @@ trait DurableConsumer[ID, EVT, CH] {
           throw new TimeoutException(s"Timed out after $latchTimeout, awaiting catch-up processing")
         }
     }
-    def catchUp = new StreamCallback[TXN] {
+    def callback(reportFailure: Throwable => Unit) = new StreamCallback[TXN] {
       def onNext(txn: TXN): Unit = process(txn)
-      def onError(th: Throwable): Unit = throw th
+      def onError(th: Throwable): Unit = reportFailure(th)
       def onCompleted(): Unit = {
         val ll = state.get
         val list = ll.left.get
