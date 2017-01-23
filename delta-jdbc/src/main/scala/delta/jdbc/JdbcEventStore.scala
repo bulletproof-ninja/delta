@@ -158,12 +158,11 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       val nextRow =
         if (singleStream) nextRevision(rs, col).map(stream -> _)
         else nextTransactionKey(rs, col)
-      nextRow match {
-        case Some((nextStream, nextRev)) =>
+      nextRow foreach {
+        case (nextStream, nextRev) =>
           if (revision != nextRev || stream != nextStream) {
             nextTxnKey = nextRow
           }
-        case _ => // Ignore
       }
       continue = nextRow.isDefined
     } while (continue && nextTxnKey.isEmpty)
