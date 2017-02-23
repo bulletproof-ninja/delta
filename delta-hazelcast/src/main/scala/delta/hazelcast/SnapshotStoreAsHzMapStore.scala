@@ -62,7 +62,7 @@ class SnapshotStoreAsHzMapStore[K, T](
       case (key, EntryState(model, true, unapplied)) if unapplied.isEmpty => key -> model
     }
     val revUpdated = map.asScala.collect {
-      case (key, EntryState(model, false, unapplied)) if unapplied.isEmpty => key -> (model.revision, model.tick)
+      case (key, EntryState(model, false, unapplied)) if unapplied.isEmpty => key -> (model.revision -> model.tick)
     }
     var futures: List[Future[_]] = Nil
     if (contentUpdated.nonEmpty) futures ::= store.setAll(contentUpdated)

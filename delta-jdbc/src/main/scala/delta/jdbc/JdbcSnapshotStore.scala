@@ -176,7 +176,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
         }
       }
     }
-  def update(key: K, revision: Int, tick: Long): Future[Unit] = updateAll(Map(key -> (revision, tick)))
+  def update(key: K, revision: Int, tick: Long): Future[Unit] = updateAll(Map(key -> (revision -> tick)))
   def updateAll(revisions: Map[K, (Int, Long)]): Future[Unit] =
     if (revisions.isEmpty) Future successful Unit
     else Future {
