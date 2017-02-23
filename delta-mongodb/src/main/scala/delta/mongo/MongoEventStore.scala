@@ -325,8 +325,8 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
             matcher.append("events.name", new Document("$in", toJList(evtNames)))
         }
         if (matchByChannel.size == 1) {
-          import collection.JavaConversions._
-          matchByChannel.head.foreach { entry =>
+          import collection.JavaConverters._
+          matchByChannel.head.asScala.foreach { entry =>
             docFilter.append(entry._1, entry._2)
           }
         } else {
