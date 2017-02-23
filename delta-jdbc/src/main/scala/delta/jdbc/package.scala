@@ -7,6 +7,32 @@ import java.sql.ResultSet
 import scuff.Numbers._
 import java.io.ByteArrayInputStream
 
+package jdbc {
+  class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
+    def this(maxLen: Int) = this(maxLen.toString)
+    val typeName = len match {
+      case "" => "VARBINARY"
+      case _ => s"VARBINARY($len)"
+    }
+    def readFrom(row: ResultSet, col: Int) = row.getBytes(col)
+  }
+  class VarCharColumn(len: String = "") extends ColumnType[String] {
+    def this(maxLen: Int) = this(maxLen.toString)
+    val typeName = len match {
+      case "" => "VARCHAR"
+      case _ => s"VARCHAR($len)"
+    }
+
+    def readFrom(row: ResultSet, col: Int) = row.getString(col)
+  }
+  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
+      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
+    def typeName = "VARCHAR(255)"
+    def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
+  }
+
+}
+
 package object jdbc {
   object UUIDBinaryColumn extends ColumnType[UUID] {
     def typeName = "BINARY(16)"
@@ -36,15 +62,6 @@ package object jdbc {
     def readFrom(row: ResultSet, col: Int) = row.getInt(col)
   }
 
-  class VarCharColumn(len: String = "") extends ColumnType[String] {
-    def this(maxLen: Int) = this(maxLen.toString)
-    val typeName = len match {
-      case "" => "VARCHAR"
-      case _ => s"VARCHAR($len)"
-    }
-
-    def readFrom(row: ResultSet, col: Int) = row.getString(col)
-  }
   object ClobColumn extends ColumnType[String] {
     def typeName = "CLOB"
     def readFrom(row: ResultSet, col: Int) = {
@@ -62,15 +79,6 @@ package object jdbc {
     def readFrom(row: ResultSet, col: Int): BigInt = BigIntegerColumn.readFrom(row, col)
     override def writeAs(bint: BigInt) = BigIntegerColumn.writeAs(bint.underlying)
   }
-  class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
-    def this(maxLen: Int) = this(maxLen.toString)
-    val typeName = len match {
-      case "" => "VARBINARY"
-      case _ => s"VARBINARY($len)"
-    }
-    def readFrom(row: ResultSet, col: Int) = row.getBytes(col)
-  }
-
   object BlobColumn extends ColumnType[Array[Byte]] {
     def typeName = "BLOB"
     def readFrom(row: ResultSet, col: Int): Array[Byte] = {
@@ -91,9 +99,4 @@ package object jdbc {
       def typeName = "VARCHAR(255)"
       def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }
-  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
-      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
-    def typeName = "VARCHAR(255)"
-    def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
-  }
 }

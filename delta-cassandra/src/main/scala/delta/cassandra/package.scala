@@ -9,6 +9,32 @@ import collection.immutable._
 import collection.{ Map => aMap, Seq => aSeq }
 import collection.mutable.{ Map => mMap }
 
+package cassandra {
+  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
+      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
+    def typeName = "ascii"
+    def readFrom(row: Row, col: Int) = byName(row.getString(col))
+  }
+
+  private abstract class AbstractMapColumn[K: ColumnType, V: ColumnType, M <: aMap[K, V]: ClassTag]
+      extends ColumnType[M] {
+    import collection.JavaConverters._
+    type T = M
+    @inline protected def kType = implicitly[ColumnType[K]]
+    @inline protected def vType = implicitly[ColumnType[V]]
+    final val typeName = s"frozen<map<${kType.typeName},${vType.typeName}>>"
+    final override def writeAs(map: T): java.util.Map[K, V] = map.asJava
+  }
+  private abstract class AbstractSeqColumn[V: ColumnType, S <: aSeq[V]: ClassTag]
+      extends ColumnType[S] {
+    import collection.JavaConverters._
+    type T = S
+    @inline protected def vType = implicitly[ColumnType[V]]
+    final val typeName = s"frozen<list<${vType.typeName}>>"
+    final override def writeAs(seq: T): java.util.List[V] = seq.asJava
+  }
+}
+
 package object cassandra {
   object TimeUUIDColumn extends ColumnType[UUID] {
     def typeName = "timeuuid"
@@ -52,21 +78,6 @@ package object cassandra {
       def typeName = "ascii"
       def readFrom(row: Row, col: Int): T = byName(row.getString(col))
     }
-  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
-      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
-    def typeName = "ascii"
-    def readFrom(row: Row, col: Int) = byName(row.getString(col))
-  }
-
-  private abstract class AbstractMapColumn[K: ColumnType, V: ColumnType, M <: aMap[K, V]: ClassTag]
-      extends ColumnType[M] {
-    import collection.JavaConverters._
-    type T = M
-    @inline protected def kType = implicitly[ColumnType[K]]
-    @inline protected def vType = implicitly[ColumnType[V]]
-    final val typeName = s"frozen<map<${kType.typeName},${vType.typeName}>>"
-    final override def writeAs(map: T): java.util.Map[K, V] = map.asJava
-  }
 
   implicit def MapColumn[K: ColumnType, V: ColumnType]: ColumnType[Map[K, V]] =
     new AbstractMapColumn[K, V, Map[K, V]] {
@@ -86,15 +97,6 @@ package object cassandra {
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala
     }
-
-  private abstract class AbstractSeqColumn[V: ColumnType, S <: aSeq[V]: ClassTag]
-      extends ColumnType[S] {
-    import collection.JavaConverters._
-    type T = S
-    @inline protected def vType = implicitly[ColumnType[V]]
-    final val typeName = s"frozen<list<${vType.typeName}>>"
-    final override def writeAs(seq: T): java.util.List[V] = seq.asJava
-  }
 
   implicit object UnitColumn extends ColumnType[Unit] {
     def typeName = "boolean"
