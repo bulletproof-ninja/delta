@@ -10,16 +10,18 @@ import scuff.JavaSerializer
 import java.io.ByteArrayOutputStream
 import scala.concurrent.ExecutionContext
 
+package college {
+  case class IntId[T](int: Int)
+
+  trait CollegeEvent
+
+}
 package object college {
 
   implicit def intId(id: IntId[_]): Int = id.int
 
-  case class IntId[T](int: Int)
-
   type SemesterId = IntId[Semester]
   type StudentId = IntId[Student]
-
-  trait CollegeEvent
 
   implicit object CollegeEventCodec
       extends EventCodec[CollegeEvent, Array[Byte]]
