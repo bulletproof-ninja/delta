@@ -3,7 +3,6 @@ package sampler.aggr.emp
 import scuff.DoubleDispatch
 import sampler.MyDate
 import sampler.aggr.DomainEvent
-import delta.util.EventHandler
 
 trait EmpEventHandler {
   type RT

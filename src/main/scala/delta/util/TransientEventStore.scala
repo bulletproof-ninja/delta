@@ -36,7 +36,6 @@ abstract class TransientEventStore[ID, EVT, CH, SF](
     }
   }
 
-  @inline
   implicit private def ec = execCtx
 
   private[this] val txnMap = new TrieMap[ID, Vector[Txn]]
