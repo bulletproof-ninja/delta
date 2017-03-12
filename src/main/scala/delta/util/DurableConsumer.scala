@@ -14,7 +14,7 @@ trait DurableConsumer[ID, EVT, CH] {
   /** Transaction selector. */
   protected def selector[T <: ES](es: T): es.Selector
   /** Last processed tick, if exists. */
-  protected def lastProcessedTick: Future[Option[Long]]
+  protected def lastProcessedTick(): Future[Option[Long]]
   /**
     * Called when historic processing begins.
     * This is distinct from live processing and
@@ -25,7 +25,7 @@ trait DurableConsumer[ID, EVT, CH] {
     * NOTE: If the event source is empty, this will
     * not be called.
     */
-  protected def getHistoricProcessor(): TXN => Unit
+  protected def getHistoricProcessor[T <: ES](es: T): TXN => Unit
   /**
     * When caught up on historic transactions,
     * a live processor is requested. Any in-memory
@@ -38,7 +38,7 @@ trait DurableConsumer[ID, EVT, CH] {
     *     2) Duplicate (repeated) revisions
     *     3) Concurrent calls
     */
-  protected def getLiveProcessor(): Future[TXN => Unit]
+  protected def getLiveProcessor[T <: ES](es: T): Future[TXN => Unit]
 
   /**
     * Start processing of transactions, either from beginning
@@ -74,11 +74,11 @@ trait DurableConsumer[ID, EVT, CH] {
         Future successful None
       case Some(_) =>
         val historicQuery = es.query(selector) _
-        val historicProcessor = this.getHistoricProcessor()
+        val historicProcessor = this.getHistoricProcessor(es)
         StreamPromise.foreach(historicQuery)(historicProcessor)
     }
     historicProcessingDone.flatMap { _ =>
-      this.getLiveProcessor().flatMap { liveProcessor =>
+      this.getLiveProcessor(es).flatMap { liveProcessor =>
         val liveSubscription = es.subscribe(selector.toMonotonic)(liveProcessor)
         // close window of opportunity, for a potential race condition, by re-querying anything since start
         val windowClosed = lastTickAtStart match {
@@ -98,11 +98,11 @@ trait DurableConsumer[ID, EVT, CH] {
       implicit ec: ExecutionContext): Future[Subscription] = {
     val historicProcessingDone: Future[Unit] = {
       val historicQuery = es.querySince(lastProcessedTick - maxTickSkew, selector) _
-      val historicProcessor = this.getHistoricProcessor()
+      val historicProcessor = this.getHistoricProcessor(es)
       StreamPromise.foreach(historicQuery)(historicProcessor)
     }
     historicProcessingDone.flatMap { _ =>
-      this.getLiveProcessor().flatMap { liveProcessor =>
+      this.getLiveProcessor(es).flatMap { liveProcessor =>
         val liveSubscription = es.subscribe(selector.toMonotonic)(liveProcessor)
         // close window of opportunity, for a potential race condition, by re-querying anything since start
         val windowQuery = es.querySince(lastTickAtStart - maxTickSkew, selector) _
