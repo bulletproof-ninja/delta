@@ -16,21 +16,24 @@ import javax.sql.{ DataSource, ConnectionPoolDataSource }
  * `processWarnings` method.
  */
 trait ConnectionProvider {
-  protected def useConnection[R](thunk: Connection => R): R
+  protected def getConnection: Connection
+  protected def processWarnings(warnings: SQLWarning): Unit = throw warnings
+  protected def useConnection[R](thunk: Connection => R): R = blocking {
+    val conn = getConnection
+    try {
+      val r = thunk(conn)
+      Option(conn.getWarnings).foreach(processWarnings)
+      r
+    } finally Try(conn.close)
+  }
 }
 
 trait DataSourceConnectionProvider extends ConnectionProvider {
   protected def dataSource: DataSource
-  protected def useConnection[R](thunk: Connection => R): R = blocking {
-    val conn = dataSource.getConnection
-    try thunk(conn) finally Try(conn.close)
-  }
+  protected def getConnection: Connection = dataSource.getConnection
 }
 
 trait PooledConnectionProvider extends ConnectionProvider {
-  protected def dataSource: javax.sql.ConnectionPoolDataSource
-  protected def useConnection[R](thunk: Connection => R): R = blocking {
-    val conn = dataSource.getPooledConnection.getConnection
-    try thunk(conn) finally Try(conn.close)
-  }
+  protected def dataSource: ConnectionPoolDataSource
+  protected def getConnection: Connection = dataSource.getPooledConnection.getConnection
 }
