@@ -42,7 +42,7 @@ class TestJdbcSnapshotStore
     new JdbcSnapshotStore2[Long, Int, String](
       "readmodel_test") with DataSourceConnectionProvider with MySQLSnapshotStore {
       val dataSource = ds
-    }.ensureTable()
+    }.ensureTable(dropIfExists = true)
 
   @Test
   def mock() {}
