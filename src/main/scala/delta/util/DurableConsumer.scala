@@ -43,25 +43,25 @@ trait DurableConsumer[ID, EVT, CH] {
   /**
     * Start processing of transactions, either from beginning
     * of time, or from where left off when last ended.
-    * @param es The [[EventSource]] to process.
+    * @param eventSource The [[EventSource]] to process.
     * @param maxTickSkew The anticipated max tick skew.
     * @return A future subscription to live events.
     * This will be available when historic processing is done,
     * thus state is considered current.
     */
-  def startProcessing(es: ES, maxTickSkew: Int)(implicit ec: ExecutionContext): Future[Subscription] = {
+  def startProcessing(eventSource: ES, maxTickSkew: Int)(implicit ec: ExecutionContext): Future[Subscription] = {
     require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
     this.lastProcessedTick.flatMap {
       case None =>
-        es.lastTick().flatMap { maybeLastTick =>
-          start(es, maybeLastTick)(selector(es), maxTickSkew)
+        eventSource.lastTick().flatMap { maybeLastTick =>
+          start(eventSource, maybeLastTick)(selector(eventSource), maxTickSkew)
         }
       case Some(lastProcessed) =>
-        es.lastTick().flatMap {
+        eventSource.lastTick().flatMap {
           case Some(lastTick) =>
-            resume(es, lastTick)(selector(es), lastProcessed, maxTickSkew)
+            resume(eventSource, lastTick)(selector(eventSource), lastProcessed, maxTickSkew)
           case None =>
-            throw new IllegalStateException(s"Last processed tick is $lastProcessed, but event source is empty: $es")
+            throw new IllegalStateException(s"Last processed tick is $lastProcessed, but event source is empty: $eventSource")
         }
     }
   }
