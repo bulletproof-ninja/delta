@@ -13,7 +13,7 @@ import delta.Transaction
  * to be serialized, i.e. transactions from the same
  * stream should not be applied concurrently.
  */
-trait SequencedTransactionHandler[ID, EVT, CH] extends (Transaction[ID, EVT, CH] => Unit) {
+trait SequencedProcessor[ID, EVT, CH] extends (Transaction[ID, EVT, CH] => Unit) {
 
   type TXN = Transaction[ID, EVT, CH]
 
@@ -78,9 +78,9 @@ trait SequencedTransactionHandler[ID, EVT, CH] extends (Transaction[ID, EVT, CH]
    * Expected revision for a given stream. Should generally
    * be last seen revision + 1. If unknown stream, there are
    * three choices, depending on strategy:
-   *   1. If only interested in new events, return `-1`
-   *   2. If always interested in complete stream, return `0`
-   *   3. If not interested, ever, return `Int.MaxValue`
+   *   1. If always interested in complete stream, return `0`. This is the most common behavior.
+   *   2. If only interested in new transactions, return `-1`.
+   *   3. If not interested, ever, return `Int.MaxValue`. This is uncommon.
    * NOTICE: When using option 3, transactions will be interpreted as duplicates,
    * so make sure duplicates are ignored (default behavior).
    */
