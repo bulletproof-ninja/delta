@@ -1,9 +1,11 @@
 package delta.jdbc
 
-import java.sql.Connection
-import javax.sql.DataSource
+import java.sql.{ Connection, SQLWarning }
+
+import scala.concurrent.blocking
 import scala.util.Try
-import concurrent.blocking
+
+import javax.sql.{ DataSource, ConnectionPoolDataSource }
 
 /**
  * Generic trait for providing a JDBC connection.
