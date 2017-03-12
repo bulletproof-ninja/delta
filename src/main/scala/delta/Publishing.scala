@@ -23,7 +23,7 @@ trait Publishing[ID, EVT, CH]
       }
     }(publishCtx)
   }
-  abstract override def commit(
+  abstract final override def commit(
     channel: CH, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     val txn = super.commit(channel, stream, revision, tick, events, metadata)
