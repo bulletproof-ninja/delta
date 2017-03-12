@@ -5,7 +5,14 @@ import javax.sql.DataSource
 import scala.util.Try
 import concurrent.blocking
 
-/** Generic trait for providing a JDBC connection. */
+/**
+ * Generic trait for providing a JDBC connection.
+ * By default, any warnings will get thrown. This
+ * behavior can be modified by either fixing the
+ * cause of the warning(s), which is the recommended
+ * approach, or, if a fix is infeasible, overriding the
+ * `processWarnings` method.
+ */
 trait ConnectionProvider {
   protected def useConnection[R](thunk: Connection => R): R
 }
