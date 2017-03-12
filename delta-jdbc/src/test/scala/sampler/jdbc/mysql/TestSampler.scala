@@ -25,7 +25,7 @@ object TestSampler {
     ds
   }
   @AfterClass
-  def dropDb {
+  def dropDb() {
     val conn = ds.getConnection
     try {
       val stm = conn.createStatement()
@@ -43,11 +43,11 @@ final class TestSampler extends sampler.TestSampler {
     new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] with PooledConnectionProvider {
       protected def publishCtx = RandomDelayExecutionContext
       protected def dataSource = TestSampler.ds
-    }
+    }.ensureSchema()
   }
 
   @Test
-  def mock {
+  def mock() {
     assertTrue(true)
   }
 }

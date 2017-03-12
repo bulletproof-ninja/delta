@@ -45,7 +45,7 @@ class TestCollege extends college.TestCollege {
       sql, RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] with DataSourceConnectionProvider {
       protected def publishCtx = RandomDelayExecutionContext
       protected def dataSource = ds
-    }
+    }.ensureSchema()
   }
 
   @Test
