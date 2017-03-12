@@ -10,7 +10,7 @@ import delta.{ EventCodec, EventStore }
 
 private object JdbcEventStore {
   lazy val DefaultThreadPool = {
-    val tg = Threads.newThreadGroup("JDBC Executors", false)
+    val tg = Threads.newThreadGroup("JDBC Executors", daemon = false)
     val tf = Threads.factory("jdbc-executor", tg)
     Threads.newCachedThreadPool(tf)
   }
