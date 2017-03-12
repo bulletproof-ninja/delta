@@ -32,22 +32,25 @@ trait EventSource[ID, EVT, CH] {
 
   /** Subscribe to published transactions. */
   def subscribe(
-    selector: Selector = Everything)(
+    selector: MonotonicSelector = Everything)(
       callback: TXN => Unit): Subscription
 
   type CEVT = Class[_ <: EVT]
 
   sealed abstract class Selector {
     def include(txn: TXN): Boolean
+    def toMonotonic: EventSource.this.MonotonicSelector
   }
-  sealed abstract class UnbrokenStreamsSelector extends Selector
-  case object Everything extends UnbrokenStreamsSelector {
+  sealed abstract class MonotonicSelector extends Selector
+  case object Everything extends MonotonicSelector {
     def include(txn: TXN) = true
+    def toMonotonic: MonotonicSelector = this
   }
-  case class ChannelSelector(channels: Set[CH]) extends UnbrokenStreamsSelector {
+  case class ChannelSelector(channels: Set[CH]) extends MonotonicSelector {
     def this(one: CH, others: CH*) = this((one +: others).toSet)
     require(channels.nonEmpty)
     def include(txn: TXN) = channels.contains(txn.channel)
+    def toMonotonic: MonotonicSelector = this
   }
   case class EventSelector(byChannel: Map[CH, Set[CEVT]])
       extends Selector {
@@ -58,9 +61,11 @@ trait EventSource[ID, EVT, CH] {
     def include(txn: TXN) = byChannel.get(txn.channel).exists { set =>
       txn.events.iterator.map(_.getClass).exists(set.contains)
     }
+    def toMonotonic: MonotonicSelector = ChannelSelector(byChannel.keySet)
   }
-  case class StreamSelector(stream: ID, channel: CH) extends UnbrokenStreamsSelector {
+  case class StreamSelector(stream: ID, channel: CH) extends MonotonicSelector {
     def include(txn: TXN) = txn.stream == stream && txn.channel == channel
+    def toMonotonic: MonotonicSelector = this
   }
 
   object Selector {
