@@ -5,7 +5,7 @@ import scuff.concurrent.StreamCallback
 import delta.Publishing
 
 /**
- * Local (JVM) scope Publishing.
+ * Local (JVM scope) Publishing.
  */
 trait LocalPublishing[ID, EVT, CH]
     extends Publishing[ID, EVT, CH] {
@@ -17,7 +17,7 @@ trait LocalPublishing[ID, EVT, CH]
 
   protected def publish(ch: CH, txn: PublishTXN) = pubSub.publish(txn)
 
-  def subscribe(selector: Selector)(
+  def subscribe(selector: MonotonicSelector)(
     callback: TXN => Unit): Subscription = {
     val sc = new StreamCallback[TXN] {
       def onNext(txn: TXN) = callback(txn)
