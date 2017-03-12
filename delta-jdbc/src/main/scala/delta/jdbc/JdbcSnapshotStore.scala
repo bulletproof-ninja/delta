@@ -16,8 +16,11 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     extends SnapshotStore[K, D] {
   cp: ConnectionProvider =>
 
-  def ensureTable(): this.type =
+  def ensureTable(dropIfExists: Boolean = false): this.type =
     useConnection { conn =>
+      if (dropIfExists) {
+        dropTable(conn)
+      }
       createTable(conn)
       createIndex(conn)
       this
@@ -48,11 +51,14 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     )"""
   }
 
+  protected def dropTableDDL = s"DROP TABLE IF EXISTS $tableRef"
+
   protected def tickIndexName = tableRef.replace(".", "_") concat "_tick"
   protected def createTickIndexDDL = s"""
     CREATE INDEX IF NOT EXISTS $tickIndexName
       ON $tableRef (tick)
   """.trim
+  protected def dropTickIndexDDL = s"DROP INDEX $tickIndexName"
 
   protected def selectOneSQL = {
     val pkNamesEqual = pkColumns.map { cd =>
@@ -100,6 +106,12 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     val stm = conn.createStatement()
     try {
       stm.execute(createTableDDL)
+    } finally Try(stm.close)
+  }
+  protected def dropTable(conn: Connection): Unit = {
+    val stm = conn.createStatement()
+    try {
+      stm.execute(dropTableDDL)
     } finally Try(stm.close)
   }
   protected def createIndex(conn: Connection): Unit = {
