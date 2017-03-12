@@ -2,7 +2,7 @@ package delta.testing
 
 import scuff._
 import scala.concurrent._
-import duration._
+
 import scala.util.Random
 
 object RandomDelayExecutionContext
@@ -15,7 +15,7 @@ class RandomDelayExecutionContext(exeCtx: ExecutionContext)
     def run {
       if (Random.nextBoolean) {
         val delay = Random.nextInRange(1 to 50)
-        blocking(Thread sleep delay)
+        Thread sleep delay
       }
       runnable.run()
     }
