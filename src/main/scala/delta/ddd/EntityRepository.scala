@@ -3,7 +3,7 @@ package delta.ddd
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
-import scuff.ddd.Repository
+import scuff.ddd._
 import delta.{ EventStore, Ticker }
 import delta.SnapshotStore
 
@@ -27,7 +27,7 @@ import delta.SnapshotStore
   * not affect correctness.
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param ticker Ticker implementation
- */
+  */
 class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, E](
   channel: CH,
   entity: Entity { type Type = E; type Id = ID; type Mutator <: StateMutator { type State = S; type Event = EVT } })(
@@ -49,9 +49,10 @@ class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, E](
     }(exeCtx)
   }
 
-  def update(id: ID, expectedRevision: Option[Int], metadata: Map[String, String])(
-    updateThunk: (E, Int) => Future[E]): Future[Int] = {
-    repo.update(id, expectedRevision, metadata) {
+  protected def update(
+    id: ID, expectedRevision: Option[Int],
+    metadata: Map[String, String], updateThunk: (E, Int) => Future[E]): Future[Int] = {
+    repo.update(id, Revision(expectedRevision), metadata) {
       case ((state, mergeEvents), revision) =>
         val instance = entity.init(entity.newMutator.init(state), mergeEvents)
         updateThunk(instance, revision).map { ar =>

@@ -158,9 +158,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     }
   }
 
-  def update(
-    id: RID, expectedRevision: Option[Int], metadata: Map[String, String])(
-      updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
+  protected def update(
+    id: RID, expectedRevision: Option[Int],
+    metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
     loadAndUpdate(id, expectedRevision, metadata, snapshots.get(id), assumeCurrentSnapshots, updateThunk)
   } catch {
     case NonFatal(th) => Future failed th

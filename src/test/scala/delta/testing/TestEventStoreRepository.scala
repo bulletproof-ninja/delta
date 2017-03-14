@@ -24,6 +24,7 @@ import delta.SysClockTicker
 import scala.{ SerialVersionUID => version }
 import delta.Fold
 import delta.Snapshot
+import scuff.ddd.Revision
 
 trait AggrEventHandler {
   type RT
@@ -144,7 +145,7 @@ abstract class AbstractEventStoreRepositoryTest {
     val newFoo = TheOneAggr.create()
     repo.insert(id, newFoo, metadata).onSuccess {
       case _ =>
-        repo.update("Foo", 0, metadata) {
+        repo.update("Foo", Revision(0), metadata) {
           case (foo, rev) =>
             assertEquals(0, rev)
             assertEquals("New", foo.aggr.status)
@@ -153,7 +154,7 @@ abstract class AbstractEventStoreRepositoryTest {
           case Failure(t) => done.failure(t)
           case Success(rev) =>
             assertEquals(0, rev)
-            repo.update("Foo", 0) {
+            repo.update("Foo", Revision.Exactly(0)) {
               case (foo, rev) =>
                 assertEquals(0, rev)
                 assertEquals("New", foo.aggr.status)
@@ -163,7 +164,7 @@ abstract class AbstractEventStoreRepositoryTest {
               case Failure(t) => done.failure(t)
               case Success(rev) =>
                 assertEquals(1, rev)
-                repo.update("Foo", 0) {
+                repo.update("Foo", Revision(0)) {
                   case (foo, rev) =>
                     assertEquals(1, rev)
                     assertTrue(foo.mergeEvents.contains(NewNumberWasAdded(44)))
@@ -174,7 +175,7 @@ abstract class AbstractEventStoreRepositoryTest {
                   case Failure(t) => done.failure(t)
                   case Success(rev) =>
                     assertEquals(1, rev)
-                    repo.update("Foo", 1, metadata) {
+                    repo.update("Foo", Revision(1), metadata) {
                       case (foo, rev) =>
                         assertEquals(1, rev)
                         assertTrue(foo.mergeEvents.isEmpty)
@@ -209,7 +210,7 @@ abstract class AbstractEventStoreRepositoryTest {
     }
     val update1 = repo.insert(id, newFoo).flatMap {
       case _ =>
-        repo.update("Foo", 0) {
+        repo.update("Foo", Revision(0)) {
           case (foo, rev) =>
             assertEquals(0, rev)
             foo(AddNewNumber(42))
@@ -265,7 +266,7 @@ abstract class AbstractEventStoreRepositoryTest {
         for (i ← range) {
           val runThis = new Runnable {
             def run {
-              val fut = repo.update("Foo", 0, metadata) {
+              val fut = repo.update("Foo", Revision(0), metadata) {
                 case (foo, rev) =>
                   foo(AddNewNumber(i))
                   Future successful foo
@@ -294,7 +295,7 @@ abstract class AbstractEventStoreRepositoryTest {
     repo.insert(id, foo).onComplete {
       case Failure(t) => done.failure(t)
       case Success(_) =>
-        repo.update("Foo", 0) {
+        repo.update("Foo", Revision(0)) {
           case (foo, rev) => Future successful foo
         }.onComplete {
           case Failure(t) => done.failure(t)

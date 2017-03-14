@@ -30,6 +30,7 @@ import sampler.aggr.emp.EmpEvent
 import sampler.aggr.emp.EmpEvent
 import sampler.aggr.dept.DeptEvent
 import delta.testing.RandomDelayExecutionContext
+import scuff.ddd.Revision
 
 class TestSampler {
 
@@ -79,21 +80,44 @@ class TestSampler {
     val emp = register(id, RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor"))
     val insertRev = EmployeeRepo.insert(id, emp, metadata).await
     assertEquals(0, insertRev)
+    try {
+      EmployeeRepo.update(id, Revision(3), metadata) {
+        case (emp, revision) =>
+          emp(UpdateSalary(45000))
+      }.await
+      fail("Should throw a Revision.Mismatch")
+    } catch {
+      case Revision.Mismatch(expected, actual) =>
+        assertEquals(3, expected)
+        assertEquals(0, actual)
+    }
     @volatile var updateRev = -1
-    var updatedRev = EmployeeRepo.update(id, 0, metadata) {
+    var updatedRev = EmployeeRepo.update(id, Revision(0), metadata) {
       case (emp, revision) =>
         updateRev = revision
-        Future successful emp(UpdateSalary(45000))
+        emp(UpdateSalary(45000))
     }.await
     assertEquals(0, updateRev)
     assertEquals(1, updatedRev)
-    updatedRev = EmployeeRepo.update(id, 1, metadata) {
+    updatedRev = EmployeeRepo.update(id, Revision(0), metadata) {
       case (emp, revision) =>
         updateRev = revision
-        Future successful emp(UpdateSalary(45000))
+        emp(UpdateSalary(45000))
     }.await
     assertEquals(1, updateRev)
     assertEquals(1, updatedRev)
+    try {
+      EmployeeRepo.update(id, Revision.Exactly(0), metadata) {
+        case (emp, revision) =>
+          updateRev = revision
+          emp(UpdateSalary(66000))
+      }.await
+      fail("Should throw a Revision.Mismatch")
+    } catch {
+      case Revision.Mismatch(expected, actual) =>
+        assertEquals(0, expected)
+        assertEquals(1, actual)
+    }
   }
 
   private def register(id: EmpId, cmd: RegisterEmployee): Employee = {
