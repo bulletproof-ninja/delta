@@ -40,7 +40,7 @@ abstract class TransientEventStore[ID, EVT, CH, SF](
 
   private[this] val txnMap = new TrieMap[ID, Vector[Txn]]
 
-  def lastTick: Future[Option[Long]] = {
+  def lastTickCommitted(): Future[Option[Long]] = {
     val ticks = Future(txnMap.values.iterator.flatten.map(_.tick))
     ticks.map { ticks =>
       if (ticks.isEmpty) None

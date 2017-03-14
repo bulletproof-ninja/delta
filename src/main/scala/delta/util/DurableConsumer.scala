@@ -53,7 +53,7 @@ trait DurableConsumer[ID, EVT, CH] {
     require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
     this.lastProcessedTick.flatMap {
       case None =>
-        eventSource.lastTick().flatMap { maybeLastTick =>
+        eventSource.lastTickCommitted().flatMap { maybeLastTick =>
           start(eventSource, maybeLastTick)(selector(eventSource), maxTickSkew)
         }
       case Some(lastProcessed) =>

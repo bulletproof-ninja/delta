@@ -13,7 +13,7 @@ trait EventSource[ID, EVT, CH] {
   type TXN = Transaction[ID, EVT, CH]
 
   def currRevision(stream: ID): Future[Option[Int]]
-  def lastTick(): Future[Option[Long]]
+  def lastTickCommitted(): Future[Option[Long]]
 
   /** Replay complete stream. */
   def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit

@@ -290,7 +290,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
 
   private[this] val NaturalOrder = new Document("$natural", 1)
 
-  def lastTick(): Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
+  def lastTickCommitted(): Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
 
   private def getFirst[T](name: String, reverse: Boolean): Future[Option[T]] = {
     withFutureCallback[Document] { callback =>

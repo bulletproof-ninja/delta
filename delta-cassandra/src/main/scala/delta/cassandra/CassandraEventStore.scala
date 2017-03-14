@@ -233,7 +233,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     val ps = session.prepare(s"SELECT MAX(tick) FROM $TableName")
     () => ps.bind()
   }
-  def lastTick: Future[Option[Long]] =
+  def lastTickCommitted(): Future[Option[Long]] =
     execute(GetLastTick()) { rs =>
       Option(rs.one).map(_.getLong(0))
     }
