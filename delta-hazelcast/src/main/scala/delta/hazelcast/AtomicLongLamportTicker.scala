@@ -14,7 +14,7 @@ object AtomicLongLamportTicker {
   def apply(al: IAtomicLong, es: EventSource[_, _, _]): LamportTicker = {
     val cas = new AtomicCAS(al)
     val lc = new LamportClock(cas)
-    es.lastTickCommitted().await(111.seconds).foreach(lc.sync)
+    es.maxTickCommitted().await(111.seconds).foreach(lc.sync)
     LamportTicker(lc)
   }
 }
