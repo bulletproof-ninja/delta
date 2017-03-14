@@ -125,7 +125,7 @@ task wrapper(type: Wrapper) {
 
 project(':delta-cassandra') {
     dependencies {
-        compile "com.datastax.cassandra:cassandra-driver-core:3.1.2"
+        compile "com.datastax.cassandra:cassandra-driver-core:3.1.4"
     }
 }
 project(':delta-jdbc') {
@@ -137,11 +137,11 @@ project(':delta-jdbc') {
 }
 project(':delta-mongodb') {
     dependencies {
-        compile "org.mongodb:mongodb-driver-async:3.4.0"
+        compile "org.mongodb:mongodb-driver-async:3.4.2"
     }
 }
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.7.4"
+        compile "com.hazelcast:hazelcast:3.7.5"
     }
 }
