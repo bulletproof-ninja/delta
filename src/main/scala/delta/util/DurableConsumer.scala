@@ -6,6 +6,13 @@ import delta.{ EventSource, Transaction }
 import scuff.Subscription
 import scuff.concurrent.StreamPromise
 
+/**
+ * A durable consumer of transactions,
+ * useful for building read models and
+ * other stateful processors.
+ * Can be started and stopped on demand,
+ * without loss of transactions.
+ */
 trait DurableConsumer[ID, EVT, CH] {
 
   type TXN = Transaction[ID, EVT, CH]
@@ -13,8 +20,16 @@ trait DurableConsumer[ID, EVT, CH] {
 
   /** Transaction selector. */
   protected def selector[T <: ES](es: T): es.Selector
-  /** Last processed tick, if exists. */
-  protected def lastProcessedTick(): Future[Option[Long]]
+  /**
+   * The highest reliable tick processed.
+   * NOTE: Since historic processing is not
+   * done in tick order, a tick received
+   * through incomplete historic processing
+   * is NOT reliable as a water mark. Any
+   * tick received in live processing can
+   * be considered a watermark.
+   */
+  protected def tickWatermark: Future[Option[Long]]
   /**
     * Called when historic processing begins.
     * This is distinct from live processing and
@@ -37,31 +52,33 @@ trait DurableConsumer[ID, EVT, CH] {
     *     1) Out-of-order revisions
     *     2) Duplicate (repeated) revisions
     *     3) Concurrent calls
+    * For condition 3, the [[SerialAsyncProcessing]] class
+    * can be used to serialize processing.
     */
   protected def getLiveProcessor[T <: ES](es: T): Future[TXN => Unit]
 
   /**
     * Start processing of transactions, either from beginning
-    * of time, or from where left off when last ended.
+    * of time, or from the tick watermark.
     * @param eventSource The [[EventSource]] to process.
-    * @param maxTickSkew The anticipated max tick skew.
+    * @param maxTickSkew The max tick skew. Larger is safer, but be reasonable.
     * @return A future subscription to live events.
     * This will be available when historic processing is done,
     * thus state is considered current.
     */
   def startProcessing(eventSource: ES, maxTickSkew: Int)(implicit ec: ExecutionContext): Future[Subscription] = {
     require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
-    this.lastProcessedTick.flatMap {
+    this.tickWatermark.flatMap {
       case None =>
-        eventSource.lastTickCommitted().flatMap { maybeLastTick =>
+        eventSource.maxTickCommitted().flatMap { maybeLastTick =>
           start(eventSource, maybeLastTick)(selector(eventSource), maxTickSkew)
         }
-      case Some(lastProcessed) =>
-        eventSource.lastTick().flatMap {
-          case Some(lastTick) =>
-            resume(eventSource, lastTick)(selector(eventSource), lastProcessed, maxTickSkew)
+      case Some(tickWatermark) =>
+        eventSource.maxTickCommitted().flatMap {
+          case Some(maxTickCommitted) =>
+            resume(eventSource, maxTickCommitted)(selector(eventSource), tickWatermark, maxTickSkew)
           case None =>
-            throw new IllegalStateException(s"Last processed tick is $lastProcessed, but event source is empty: $eventSource")
+            throw new IllegalStateException(s"Tick watermark is $tickWatermark, but event source is empty: $eventSource")
         }
     }
   }
