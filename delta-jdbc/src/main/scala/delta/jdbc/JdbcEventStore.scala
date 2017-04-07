@@ -107,7 +107,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     }
   }(blockingJdbcCtx)
 
-  def maxTickCommitted(): Future[Option[Long]] = Future {
+  def maxTick(): Future[Option[Long]] = Future {
     forQuery(dialect.selectMaxTick(_))
   }(blockingJdbcCtx)
 

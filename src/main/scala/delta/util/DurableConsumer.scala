@@ -70,15 +70,15 @@ trait DurableConsumer[ID, EVT, CH] {
     require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
     this.tickWatermark.flatMap {
       case None =>
-        eventSource.maxTickCommitted().flatMap { maybeLastTick =>
-          start(eventSource, maybeLastTick)(selector(eventSource), maxTickSkew)
+        eventSource.maxTick().flatMap { maxExistingTick =>
+          start(eventSource, maxExistingTick)(selector(eventSource), maxTickSkew)
         }
-      case Some(tickWatermark) =>
-        eventSource.maxTickCommitted().flatMap {
-          case Some(maxTickCommitted) =>
-            resume(eventSource, maxTickCommitted)(selector(eventSource), tickWatermark, maxTickSkew)
+      case Some(maxProccessedTick) =>
+        eventSource.maxTick().flatMap {
+          case Some(maxExistingTick) =>
+            resume(eventSource, maxExistingTick)(selector(eventSource), maxProccessedTick, maxTickSkew)
           case None =>
-            throw new IllegalStateException(s"Tick watermark is $tickWatermark, but event source is empty: $eventSource")
+            throw new IllegalStateException(s"Highest tick is $maxProccessedTick, but event source is empty: $eventSource")
         }
     }
   }
