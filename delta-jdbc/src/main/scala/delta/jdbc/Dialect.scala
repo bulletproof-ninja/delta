@@ -8,7 +8,8 @@ import delta.EventCodec
 class DefaultDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
   extends Dialect[ID, EVT, CH, SF](schema.optional)
 
-protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] protected[jdbc] ( final val schema: Option[String]) {
+protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] protected[jdbc] (
+    final val schema: Option[String]) {
 
   private[jdbc] def idType = implicitly[ColumnType[ID]]
   private[jdbc] def chType = implicitly[ColumnType[CH]]
