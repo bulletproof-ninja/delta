@@ -7,6 +7,7 @@ import scala.reflect.ClassTag
 import org.bson.Document
 import org.bson.codecs.{ Codec, DecoderContext, EncoderContext }
 import org.bson.codecs.configuration.{ CodecRegistries, CodecRegistry }
+import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
 
 import com.mongodb._
 import com.mongodb.async.SingleResultCallback
@@ -21,17 +22,16 @@ object MongoEventStore {
   def getCollection(
     ns: MongoNamespace, client: MongoClient,
     codecs: Codec[_]*): MongoCollection[Document] = {
-    if (codecs.isEmpty) getCollection(ns, client, null: CodecRegistry)
+    if (codecs.isEmpty) getCollection(ns, client, DEFAULT_CODEC_REGISTRY)
     else getCollection(ns, client, CodecRegistries.fromCodecs(codecs: _*))
   }
   def getCollection(
     ns: MongoNamespace, client: MongoClient,
     optRegistry: CodecRegistry): MongoCollection[Document] = {
-
-    val registry = Option(optRegistry).map { reg =>
-      CodecRegistries.fromRegistries(reg, client.getSettings.getCodecRegistry)
-    } getOrElse client.getSettings.getCodecRegistry
-
+    val registry = optRegistry match {
+      case null => CodecRegistries.fromRegistries(DEFAULT_CODEC_REGISTRY, client.getSettings.getCodecRegistry)
+      case reg => CodecRegistries.fromRegistries(reg, DEFAULT_CODEC_REGISTRY, client.getSettings.getCodecRegistry)
+    }
     val (rc, wc) = client.getSettings.getClusterSettings.getRequiredClusterType match {
       case ClusterType.REPLICA_SET => ReadConcern.MAJORITY -> WriteConcern.MAJORITY
       case _ => ReadConcern.DEFAULT -> WriteConcern.JOURNALED

@@ -135,6 +135,7 @@ project(':delta-jdbc') {
 project(':delta-mongodb') {
     dependencies {
         compile "org.mongodb:mongodb-driver-async:3.4.2"
+        compile "org.mongodb.scala:mongo-scala-bson_$vScala:1.2.1"
     }
 }
 project(':delta-hazelcast') {
