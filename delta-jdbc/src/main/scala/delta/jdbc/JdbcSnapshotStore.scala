@@ -178,13 +178,15 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     }
   }
   private def set(conn: Connection)(key: K, data: Snapshot[D]): Unit = {
-    if (data.revision == 0) { // Definitely insert
-      insert(conn)(key, data)
-    } else { // Who knows? Assume common case, which is update, but insert if not
-      update(conn)(key, data) match {
-        case 0 => insert(conn)(key, data)
-        case 1 => ()
-      }
+    // Assume common case, which is update, but insert if not
+    update(conn)(key, data) match {
+      case 0 =>
+        if (!insert(conn)(key, data)) { // Could be race condition, try update again
+          if (update(conn)(key, data) == 0) {
+            sys.error(s"Failed to both insert and update for key $key, for unknown reason")
+          }
+        }
+      case 1 => ()
     }
   }
 
