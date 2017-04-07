@@ -44,9 +44,6 @@ allprojects {
     repositories {
         mavenCentral()
         jcenter()
-        maven {
-            url "http://dl.bintray.com/nilskp/maven" 
-        }
     }
     dependencies {
         compileOnly "org.scala-lang:scala-reflect:$vScalaFull"
