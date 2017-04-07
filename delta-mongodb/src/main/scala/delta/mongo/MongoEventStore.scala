@@ -111,7 +111,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
   }
 
   def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit = {
-    query(new Document("_id.stream", stream), OrderByRevision, callback)
+    queryWith(new Document("_id.stream", stream), callback, OrderByRevision)
   }
 
   def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit = {
@@ -119,12 +119,8 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     if (fromRevision > 0) {
       filter.append("_id.rev", new Document("$gte", fromRevision))
     }
-    query(filter, OrderByRevision, callback)
+    queryWith(filter, callback, OrderByRevision)
   }
-  //  def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamCallback[TXN]): Unit = {
-  //    val filter = new Document("_id.stream", stream).append("_id.rev", new Document("$lte", toRevision))
-  //    query(filter, OrderByRevision, callback)
-  //  }
   def replayStreamRange(stream: ID, revisionRange: collection.immutable.Range)(callback: StreamCallback[TXN]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val filter = new Document("_id.stream", stream)
@@ -138,7 +134,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
       val range = new Document("$gte", from).append("$lte", to)
       filter.append("_id.rev", range)
     }
-    query(filter, OrderByRevision, callback)
+    queryWith(filter, callback, OrderByRevision)
   }
 
   def commit(
@@ -158,7 +154,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     }(Threads.PiggyBack)
   }
 
-  protected def query(filter: Document, ordering: Document, callback: StreamCallback[TXN]): Unit = {
+  protected def queryWith(filter: Document, callback: StreamCallback[TXN], ordering: Document = null): Unit = {
     val onTxn = new Block[TXN] {
       def apply(txn: TXN) = callback.onNext(txn)
     }
@@ -288,8 +284,6 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
 
   }
 
-  private[this] val NaturalOrder = new Document("$natural", 1)
-
   def maxTick(): Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
 
   private def getFirst[T](name: String, reverse: Boolean): Future[Option[T]] = {
@@ -339,12 +333,12 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
   }
 
   def query(streamFilter: Selector)(callback: StreamCallback[TXN]): Unit = {
-    query(toDoc(streamFilter), NaturalOrder, callback)
+    queryWith(toDoc(streamFilter), callback)
   }
 
   def querySince(sinceTick: Long, streamFilter: Selector)(callback: StreamCallback[TXN]): Unit = {
     val docFilter = new Document("tick", new Document("$gte", sinceTick))
-    query(toDoc(streamFilter, docFilter), NaturalOrder, callback)
+    queryWith(toDoc(streamFilter, docFilter), callback)
   }
 
 }
