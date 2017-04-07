@@ -125,21 +125,6 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     promise.future
   }
 
-//  private def queryStream(callback: StreamCallback[TXN], stm: PreparedStatement, stream: ID, parms: Any*) {
-//    val streamParm = ct[ID].writeAs(stream)
-//    val refParms = streamParm +: parms.map(_.asInstanceOf[AnyRef])
-//    val bound = stm.bind(refParms: _*)
-//    execute(bound) { rs =>
-//      Try {
-//        val iter = rs.iterator().asScala.map(row => toTransaction(Some(stream), row, StreamColumnsIdx))
-//        while (iter.hasNext) callback.onNext(iter.next)
-//      } match {
-//        case Success(_) => callback.onCompleted()
-//        case Failure(NonFatal(e)) => callback.onError(e)
-//      }
-//    }
-//  }
-
   // TODO: Make fully callback driven:
   private def processMultiple(callback: TXN => Unit, stms: Seq[BoundStatement]): Future[Unit] = {
       def iterate(rss: Seq[ResultSet]): Seq[ResultSet] = {
@@ -175,12 +160,6 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       }
     }
   }
-
-  //  protected def execute[T](stm: PreparedStatement, parms: Any*)(handler: ResultSet => T): Future[T] = {
-  //    val refParms = parms.map(_.asInstanceOf[AnyRef]).toSeq
-  //    val bound = stm.bind(refParms: _*)
-  //    execute(bound)(handler)
-  //  }
 
   private def fromJLists(types: JList[String], vers: JList[Byte], data: JList[SF]): List[EVT] = {
     val size = types.size
@@ -218,17 +197,6 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     execute(CurrRevision(streamId))(rs => Option(rs.one).map(_.getInt(0)))
   }
 
-  //  private val GetTickRange = {
-  //    val ps = session.prepare(s"SELECT MIN(tick), MAX(tick) FROM $TableName")
-  //    () => ps.bind()
-  //  }
-  //  private def tickRange(): Future[Option[TickRange]] = {
-  //    execute(GetTickRange()) { rs =>
-  //      Option(rs.one).map { row =>
-  //        TickRange(row.getLong(0), row.getLong(1))
-  //      }
-  //    }
-  //  }
   private val GetLastTick = {
     val ps = session.prepare(s"SELECT MAX(tick) FROM $TableName")
     () => ps.bind()
