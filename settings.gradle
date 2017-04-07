@@ -1,1 +1,1 @@
-include 'delta-cassandra', 'delta-jdbc', 'delta-mongodb', 'delta-hazelcast'
+include 'delta-cassandra', 'delta-jdbc', 'delta-mongodb', 'delta-hazelcast', 'delta-redis'

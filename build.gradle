@@ -143,3 +143,10 @@ project(':delta-hazelcast') {
         compile "com.hazelcast:hazelcast:3.7.5"
     }
 }
+project(':delta-redis') {
+    dependencies {
+        compile "redis.clients:jedis:2.9.0"
+        //compile "io.vertx:vertx-redis-client:3.4.1"
+        //compile "biz.paluch.redis:lettuce:4.3.1.Final"
+    }
+}
