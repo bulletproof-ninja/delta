@@ -1,24 +1,30 @@
 package delta
 
 import scuff.Codec
+import scala.reflect.ClassTag
 
 /**
-  *  Generic state/event fold.
+  *  Generic fold.
   */
-trait Fold[S, -EVT] extends Serializable {
-  def process(state: Option[S], events: Traversable[EVT]): S = {
-    val (st, evts) = state.map(_ -> events) getOrElse (init(events.head) -> events.tail)
-    if (evts.isEmpty) st
-    else evts.foldLeft(st) {
-      case (state, evt) => next(state, evt)
+abstract class Fold[S, E: ClassTag] extends Serializable {
+
+  def init(e: E): S
+  def next(s: S, e: E): S
+
+  def process(os: Option[S], te: Traversable[_ >: E]): S = {
+    val verified = te.collect {
+      case e: E => e
+    }
+    val (s, es) = os.map(_ -> verified) getOrElse (init(verified.head) -> verified.tail)
+    if (es.isEmpty) s
+    else es.foldLeft(s) {
+      case (s, e) => next(s, e)
     }
   }
-  def init(evt: EVT): S
-  def next(state: S, evt: EVT): S
 }
 
-final class FoldAdapter[S1, S2, -EVT](fold: Fold[S2, EVT], codec: Codec[S1, S2])
-    extends Fold[S1, EVT] {
-  def init(evt: EVT) = codec decode fold.init(evt)
-  def next(state: S1, evt: EVT) = codec decode fold.next(codec encode state, evt)
+final class FoldAdapter[S1, S2, E: ClassTag](fold: Fold[S2, E], codec: Codec[S1, S2])
+    extends Fold[S1, E] {
+  def init(e: E) = codec decode fold.init(e)
+  def next(s: S1, e: E) = codec decode fold.next(codec encode s, e)
 }
