@@ -30,15 +30,14 @@ private class StateHandler(state: State = null)
 }
 
 private[aggr] class Mutator
-    extends StateMutator
-    with Fold[State, DeptEvent] {
+    extends StateMutator {
 
-  protected def fold = this
+  protected val fold = new Fold[State, DeptEvent] {
+    def init(evt: DeptEvent): State = new StateHandler().dispatch(evt)
+    def next(state: State, evt: DeptEvent): State = new StateHandler(state).dispatch(evt)
+  }
 
   type Event = DeptEvent
   type State = sampler.aggr.dept.State
-
-  def init(evt: DeptEvent): State = new StateHandler().dispatch(evt)
-  def next(state: State, evt: DeptEvent): State = new StateHandler(state).dispatch(evt)
 
 }

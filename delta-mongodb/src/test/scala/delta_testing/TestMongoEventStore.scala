@@ -1,8 +1,8 @@
 package delta_testing
 
 import com.mongodb.client.result.DeleteResult
-import com.mongodb.connection.ConnectionPoolSettings
-import delta.mongo.{ StringCodec, UnitCodec }
+
+import delta.mongo.{ stringCodec, unitCodec }
 import org.junit._
 import org.junit.Assert._
 import delta.util._
@@ -21,10 +21,8 @@ object TestMongoEventStore {
 
   @BeforeClass
   def setupClass {
-    val poolSettings = ConnectionPoolSettings.builder.maxWaitQueueSize(200).maxSize(3).build().ensuring(_ != null)
-    val settings = MongoClientSettings.builder.connectionPoolSettings(poolSettings).build().ensuring(_ != null)
-    client = MongoClients.create(settings)
-    coll = client.getDatabase("test").getCollection(getClass.getName)
+    client = MongoClients.create()
+    coll = client.getDatabase("test").getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_"))
   }
   @AfterClass
   def teardownClass {

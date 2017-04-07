@@ -422,7 +422,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
       def publishCtx = RandomDelayExecutionContext
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
-    val snapshotStore = new MapSnapshotStore[String, AggrState](snapshotMap)
+    val snapshotStore = new ConcurrentMapSnapshotStore[String, AggrState](snapshotMap)
     repo = new EntityRepository((), TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
   }
 

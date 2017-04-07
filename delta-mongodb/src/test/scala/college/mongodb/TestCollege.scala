@@ -25,7 +25,7 @@ object TestCollege {
   @BeforeClass
   def setupClass {
     client = MongoClients.create()
-    val ns = new MongoNamespace("unit-testing", getClass.getName.replace("$", "").replace(".", "_"))
+    val ns = new MongoNamespace("unit-testing", getClass.getName.replaceAll("[\\.\\$]+", "_"))
     coll = MongoEventStore.getCollection(ns, client)
 
   }

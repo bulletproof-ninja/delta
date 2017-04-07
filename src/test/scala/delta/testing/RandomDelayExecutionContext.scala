@@ -5,11 +5,7 @@ import scala.concurrent._
 
 import scala.util.Random
 
-object RandomDelayExecutionContext
-  extends RandomDelayExecutionContext(ExecutionContext.global)
-
-class RandomDelayExecutionContext(exeCtx: ExecutionContext)
-    extends ExecutionContext {
+class RandomDelayExecutionContext(exeCtx: ExecutionContext) extends ExecutionContext {
 
   def execute(runnable: Runnable) = exeCtx execute new Runnable {
     def run {
@@ -24,3 +20,6 @@ class RandomDelayExecutionContext(exeCtx: ExecutionContext)
   def reportFailure(th: Throwable) = exeCtx reportFailure th
 
 }
+
+object RandomDelayExecutionContext
+  extends RandomDelayExecutionContext(ExecutionContext.global)

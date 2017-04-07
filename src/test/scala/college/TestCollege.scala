@@ -74,8 +74,8 @@ class TestCollege {
   @Test
   def `many-to-many relationship` {
     val Unknown = "<unknown>"
-    val studentIds = addStudents(500)
-    val semesterIds = addSemesters(90).toIndexedSeq
+    val studentIds = addStudents(200)
+    val semesterIds = addSemesters(30).toIndexedSeq
       def randomSemester: SemesterId = {
         val idx = rand.nextInRange(0 until semesterIds.size)
         semesterIds(idx)
