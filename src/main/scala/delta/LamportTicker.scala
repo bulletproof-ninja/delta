@@ -15,7 +15,7 @@ object LamportTicker {
 
   private[this] val subscribingClocks = {
       def factory(es: EventSource[_, _, _]): LamportTicker = {
-        val maxTick = es.maxTickCommitted.await(111.seconds) getOrElse -1L
+        val maxTick = es.maxTick.await(111.seconds) getOrElse -1L
         val clock = new LamportClock(maxTick)
         val subscription = es.subscribe() { txn =>
           clock.sync(txn.tick)
