@@ -16,9 +16,9 @@ class SnapshotUpdater[K, D] private (
       entry.getValue match {
         case null => update.right.toOption
         case existing => update match {
-          case Right(snapshot) if snapshot.revision > existing.revision =>
+          case Right(snapshot) if snapshot.revision >= existing.revision =>
             Some(snapshot)
-          case Left((revision, tick)) if revision > existing.revision =>
+          case Left((revision, tick)) if revision > existing.revision || tick > existing.tick =>
             Some(existing.copy(revision = revision, tick = tick))
           case _ => None
         }
