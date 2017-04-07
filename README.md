@@ -1,4 +1,5 @@
-[![Scala version](https://img.shields.io/badge/scala-2.11-orange.svg)](http://www.scala-lang.org/api/2.11.8/)
+[![Scala version](https://img.shields.io/badge/scala-2.11-orange.svg)](http://www.scala-lang.org/api/2.11.9/)
+[![Scala version](https://img.shields.io/badge/scala-2.12-orange.svg)](http://www.scala-lang.org/api/2.12.1/)
 [ ![Download](https://api.bintray.com/packages/bulletproof-ninja/maven/Delta/images/download.svg) ](https://bintray.com/bulletproof-ninja/maven/Delta/_latestVersion#files)
 [![Join Chat at https://gitter.im/nilskp/delta](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/nilskp/delta)
 
