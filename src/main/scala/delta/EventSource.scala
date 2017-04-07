@@ -69,6 +69,7 @@ trait EventSource[ID, EVT, CH] {
   }
 
   object Selector {
+    def Everything = EventSource.this.Everything
     def apply(ch: CH, one: CEVT, others: CEVT*) =
       new EventSelector(Map(ch -> (one +: others).toSet))
     def apply(one: CH, others: CH*) =
