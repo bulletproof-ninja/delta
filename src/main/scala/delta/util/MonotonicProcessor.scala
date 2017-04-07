@@ -14,13 +14,21 @@ trait MonotonicProcessor[ID, EVT, CH, S]
 
   type TXN = Transaction[ID, EVT, CH]
 
+  /**
+    * The execution context to ensure same-thread
+    * processing of streams.
+    * NOTE: Because strict ordering is guaranteed,
+    * execution will block on the provided threads,
+    * thus the number of threads should not necessarily
+    * be limited to the number of cores.
+    */
+  protected def exeCtx: PartitionedExecutionContext
   protected def snapshots: SnapshotStore[ID, S]
   protected def process(txn: TXN, currState: Option[S]): S
-  protected def exeCtx: PartitionedExecutionContext
   protected def onSnapshotUpdated(id: ID, snapshot: Snapshot[S]): Unit
 
-  private[this] val _defaultTimeout = 10.seconds
   protected def snapshotStoreTimeout: FiniteDuration = _defaultTimeout
+  private[this] val _defaultTimeout = 10.seconds
 
   private def updateOnPartitionThread(
     key: ID, thunk: Option[Snapshot[S]] => Option[Snapshot[S]]): Option[Snapshot[S]] = {
