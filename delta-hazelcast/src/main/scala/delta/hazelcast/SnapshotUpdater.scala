@@ -9,7 +9,7 @@ class SnapshotUpdater[K, D] private (
     extends AbstractEntryProcessor[K, Snapshot[D]](true) {
 
   def this(snapshot: Snapshot[D]) = this(Right(snapshot))
-  def this(revision: Int, tick: Long) = this(Left(revision -> tick))
+  def this(revision: Int, tick: Long) = this(Left((revision, tick)))
 
   def process(entry: Entry[K, Snapshot[D]]): Object = {
     val toUpdate =
