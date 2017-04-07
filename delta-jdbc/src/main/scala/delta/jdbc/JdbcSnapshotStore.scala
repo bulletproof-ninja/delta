@@ -9,6 +9,8 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import delta.SnapshotStore
 import delta.Snapshot
+import java.sql.SQLIntegrityConstraintViolationException
+import java.sql.SQLException
 
 abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   table: String, schema: Option[String])(
@@ -185,10 +187,19 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
       }
     }
   }
-  protected def insert(conn: Connection)(key: K, data: Snapshot[D]): Unit = {
+
+  protected def isKeyViolation(e: SQLException): Boolean = e match {
+    case dupe: SQLIntegrityConstraintViolationException => true
+    case _ => false
+  }
+
+  protected def insert(conn: Connection)(key: K, data: Snapshot[D]): Boolean = {
     val ps = conn.prepareStatement(insertOneSQL)
     try {
-      setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate()
+      setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate() != 0
+    } catch {
+      case e: SQLException if isKeyViolation(e) =>
+        false
     } finally Try(ps.close)
   }
   protected def update(conn: Connection)(key: K, data: Snapshot[D]): Int = {
