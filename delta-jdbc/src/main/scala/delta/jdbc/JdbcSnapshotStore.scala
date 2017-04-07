@@ -70,6 +70,10 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     WHERE $pkNamesEqual
   """
   }
+  protected def selectMaxTick = s"""
+    SELECT MAX(tick)
+    FROM $tableRef
+  """
   protected def insertOneSQL = {
     val pkNames = pkColumns.map(_.name).mkString(",")
     val pkQs = Iterable.fill(pkColumns.size)("?").mkString(",")
@@ -134,8 +138,22 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     ps
   }
 
-  def get(key: K): Future[Option[Snapshot[D]]] = getAll(List(key)).map(_.get(key))
-  def getAll(keys: Iterable[K]): Future[Map[K, Snapshot[D]]] = Future {
+  def maxTick: Future[Option[Long]] = Future {
+    useConnection { conn =>
+      val ps = conn.prepareStatement(selectMaxTick)
+      try {
+        val rs = ps.executeQuery()
+        if (rs.next) {
+          val tick = rs.getLong(1)
+          if (rs.wasNull) None
+          else Some(tick)
+        } else None
+      } finally Try(ps.close)
+    }
+  }
+
+  def read(key: K): Future[Option[Snapshot[D]]] = readBatch(List(key)).map(_.get(key))
+  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[D]]] = Future {
     useConnection { conn =>
       val ps = conn.prepareStatement(selectOneSQL)
       try {
@@ -152,7 +170,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     }
   }
 
-  def set(key: K, data: Snapshot[D]): Future[Unit] = Future {
+  def write(key: K, data: Snapshot[D]): Future[Unit] = Future {
     useConnection { conn =>
       set(conn)(key, data)
     }
@@ -179,7 +197,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
       setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate()
     } finally Try(ps.close)
   }
-  def setAll(map: Map[K, Snapshot[D]]): Future[Unit] =
+  def writeBatch(map: Map[K, Snapshot[D]]): Future[Unit] =
     if (map.isEmpty) Future successful Unit
     else Future {
       useConnection { conn =>
@@ -188,8 +206,9 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
         }
       }
     }
-  def update(key: K, revision: Int, tick: Long): Future[Unit] = updateAll(Map(key -> (revision -> tick)))
-  def updateAll(revisions: Map[K, (Int, Long)]): Future[Unit] =
+  def refresh(key: K, revision: Int, tick: Long): Future[Unit] =
+    refreshBatch(Map(key -> ((revision, tick))))
+  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] =
     if (revisions.isEmpty) Future successful Unit
     else Future {
       useConnection { conn =>

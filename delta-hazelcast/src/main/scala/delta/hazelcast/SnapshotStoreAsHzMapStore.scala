@@ -28,12 +28,12 @@ class SnapshotStoreAsHzMapStore[K, T](
     with MapLoaderLifecycleSupport {
 
   store match {
-    case _: IMapAsSnapshotStore[_, _] => throw new IllegalArgumentException(
+    case _: IMapSnapshotStore[_, _] => throw new IllegalArgumentException(
       s"Trying to use ${store.getClass.getSimpleName} as SnapshotStore implementation. Think about it. It makes no sense.")
     case _ => // Ok, good.
   }
 
-  @volatile private[this] var _mapName: String = "<unknown>"
+  @volatile private[this] var _mapName: String = "<uninitialized>"
   protected def mapName = _mapName
   @volatile private[this] var _logger: ILogger = _
   protected def logger = _logger
@@ -47,36 +47,39 @@ class SnapshotStoreAsHzMapStore[K, T](
   def loadAllKeys = preloadKeys.asJava
 
   def delete(k: K) =
-    logger.warning(s"Tried to delete $k from $mapName, but ignoring. Override method if needed. Or use 'evict' instead of 'remove'.")
+    logger.warning(s"Tried to delete $k from $mapName, but ignoring. Override `delete` if needed, or use `evict` instead of `remove`/`delete`.")
   def deleteAll(keys: Collection[K]) =
-    logger.warning(s"Tried to delete ${keys.size} keys from $mapName, but ignoring. Override method if needed. Or use 'evict' instead of 'remove'.")
+    logger.warning(s"Tried to delete ${keys.size} keys from $mapName, but ignoring. Override `deleteAll` if needed. Or use `evict` instead of `remove`/`delete`.")
 
   def store(key: K, state: EntryState[T, Any]): Unit = {
     if (state.unapplied.isEmpty) {
-      if (state.contentUpdated) store.set(key, state.snapshot).await(awaitTimeout)
-      else store.update(key, state.snapshot.revision, state.snapshot.tick).await(awaitTimeout)
+      if (state.contentUpdated) store.write(key, state.snapshot).await(awaitTimeout)
+      else store.refresh(key, state.snapshot.revision, state.snapshot.tick).await(awaitTimeout)
     }
   }
   def storeAll(map: JMap[K, EntryState[T, Any]]) = {
     val contentUpdated = map.asScala.collect {
-      case (key, EntryState(model, true, unapplied)) if unapplied.isEmpty => key -> model
+      case (key, EntryState(model, true, unapplied)) if unapplied.isEmpty =>
+        key -> model
     }
-    val revUpdated = map.asScala.collect {
-      case (key, EntryState(model, false, unapplied)) if unapplied.isEmpty => key -> (model.revision -> model.tick)
-    }
+    val revUpdated: collection.mutable.Map[K, (Int, Long)] =
+      map.asScala.collect {
+        case (key, EntryState(model, false, unapplied)) if unapplied.isEmpty =>
+          (key, (model.revision, model.tick))
+      }
     var futures: List[Future[_]] = Nil
-    if (contentUpdated.nonEmpty) futures ::= store.setAll(contentUpdated)
-    if (revUpdated.nonEmpty) futures ::= store.updateAll(revUpdated)
+    if (contentUpdated.nonEmpty) futures ::= store.writeBatch(contentUpdated)
+    if (revUpdated.nonEmpty) futures ::= store.refreshBatch(revUpdated)
     futures.foreach(_.await(awaitTimeout))
   }
 
   def load(key: K): EntryState[T, Any] =
-    store.get(key).await(awaitTimeout) match {
+    store.read(key).await(awaitTimeout) match {
       case Some(model) => new EntryState(model)
       case _ => null
     }
   def loadAll(keys: Collection[K]) = {
-    val models = store.getAll(keys.asScala).await(awaitTimeout)
+    val models = store.readBatch(keys.asScala).await(awaitTimeout)
     models.mapValues(m => new EntryState[T, Any](m)).asJava
   }
 

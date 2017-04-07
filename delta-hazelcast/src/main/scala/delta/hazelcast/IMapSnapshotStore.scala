@@ -12,13 +12,24 @@ import delta.{ SnapshotStore, Snapshot }
 /**
   * [[delta.SnapshotStore]] implementation, backed
   * by a Hazelcast `IMap`.
+  * Since `IMap`s are potentially incomplete caches,
+  * a specific `maxTick` function is required
+  * to resolve the current high-water mark.
+  * @tparam K Key type
+  * @tparam V Snapshot content type
+  * @param imap The `IMap` instance
+  * @param maxTickImpl Function for resolving the highest tick
+  * @param logger `ILogger` instance
   */
-class IMapAsSnapshotStore[K, V](
+class IMapSnapshotStore[K, V](
   imap: IMap[K, Snapshot[V]],
+  maxTickImpl: => Future[Option[Long]],
   logger: ILogger)(implicit ec: ExecutionContext)
     extends SnapshotStore[K, V] {
 
-  def get(id: K): Future[Option[Snapshot[V]]] = {
+  def maxTick: Future[Option[Long]] = maxTickImpl
+
+  def read(id: K): Future[Option[Snapshot[V]]] = {
     val f = imap.getAsync(id)
     val p = Promise[Option[Snapshot[V]]]
     f andThen new ExecutionCallback[Snapshot[V]] {
@@ -30,7 +41,7 @@ class IMapAsSnapshotStore[K, V](
 
   private def updateFailure(id: K, th: Throwable) = logger.severe(s"""Updating entry $id in "${imap.getName}" failed""", th)
 
-  def set(id: K, snapshot: Snapshot[V]): Future[Unit] = {
+  def write(id: K, snapshot: Snapshot[V]): Future[Unit] = {
     try {
       val promise = Promise[Unit]
       val callback = new ExecutionCallback[Void] {
@@ -49,10 +60,10 @@ class IMapAsSnapshotStore[K, V](
     }
   }
 
-  def getAll(keys: Iterable[K]): Future[Map[K, Snapshot[V]]] = {
+  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[V]]] = {
     val seqFutures: Seq[Future[(K, Option[Snapshot[V]])]] =
       keys.map { key =>
-        this.get(key).map { option => key -> option }
+        this.read(key).map { option => key -> option }
       }.toSeq
     val futureSeq: Future[Seq[(K, Option[Snapshot[V]])]] = Future.sequence(seqFutures)
     futureSeq.map { seq =>
@@ -61,13 +72,13 @@ class IMapAsSnapshotStore[K, V](
       }.toMap
     }
   }
-  def setAll(snapshots: Map[K, Snapshot[V]]): Future[Unit] = {
+  def writeBatch(snapshots: Map[K, Snapshot[V]]): Future[Unit] = {
     val futures = snapshots.toSeq.map {
-      case (key, snapshot) => set(key, snapshot)
+      case (key, snapshot) => write(key, snapshot)
     }
     Future.sequence(futures).map(_ => Unit)
   }
-  def update(key: K, revision: Int, tick: Long): Future[Unit] = {
+  def refresh(key: K, revision: Int, tick: Long): Future[Unit] = {
     try {
       val promise = Promise[Unit]
       val callback = new ExecutionCallback[Void] {
@@ -86,9 +97,9 @@ class IMapAsSnapshotStore[K, V](
     }
 
   }
-  def updateAll(revisions: Map[K, (Int, Long)]): Future[Unit] = {
+  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] = {
     val futures = revisions.toSeq.map {
-      case (key, (revision, tick)) => update(key, revision, tick)
+      case (key, (revision, tick)) => refresh(key, revision, tick)
     }
     Future.sequence(futures).map(_ => Unit)
   }

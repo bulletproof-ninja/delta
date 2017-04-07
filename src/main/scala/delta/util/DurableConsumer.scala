@@ -7,12 +7,12 @@ import scuff.Subscription
 import scuff.concurrent.StreamPromise
 
 /**
- * A durable consumer of transactions,
- * useful for building read models and
- * other stateful processors.
- * Can be started and stopped on demand,
- * without loss of transactions.
- */
+  * A durable consumer of transactions,
+  * useful for building read models and
+  * other stateful processors.
+  * Can be started and stopped on demand,
+  * without loss of transactions.
+  */
 trait DurableConsumer[ID, EVT, CH] {
 
   type TXN = Transaction[ID, EVT, CH]
@@ -21,41 +21,42 @@ trait DurableConsumer[ID, EVT, CH] {
   /** Transaction selector. */
   protected def selector[T <: ES](es: T): es.Selector
   /**
-   * The highest reliable tick processed.
-   * NOTE: Since historic processing is not
-   * done in tick order, a tick received
-   * through incomplete historic processing
-   * is NOT reliable as a water mark. Any
-   * tick received in live processing can
-   * be considered a watermark.
-   */
-  protected def tickWatermark: Future[Option[Long]]
+    * The highest real-time tick processed.
+    * NOTE: Since historic processing is not
+    * done in tick order, a tick received
+    * through incomplete historic processing
+    * is NOT reliable as a high-water mark. Any
+    * tick received in real-time processing can
+    * be considered a high-water mark.
+    */
+  protected def maxRealTimeProccessedTick: Future[Option[Long]]
   /**
     * Called when historic processing begins.
-    * This is distinct from live processing and
+    * This is distinct from real-time processing and
     * allows the following optimizations:
     *     1) Predictable monotonic increasing revisions
     *     2) No duplicate revisions
     *     3) Potential for in-memory processing
-    * NOTE: If the event source is empty, this will
+    * NOTE: Tick order is arbitrary, thus no guarantee
+    * of causal tick processing, between different streams,
+    * although, as mentioned, individual streams will be
+    * processed in causal (monotonic revision) order.
+    * If the event source is empty, this will
     * not be called.
     */
-  protected def getHistoricProcessor[T <: ES](es: T): TXN => Unit
+  protected def batchProcessor[T <: ES](es: T): TXN => Unit
   /**
-    * When caught up on historic transactions,
-    * a live processor is requested. Any in-memory
-    * processing from historic processing can be
-    * persisted when called, before returning the
-    * processing function.
-    * A live processor must take care to handle these
+    * When historic batch processing is completed,
+    * a real-time processor is requested.
+    * A real-time processor must take care to handle these
     * conditions:
     *     1) Out-of-order revisions
-    *     2) Duplicate (repeated) revisions
-    *     3) Concurrent calls
+    *     2) Duplicate transactions
+    *     3) Concurrent calls (depending on pub/sub implementation)
     * For condition 3, the [[SerialAsyncProcessing]] class
     * can be used to serialize processing.
     */
-  protected def getLiveProcessor[T <: ES](es: T): Future[TXN => Unit]
+  protected def realTimeProcessor[T <: ES](es: T): Future[TXN => Unit]
 
   /**
     * Start processing of transactions, either from beginning
@@ -66,9 +67,9 @@ trait DurableConsumer[ID, EVT, CH] {
     * This will be available when historic processing is done,
     * thus state is considered current.
     */
-  def startProcessing(eventSource: ES, maxTickSkew: Int)(implicit ec: ExecutionContext): Future[Subscription] = {
+  def process(eventSource: ES, maxTickSkew: Int)(implicit ec: ExecutionContext): Future[Subscription] = {
     require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
-    this.tickWatermark.flatMap {
+    this.maxRealTimeProccessedTick.flatMap {
       case None =>
         eventSource.maxTick().flatMap { maxExistingTick =>
           start(eventSource, maxExistingTick)(selector(eventSource), maxTickSkew)
@@ -83,48 +84,46 @@ trait DurableConsumer[ID, EVT, CH] {
     }
   }
 
-  private def start(es: ES, lastTickAtStart: Option[Long])(
+  private def start(es: ES, maxExistingTickAtStart: Option[Long])(
     selector: es.Selector, maxTickSkew: Int)(
       implicit ec: ExecutionContext): Future[Subscription] = {
-    val historicProcessingDone: Future[Unit] = lastTickAtStart match {
+    val batchProcessingDone: Future[Unit] = maxExistingTickAtStart match {
       case None => // EventSource is empty
         Future successful None
       case Some(_) =>
-        val historicQuery = es.query(selector) _
-        val historicProcessor = this.getHistoricProcessor(es)
-        StreamPromise.foreach(historicQuery)(historicProcessor)
+        val batchQuery = es.query(selector) _
+        StreamPromise.foreach(batchQuery)(batchProcessor(es))
     }
-    historicProcessingDone.flatMap { _ =>
-      this.getLiveProcessor(es).flatMap { liveProcessor =>
-        val liveSubscription = es.subscribe(selector.toMonotonic)(liveProcessor)
+    batchProcessingDone.flatMap { _ =>
+      this.realTimeProcessor(es).flatMap { realTimeProcessor =>
+        val liveSubscription = es.subscribe(selector.toMonotonic)(realTimeProcessor)
         // close window of opportunity, for a potential race condition, by re-querying anything since start
-        val windowClosed = lastTickAtStart match {
+        val windowClosed = maxExistingTickAtStart match {
           case None =>
             val windowQuery = es.query(selector) _
-            StreamPromise.foreach(windowQuery)(liveProcessor)
-          case Some(lastTickAtStart) =>
-            val windowQuery = es.querySince(lastTickAtStart - maxTickSkew, selector) _
-            StreamPromise.foreach(windowQuery)(liveProcessor)
+            StreamPromise.foreach(windowQuery)(realTimeProcessor)
+          case Some(maxExistingTickAtStart) =>
+            val windowQuery = es.querySince(maxExistingTickAtStart - maxTickSkew, selector) _
+            StreamPromise.foreach(windowQuery)(realTimeProcessor)
         }
         windowClosed.map(_ => liveSubscription)
       }
     }
   }
-  private def resume(es: ES, lastTickAtStart: Long)(
-    selector: es.Selector, lastProcessedTick: Long, maxTickSkew: Int)(
+  private def resume(es: ES, maxExistingTickAtStart: Long)(
+    selector: es.Selector, maxProccessedTick: Long, maxTickSkew: Int)(
       implicit ec: ExecutionContext): Future[Subscription] = {
     val historicProcessingDone: Future[Unit] = {
-      val historicQuery = es.querySince(lastProcessedTick - maxTickSkew, selector) _
-      val historicProcessor = this.getHistoricProcessor(es)
-      StreamPromise.foreach(historicQuery)(historicProcessor)
+      val historicQuery = es.querySince(maxProccessedTick - maxTickSkew, selector) _
+      StreamPromise.foreach(historicQuery)(batchProcessor(es))
     }
     historicProcessingDone.flatMap { _ =>
-      this.getLiveProcessor(es).flatMap { liveProcessor =>
-        val liveSubscription = es.subscribe(selector.toMonotonic)(liveProcessor)
+      this.realTimeProcessor(es).flatMap { realTimeProcessor =>
+        val liveSubscription = es.subscribe(selector.toMonotonic)(realTimeProcessor)
         // close window of opportunity, for a potential race condition, by re-querying anything since start
-        val windowQuery = es.querySince(lastTickAtStart - maxTickSkew, selector) _
+        val windowQuery = es.querySince(maxExistingTickAtStart - maxTickSkew, selector) _
         StreamPromise
-          .foreach(windowQuery)(liveProcessor)
+          .foreach(windowQuery)(realTimeProcessor)
           .map(_ => liveSubscription)
       }
     }

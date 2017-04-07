@@ -93,7 +93,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     futureState.map(opt => opt.getOrElse(throw new UnknownIdException(id)))
   }
 
-  final def load(id: RID): Future[((S, Nil.type), Int)] = loadLatest(id, snapshots.get(id), false, None).map {
+  final def load(id: RID): Future[((S, Nil.type), Int)] = loadLatest(id, snapshots.read(id), false, None).map {
     case (snapshot, _) => snapshot.content -> Nil -> snapshot.revision
   }
 
@@ -111,14 +111,14 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
               throw new DuplicateIdException(id)
             }
         }
-        committedRevision.foreach(rev => snapshots.set(id, new Snapshot(state, rev, tick)))
+        committedRevision.foreach(rev => snapshots.write(id, new Snapshot(state, rev, tick)))
         committedRevision
       }
   }
 
   private def recordUpdate(id: RID, state: S, newRevision: Int, events: List[EVT], metadata: Map[String, String], tick: Long): Future[Int] = {
     val committedRevision = eventStore.commit(channel, id, newRevision, tick, events, metadata).map(_.revision)
-    committedRevision.foreach(rev => snapshots.set(id, new Snapshot(state, rev, tick)))
+    committedRevision.foreach(rev => snapshots.write(id, new Snapshot(state, rev, tick)))
     committedRevision
   }
 
@@ -161,7 +161,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   protected def update(
     id: RID, expectedRevision: Option[Int],
     metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
-    loadAndUpdate(id, expectedRevision, metadata, snapshots.get(id), assumeCurrentSnapshots, updateThunk)
+    loadAndUpdate(id, expectedRevision, metadata, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
   } catch {
     case NonFatal(th) => Future failed th
   }
