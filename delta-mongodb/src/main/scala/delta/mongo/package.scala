@@ -11,15 +11,32 @@ import org.bson.{ BsonReader, BsonWriter, UuidRepresentation }
 import org.bson.codecs._
 
 import com.mongodb.async.SingleResultCallback
+import java.util.UUID
 
 package object mongo {
 
-  implicit val ObjectIdCodec = new ObjectIdCodec
-  implicit val UUIDCodec = new UuidCodec(UuidRepresentation.STANDARD)
-  implicit val StringCodec = new StringCodec
-  implicit val IntCodec = new IntegerCodec().asInstanceOf[Codec[Int]]
-  implicit val LongCodec = new LongCodec().asInstanceOf[Codec[Long]]
-  implicit val UnitCodec = new Codec[Unit] {
+  implicit def tuple2Codec[A: Codec, B: Codec] = new Codec[(A, B)] {
+    def getEncoderClass = classOf[Tuple2[_, _]].asInstanceOf[Class[Tuple2[A, B]]]
+    def encode(writer: BsonWriter, value: (A, B), encoderContext: EncoderContext) {
+      writer.writeStartArray()
+      implicitly[Codec[A]].encode(writer, value._1, encoderContext)
+      implicitly[Codec[B]].encode(writer, value._2, encoderContext)
+      writer.writeEndArray()
+    }
+    def decode(reader: BsonReader, decoderContext: DecoderContext): (A, B) = {
+      reader.readStartArray()
+      val a: A = implicitly[Codec[A]].decode(reader, decoderContext)
+      val b: B = implicitly[Codec[B]].decode(reader, decoderContext)
+      reader.readEndArray()
+      a -> b
+    }
+  }
+  implicit val objectIdCodec = new ObjectIdCodec
+  implicit val uuidCodec: Codec[UUID] = new UuidCodec(UuidRepresentation.STANDARD)
+  implicit val stringCodec: Codec[String] = new StringCodec
+  implicit val intCodec = new IntegerCodec().asInstanceOf[Codec[Int]]
+  implicit val longCodec = new LongCodec().asInstanceOf[Codec[Long]]
+  implicit val unitCodec = new Codec[Unit] {
     def getEncoderClass = classOf[Unit]
     def encode(writer: BsonWriter, value: Unit, encoderContext: EncoderContext) {
       writer.writeUndefined()
@@ -35,14 +52,15 @@ package object mongo {
         case (map, enum: E) => map.updated(enum.name, enum)
       }
     def encode(writer: BsonWriter, value: E, encoderContext: EncoderContext) {
-      StringCodec.encode(writer, value.name, encoderContext)
+      stringCodec.encode(writer, value.name, encoderContext)
     }
     def decode(reader: BsonReader, decoderContext: DecoderContext): E = {
-      byName apply StringCodec.decode(reader, decoderContext)
+      byName apply stringCodec.decode(reader, decoderContext)
     }
   }
 
-  def withFutureCallback[R](thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {
+  def withFutureCallback[R](
+    thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {
     val promise = Promise[Option[R]]
     var used = false
       def callback = if (!used) new SingleResultCallback[R] {
@@ -57,7 +75,9 @@ package object mongo {
     promise.future
   }
 
-  def withBlockingCallback[R](timeout: FiniteDuration = 30.seconds)(thunk: (=> SingleResultCallback[R]) => Unit): Option[R] = {
+  def withBlockingCallback[R](
+    timeout: FiniteDuration = 30.seconds)(
+      thunk: (=> SingleResultCallback[R]) => Unit): Option[R] = {
     val queue = new ArrayBlockingQueue[Try[R]](1)
     var used = false
       def callback = if (!used) new SingleResultCallback[R] {

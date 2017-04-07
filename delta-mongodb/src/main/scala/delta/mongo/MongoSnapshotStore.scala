@@ -11,57 +11,74 @@ import com.mongodb.client.result.UpdateResult
 import collection.JavaConverters._
 import scala.reflect.{ ClassTag, classTag }
 import java.util.ArrayList
-import org.bson.codecs.Codec
-import org.bson.codecs.configuration.CodecRegistries
-
-object MongoSnapshotStore {
-  def apply[K: ClassTag, V](
-    codec: Codec[Snapshot[V]],
-    coll: MongoCollection[Document])(
-      implicit ec: ExecutionContext): MongoSnapshotStore[K, V] = {
-    new MongoSnapshotStore(withCodec(codec, coll))
-  }
-  private def withCodec[V](
-    codec: Codec[Snapshot[V]],
-    coll: MongoCollection[Document]) = {
-    val orgReg = coll.getCodecRegistry
-    val addReg = CodecRegistries.fromCodecs(codec)
-    val bothReg = CodecRegistries.fromRegistries(orgReg, addReg)
-    coll.withCodecRegistry(bothReg)
-  }
-}
+import scuff.Codec
 
 class MongoSnapshotStore[K: ClassTag, V](
+  snapshotCodec: Codec[V, Document],
   coll: MongoCollection[Document])(
     implicit ec: ExecutionContext)
     extends SnapshotStore[K, V] {
 
-  def this(codec: Codec[Snapshot[V]], coll: MongoCollection[Document])(
-    implicit ec: ExecutionContext) =
-    this(MongoSnapshotStore.withCodec(codec, coll))
+  private[this] val tickIndexFuture = withFutureCallback[String] { cb =>
+    coll.createIndex(new Document("tick", -1), cb)
+  }
+
+  def maxTick: Future[Option[Long]] = tickIndexFuture.flatMap { _ =>
+    withFutureCallback[Document] { cb =>
+      coll.find()
+        .sort(new Document("tick", -1))
+        .limit(1)
+        .projection(new Document("_id", 0).append("tick", 1))
+        .first(cb)
+    } map { maybeDoc =>
+      maybeDoc.map(_.getLong("tick"))
+    }
+  }
 
   private[this] val keyClass = classTag[K].runtimeClass.asInstanceOf[Class[K]]
 
-  private def _id(k: K): Document = new Document("_id", k)
+  private def where(k: K, newRevision: Int, newTick: Long): Document = {
+    val $or = Array(
+      new Document("revision", new Document("$lt", newRevision)),
+      new Document("tick", new Document("$lt", newTick)))
+    _id(k)
+      .append("$or", $or)
+  }
+  private def where(k: K, newRevision: Int): Document = {
+    _id(k)
+      .append("revision", new Document("$lte", newRevision))
+  }
+
+  private def _id(k: K) = new Document("_id", k)
   private def _id(keys: java.util.List[K]): Document = new Document("_id", new Document("$in", keys))
 
-  def get(key: K): Future[Option[Snapshot[V]]] = {
+  def read(key: K): Future[Option[Snapshot[V]]] = {
     withFutureCallback[Document] { callback =>
       coll.find(_id(key)).projection(new Document("_id", 0)).first(callback)
     } map { optDoc =>
-      optDoc.map(doc => doc.get("snapshot", classOf[Snapshot[V]]))
+      optDoc map { doc =>
+        val revision = doc.getInteger("revision")
+        val tick = doc.getLong("tick")
+        val content = snapshotCodec decode doc.get("snapshot", classOf[Document])
+        new Snapshot(content, revision, tick)
+      }
     }
   }
-  def set(key: K, snapshot: Snapshot[V]): Future[Unit] = {
+  def write(key: K, snapshot: Snapshot[V]): Future[Unit] = {
     withFutureCallback[UpdateResult] { callback =>
       val upsert = new UpdateOptions().upsert(true)
-      val update = new Document("$set", new Document("snapshot", snapshot))
-      coll.updateOne(_id(key), update, upsert, callback)
+      val contentDoc = snapshotCodec encode snapshot.content
+      val doc = _id(key)
+        .append("snapshot", contentDoc)
+        .append("revision", snapshot.revision)
+        .append("tick", snapshot.tick)
+      val update = new Document("$set", doc)
+      coll.updateOne(where(key, snapshot.revision), update, upsert, callback)
     } map { _ =>
       Unit
     }
   }
-  def getAll(keys: Iterable[K]): Future[Map[K, Snapshot[V]]] = {
+  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[V]]] = {
     withFutureCallback[ArrayList[Document]] { callback =>
       val keyList = keys.toSeq.asJava
       val target = new ArrayList[Document](keyList.size)
@@ -71,32 +88,34 @@ class MongoSnapshotStore[K: ClassTag, V](
         docs.asScala.foldLeft(Map.empty[K, Snapshot[V]]) {
           case (map, doc) =>
             val key: K = doc.get("_id", keyClass)
-            val snapshot = doc.get("snapshot", classOf[Snapshot[V]])
-            map.updated(key, snapshot)
+            val revision = doc.getInteger("revision")
+            val tick = doc.getLong("tick")
+            val content = snapshotCodec decode doc.get("snapshot", classOf[Document])
+            map.updated(key, Snapshot(content, revision, tick))
         }
       case _ => Map.empty
     }
   }
-  def setAll(snapshots: collection.Map[K, Snapshot[V]]): Future[Unit] = {
+  def writeBatch(snapshots: collection.Map[K, Snapshot[V]]): Future[Unit] = {
     val futures = snapshots.map {
-      case (key, snapshot) => set(key, snapshot)
+      case (key, snapshot) => write(key, snapshot)
     }
     Future.sequence(futures).map(_ => Unit)
   }
-  def update(key: K, revision: Int, tick: Long): Future[Unit] = {
+  def refresh(key: K, revision: Int, tick: Long): Future[Unit] = {
     withFutureCallback[UpdateResult] { callback =>
       val updateOnly = new UpdateOptions().upsert(false)
       val update = new Document("$set",
-        new Document("snapshot.rev", revision)
-          .append("snapshot.tick", tick))
-      coll.updateOne(_id(key), update, updateOnly, callback)
+        new Document("revision", revision)
+          .append("tick", tick))
+      coll.updateOne(where(key, revision, tick), update, updateOnly, callback)
     } map { _ =>
       Unit
     }
   }
-  def updateAll(revisions: collection.Map[K, (Int, Long)]): Future[Unit] = {
+  def refreshBatch(revisions: collection.Map[K, (Int, Long)]): Future[Unit] = {
     val futures = revisions.map {
-      case (key, (revision, tick)) => update(key, revision, tick)
+      case (key, (revision, tick)) => refresh(key, revision, tick)
     }
     Future.sequence(futures).map(_ => Unit)
   }
