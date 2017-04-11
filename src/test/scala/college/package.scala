@@ -4,11 +4,7 @@ import language.implicitConversions
 import college.semester._
 import college.student._
 import delta._
-import delta.util._
-import delta.ddd.EntityRepository
 import scuff.JavaSerializer
-import java.io.ByteArrayOutputStream
-import scala.concurrent.ExecutionContext
 
 package college {
   case class IntId[T](int: Int)
