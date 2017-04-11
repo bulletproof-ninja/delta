@@ -6,26 +6,47 @@ import scala.concurrent.blocking
 import scala.util.Try
 
 import javax.sql.{ DataSource, ConnectionPoolDataSource }
+import scuff.concurrent.ResourcePool
+import java.sql.SQLException
+import java.sql.SQLTransientException
 
 /**
- * Generic trait for providing a JDBC connection.
- * By default, any warnings will get thrown. This
- * behavior can be modified by either fixing the
- * cause of the warning(s), which is the recommended
- * approach, or, if a fix is infeasible, overriding the
- * `processWarnings` method.
- */
+  * Generic trait for providing a JDBC connection.
+  * By default, any warnings will get thrown. This
+  * behavior can be modified by either fixing the
+  * cause of the warning(s), which is the recommended
+  * approach, or, if a fix is infeasible, overriding the
+  * `processWarnings` method.
+  */
 trait ConnectionProvider {
   protected def getConnection: Connection
-  protected def processWarnings(warnings: SQLWarning): Unit = throw warnings
-  protected def useConnection[R](thunk: Connection => R): R = blocking {
+  protected def getConnection(readOnly: Boolean): Connection = {
     val conn = getConnection
+    conn.setReadOnly(readOnly)
+    conn.setAutoCommit(readOnly)
+    conn
+  }
+  protected def processWarnings(warnings: SQLWarning): Unit = throw warnings
+  protected def useConnection[R](readOnly: Boolean)(thunk: Connection => R): R = blocking {
+    val conn = getConnection(readOnly)
     try {
       val r = thunk(conn)
       Option(conn.getWarnings).foreach(processWarnings)
       r
     } finally Try(conn.close)
   }
+  protected def forUpdate[R](thunk: Connection => R): R = useConnection(readOnly = false) { conn =>
+    try {
+      val r = thunk(conn)
+      conn.commit()
+      r
+    } catch {
+      case t: Throwable =>
+        Try(conn.rollback())
+        throw t
+    }
+  }
+  protected def forQuery[R](thunk: Connection => R): R = useConnection(readOnly = true)(thunk)
 }
 
 trait DataSourceConnectionProvider extends ConnectionProvider {

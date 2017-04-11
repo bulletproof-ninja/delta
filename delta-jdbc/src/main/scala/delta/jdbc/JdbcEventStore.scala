@@ -37,27 +37,6 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     this
   }
 
-  protected def prepareUpdate(conn: Connection) {
-    conn.setAutoCommit(false)
-    conn.setReadOnly(false)
-  }
-  protected def prepareQuery(conn: Connection) {
-    conn.setReadOnly(true)
-  }
-
-  protected def forUpdate[R](thunk: Connection => R): R = {
-    useConnection { conn =>
-      prepareUpdate(conn)
-      thunk(conn)
-    }
-  }
-  protected def forQuery[R](thunk: Connection => R): R = {
-    useConnection { conn =>
-      prepareQuery(conn)
-      thunk(conn)
-    }
-  }
-
   private def selectRevision(stream: ID, revision: Int)(
     implicit conn: Connection): Option[TXN] = {
     var dupe: Option[TXN] = None
@@ -88,7 +67,6 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
           dialect.insertTransaction(stream, revision, tick)
           dialect.insertEvents(stream, revision, events)
           dialect.insertMetadata(stream, revision, metadata)
-          conn.commit()
         } catch {
           case sqlEx: SQLException if dialect.isDuplicateKeyViolation(sqlEx) =>
             selectRevision(stream, revision) match {

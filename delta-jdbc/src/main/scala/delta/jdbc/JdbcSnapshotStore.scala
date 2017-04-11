@@ -2,14 +2,10 @@ package delta.jdbc
 
 import scuff._
 import collection.Map
-import java.sql.Connection
+import java.sql._
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext }
-import java.sql.PreparedStatement
-import java.sql.ResultSet
-import delta.SnapshotStore
-import delta.Snapshot
-import java.sql.SQLException
+import delta._
 
 abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   table: String, schema: Option[String])(
@@ -18,7 +14,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   cp: ConnectionProvider =>
 
   def ensureTable(dropIfExists: Boolean = false): this.type =
-    useConnection { conn =>
+    forUpdate { conn =>
       if (dropIfExists) {
         dropTable(conn)
       }
@@ -140,7 +136,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   }
 
   def maxTick: Future[Option[Long]] = Future {
-    useConnection { conn =>
+    forQuery { conn =>
       val ps = conn.prepareStatement(selectMaxTick)
       try {
         val rs = ps.executeQuery()
@@ -155,7 +151,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
 
   def read(key: K): Future[Option[Snapshot[D]]] = readBatch(List(key)).map(_.get(key))
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[D]]] = Future {
-    useConnection { conn =>
+    forQuery { conn =>
       val ps = conn.prepareStatement(selectOneSQL)
       try {
         keys.foldLeft(Map.empty[K, Snapshot[D]]) {
@@ -172,7 +168,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   }
 
   def write(key: K, data: Snapshot[D]): Future[Unit] = Future {
-    useConnection { conn =>
+    forUpdate { conn =>
       set(conn)(key, data)
     }
   }
@@ -209,7 +205,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   def writeBatch(map: Map[K, Snapshot[D]]): Future[Unit] =
     if (map.isEmpty) Future successful Unit
     else Future {
-      useConnection { conn =>
+      forUpdate { conn =>
         map.foreach {
           case (key, data) => set(conn)(key, data)
         }
@@ -220,7 +216,7 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] =
     if (revisions.isEmpty) Future successful Unit
     else Future {
-      useConnection { conn =>
+      forUpdate { conn =>
         val ps = conn.prepareStatement(updateRevTickSQL)
         try {
           val isBatch = revisions.size != 1
