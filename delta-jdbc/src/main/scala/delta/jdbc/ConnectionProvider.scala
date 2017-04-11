@@ -58,3 +58,18 @@ trait ConnectionPoolDataSourceConnection extends ConnectionProvider {
   protected def dataSource: ConnectionPoolDataSource
   protected def getConnection: Connection = dataSource.getPooledConnection.getConnection
 }
+trait Retry extends ConnectionProvider {
+  protected def numRetries = 1
+  protected def shouldRetry(e: SQLException): Boolean = e.isInstanceOf[SQLTransientException]
+  final override protected def useConnection[R](readOnly: Boolean)(thunk: Connection => R): R = {
+    tryThunk(readOnly, numRetries, thunk)
+  }
+  private def tryThunk[R](readOnly: Boolean, retriesLeft: Int, thunk: Connection => R): R = {
+    try {
+      super.useConnection(readOnly)(thunk)
+    } catch {
+      case e: SQLException if retriesLeft > 0 && shouldRetry(e) =>
+        tryThunk(readOnly, retriesLeft - 1, thunk)
+    }
+  }
+}
