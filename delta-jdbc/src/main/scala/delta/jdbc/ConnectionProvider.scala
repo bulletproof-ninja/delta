@@ -58,6 +58,14 @@ trait ConnectionPoolDataSourceConnection extends ConnectionProvider {
   protected def dataSource: ConnectionPoolDataSource
   protected def getConnection: Connection = dataSource.getPooledConnection.getConnection
 }
+trait ResourcePoolConnection extends ConnectionProvider {
+  private[this] val readPool = new ResourcePool(super.getConnection(readOnly = true), 1)
+  private[this] val writePool = new ResourcePool(super.getConnection(readOnly = false), 1)
+  override protected def useConnection[R](readOnly: Boolean)(thunk: Connection => R): R = {
+    val pool = if (readOnly) readPool else writePool
+    pool.use(thunk)
+  }
+}
 trait Retry extends ConnectionProvider {
   protected def numRetries = 1
   protected def shouldRetry(e: SQLException): Boolean = e.isInstanceOf[SQLTransientException]
