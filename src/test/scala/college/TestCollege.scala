@@ -16,9 +16,6 @@ import scala.util.{ Random => rand }
 
 import language.implicitConversions
 import scala.collection.concurrent.TrieMap
-import scala.util.Try
-import scala.util.Failure
-import scala.util.Success
 import delta.util.LocalPublishing
 import delta.testing.RandomDelayExecutionContext
 
@@ -72,7 +69,7 @@ class TestCollege {
   }
 
   @Test
-  def `many-to-many relationship` {
+  def `many-to-many relationship`() {
     val Unknown = "<unknown>"
     val studentIds = addStudents(200)
     val semesterIds = addSemesters(30).toIndexedSeq
