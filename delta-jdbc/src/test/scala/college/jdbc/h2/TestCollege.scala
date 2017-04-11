@@ -36,7 +36,7 @@ class TestCollege extends college.TestCollege {
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore[Int, CollegeEvent, String, Array[Byte]](
-      sql, RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] with DataSourceConnectionProvider {
+      sql, RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] with DataSourceConnection {
       protected def publishCtx = RandomDelayExecutionContext
       protected def dataSource = ds
     }.ensureSchema()

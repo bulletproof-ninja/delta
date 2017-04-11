@@ -49,12 +49,12 @@ trait ConnectionProvider {
   protected def forQuery[R](thunk: Connection => R): R = useConnection(readOnly = true)(thunk)
 }
 
-trait DataSourceConnectionProvider extends ConnectionProvider {
+trait DataSourceConnection extends ConnectionProvider {
   protected def dataSource: DataSource
   protected def getConnection: Connection = dataSource.getConnection
 }
 
-trait PooledConnectionProvider extends ConnectionProvider {
+trait ConnectionPoolDataSourceConnection extends ConnectionProvider {
   protected def dataSource: ConnectionPoolDataSource
   protected def getConnection: Connection = dataSource.getPooledConnection.getConnection
 }

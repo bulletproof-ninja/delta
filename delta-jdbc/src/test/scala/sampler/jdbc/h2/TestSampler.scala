@@ -38,7 +38,7 @@ final class TestSampler extends sampler.TestSampler {
     ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore(sql, RandomDelayExecutionContext)
       with LocalPublishing[Int, DomainEvent, Aggr.Value]
-      with DataSourceConnectionProvider {
+      with DataSourceConnection {
       protected def publishCtx = RandomDelayExecutionContext
       protected def dataSource = ds
     }.ensureSchema()

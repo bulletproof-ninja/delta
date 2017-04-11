@@ -5,7 +5,7 @@ import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
 import org.junit._
 import delta.SnapshotStore
 import delta.jdbc.JdbcSnapshotStore
-import delta.jdbc.DataSourceConnectionProvider
+import delta.jdbc.DataSourceConnection
 import delta.testing.RandomDelayExecutionContext
 import delta.jdbc.VarCharColumn
 import delta.jdbc.mysql.MySQLSnapshotStore
@@ -40,7 +40,7 @@ class TestJdbcSnapshotStore
 
   override val store: SnapshotStore[Long, String] =
     new JdbcSnapshotStore[Long, String](
-      "readmodel_test") with DataSourceConnectionProvider with MySQLSnapshotStore {
+      "readmodel_test") with DataSourceConnection with MySQLSnapshotStore {
       val dataSource = ds
     }.ensureTable(dropIfExists = true)
 

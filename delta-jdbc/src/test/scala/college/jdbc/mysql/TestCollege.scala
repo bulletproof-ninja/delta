@@ -42,7 +42,7 @@ class TestCollege extends college.TestCollege {
     implicit def DataColumn = BlobColumn
     val sql = new MySQLDialect[Int, CollegeEvent, String, Array[Byte]]
     new JdbcEventStore[Int, CollegeEvent, String, Array[Byte]](
-      sql, RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] with DataSourceConnectionProvider {
+      sql, RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] with DataSourceConnection {
       protected def publishCtx = RandomDelayExecutionContext
       protected def dataSource = ds
     }.ensureSchema()

@@ -40,7 +40,7 @@ final class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     val sql = new MySQLDialect[Int, DomainEvent, Aggr.Value, JSON]
-    new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] with PooledConnectionProvider {
+    new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] with DataSourceConnection {
       protected def publishCtx = RandomDelayExecutionContext
       protected def dataSource = TestSampler.ds
     }.ensureSchema()
