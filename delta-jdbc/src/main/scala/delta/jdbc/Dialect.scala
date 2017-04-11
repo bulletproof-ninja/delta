@@ -8,6 +8,13 @@ import delta.EventCodec
 class DefaultDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
   extends Dialect[ID, EVT, CH, SF](schema.optional)
 
+private[jdbc] object Dialect {
+  def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = {
+    sqlEx.isInstanceOf[SQLIntegrityConstraintViolationException] ||
+      Option(sqlEx.getSQLState).exists(_ startsWith "23")
+  }
+}
+
 protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] protected[jdbc] (
     final val schema: Option[String]) {
 
@@ -15,14 +22,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   private[jdbc] def chType = implicitly[ColumnType[CH]]
   private[jdbc] def sfType = implicitly[ColumnType[SF]]
 
-  def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = {
-    Option(sqlEx.getSQLState).exists(_ startsWith "23") ||
-      Option(sqlEx.getMessage).map(_.toLowerCase).exists { msg =>
-        (msg contains "duplicate") ||
-          (msg contains "constraint") ||
-          (msg contains "violation")
-      }
-  }
+  def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
   protected def schemaPrefix = schema.map(_ + ".") getOrElse ""
   protected def streamTable = s"${schemaPrefix}stream"

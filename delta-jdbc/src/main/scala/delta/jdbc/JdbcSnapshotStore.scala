@@ -9,7 +9,6 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import delta.SnapshotStore
 import delta.Snapshot
-import java.sql.SQLIntegrityConstraintViolationException
 import java.sql.SQLException
 
 abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
@@ -190,17 +189,14 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     }
   }
 
-  protected def isKeyViolation(e: SQLException): Boolean = e match {
-    case dupe: SQLIntegrityConstraintViolationException => true
-    case _ => false
-  }
+  protected def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
   protected def insert(conn: Connection)(key: K, data: Snapshot[D]): Boolean = {
     val ps = conn.prepareStatement(insertOneSQL)
     try {
       setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate() != 0
     } catch {
-      case e: SQLException if isKeyViolation(e) =>
+      case e: SQLException if isDuplicateKeyViolation(e) =>
         false
     } finally Try(ps.close)
   }
