@@ -25,10 +25,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
   protected def schemaPrefix = schema.map(_ + ".") getOrElse ""
-  protected def streamTable = s"${schemaPrefix}stream"
-  protected def transactionTable = s"${schemaPrefix}transaction"
-  protected def eventTable = s"${schemaPrefix}event"
-  protected def metadataTable = s"${schemaPrefix}metadata"
+  protected def streamTable = s"${schemaPrefix}es_stream"
+  protected def transactionTable = s"${schemaPrefix}es_transaction"
+  protected def eventTable = s"${schemaPrefix}es_event"
+  protected def metadataTable = s"${schemaPrefix}es_metadata"
   protected def channelIndex = s"${streamTable.replace(".", "_")}_channel"
   protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_name"
   protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick"
