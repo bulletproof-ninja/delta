@@ -9,6 +9,7 @@ import javax.sql.{ DataSource, ConnectionPoolDataSource }
 import scuff.concurrent.ResourcePool
 import java.sql.SQLException
 import java.sql.SQLTransientException
+import java.sql.SQLRecoverableException
 
 /**
   * Generic trait for providing a JDBC connection.
@@ -58,6 +59,7 @@ trait ConnectionPoolDataSourceConnection extends ConnectionProvider {
   protected def dataSource: ConnectionPoolDataSource
   protected def getConnection: Connection = dataSource.getPooledConnection.getConnection
 }
+
 trait ResourcePoolConnection extends ConnectionProvider {
   private[this] val readPool = new ResourcePool(super.getConnection(readOnly = true), 1)
   private[this] val writePool = new ResourcePool(super.getConnection(readOnly = false), 1)
@@ -66,9 +68,15 @@ trait ResourcePoolConnection extends ConnectionProvider {
     pool.use(thunk)
   }
 }
+
 trait Retry extends ConnectionProvider {
+
   protected def numRetries = 1
-  protected def shouldRetry(e: SQLException): Boolean = e.isInstanceOf[SQLTransientException]
+
+  protected def shouldRetry(e: SQLException): Boolean =
+    e.isInstanceOf[SQLTransientException] ||
+      e.isInstanceOf[SQLRecoverableException]
+
   final override protected def useConnection[R](readOnly: Boolean)(thunk: Connection => R): R = {
     tryThunk(readOnly, numRetries, thunk)
   }
