@@ -33,14 +33,14 @@ trait MonotonicProcessor[ID, EVT, CH, S]
   private def updateOnPartitionThread(
     key: ID, thunk: Option[Snapshot[S]] => Option[Snapshot[S]]): Option[Snapshot[S]] = {
 
-    val oldSnapshot = snapshots.read(key).await(snapshotStoreTimeout)
+    val oldSnapshot = snapshots.read(key).await(snapshotStoreTimeout, exeCtx.reportFailure)
     val newSnapshot = thunk(oldSnapshot)
     if (oldSnapshot ne newSnapshot) newSnapshot.foreach { newSnapshot =>
       if (oldSnapshot.forall(_.content != newSnapshot.content)) {
-        snapshots.write(key, newSnapshot).await(snapshotStoreTimeout)
+        snapshots.write(key, newSnapshot).await(snapshotStoreTimeout, exeCtx.reportFailure)
         onSnapshotUpdated(key, newSnapshot)
       } else if (oldSnapshot.get.revision != newSnapshot.revision || oldSnapshot.get.tick != newSnapshot.tick) {
-        snapshots.refresh(key, newSnapshot.revision, newSnapshot.tick).await(snapshotStoreTimeout)
+        snapshots.refresh(key, newSnapshot.revision, newSnapshot.tick).await(snapshotStoreTimeout, exeCtx.reportFailure)
         onSnapshotUpdated(key, newSnapshot)
       }
     }

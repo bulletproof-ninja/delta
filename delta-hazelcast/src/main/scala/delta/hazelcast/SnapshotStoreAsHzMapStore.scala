@@ -33,6 +33,9 @@ class SnapshotStoreAsHzMapStore[K, T](
     case _ => // Ok, good.
   }
 
+  private def logTimedOutFuture(th: Throwable): Unit =
+    logger.warning("Timed-out future eventually failed", th)
+
   @volatile private[this] var _mapName: String = "<uninitialized>"
   protected def mapName = _mapName
   @volatile private[this] var _logger: ILogger = _
@@ -53,8 +56,8 @@ class SnapshotStoreAsHzMapStore[K, T](
 
   def store(key: K, state: EntryState[T, Any]): Unit = {
     if (state.unapplied.isEmpty) {
-      if (state.contentUpdated) store.write(key, state.snapshot).await(awaitTimeout)
-      else store.refresh(key, state.snapshot.revision, state.snapshot.tick).await(awaitTimeout)
+      if (state.contentUpdated) store.write(key, state.snapshot).await(awaitTimeout, logTimedOutFuture)
+      else store.refresh(key, state.snapshot.revision, state.snapshot.tick).await(awaitTimeout, logTimedOutFuture)
     }
   }
   def storeAll(map: JMap[K, EntryState[T, Any]]) = {
@@ -70,16 +73,16 @@ class SnapshotStoreAsHzMapStore[K, T](
     var futures: List[Future[_]] = Nil
     if (contentUpdated.nonEmpty) futures ::= store.writeBatch(contentUpdated)
     if (revUpdated.nonEmpty) futures ::= store.refreshBatch(revUpdated)
-    futures.foreach(_.await(awaitTimeout))
+    futures.foreach(_.await(awaitTimeout, logTimedOutFuture))
   }
 
   def load(key: K): EntryState[T, Any] =
-    store.read(key).await(awaitTimeout) match {
+    store.read(key).await(awaitTimeout, logTimedOutFuture) match {
       case Some(model) => new EntryState(model)
       case _ => null
     }
   def loadAll(keys: Collection[K]) = {
-    val models = store.readBatch(keys.asScala).await(awaitTimeout)
+    val models = store.readBatch(keys.asScala).await(awaitTimeout, logTimedOutFuture)
     models.mapValues(m => new EntryState[T, Any](m)).asJava
   }
 
