@@ -44,9 +44,6 @@ allprojects {
     repositories {
         mavenCentral()
         jcenter()
-        maven {
-            url "http://dl.bintray.com/bulletproof-ninja/maven"
-        }
     }
     dependencies {
         compileOnly "org.scala-lang:scala-reflect:$vScalaFull"
@@ -149,7 +146,5 @@ project(':delta-hazelcast') {
 project(':delta-redis') {
     dependencies {
         compile "redis.clients:jedis:2.9.0"
-        //compile "io.vertx:vertx-redis-client:3.4.1"
-        //compile "biz.paluch.redis:lettuce:4.3.1.Final"
     }
 }
