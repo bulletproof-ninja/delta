@@ -61,8 +61,9 @@ trait ConnectionPoolDataSourceConnection extends ConnectionProvider {
 }
 
 trait ResourcePoolConnection extends ConnectionProvider {
-  private[this] val readPool = new ResourcePool(super.getConnection(readOnly = true), 1)
-  private[this] val writePool = new ResourcePool(super.getConnection(readOnly = false), 1)
+  protected def newResourcePool(init: => Connection): ResourcePool[Connection]
+  private[this] val readPool = newResourcePool(super.getConnection(readOnly = true))
+  private[this] val writePool = newResourcePool(super.getConnection(readOnly = false))
   override protected def useConnection[R](readOnly: Boolean)(thunk: Connection => R): R = {
     val pool = if (readOnly) readPool else writePool
     pool.use(thunk)
