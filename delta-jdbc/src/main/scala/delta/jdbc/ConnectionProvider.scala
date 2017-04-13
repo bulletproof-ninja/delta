@@ -71,14 +71,14 @@ trait ResourcePoolConnection extends ConnectionProvider {
 
 trait Retry extends ConnectionProvider {
 
-  protected def numRetries = 1
+  protected def retryCount: Int
 
   protected def shouldRetry(e: SQLException): Boolean =
     e.isInstanceOf[SQLTransientException] ||
       e.isInstanceOf[SQLRecoverableException]
 
   final override protected def useConnection[R](readOnly: Boolean)(thunk: Connection => R): R = {
-    tryThunk(readOnly, numRetries, thunk)
+    tryThunk(readOnly, retryCount, thunk)
   }
   private def tryThunk[R](readOnly: Boolean, retriesLeft: Int, thunk: Connection => R): R = {
     try {
