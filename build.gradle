@@ -4,8 +4,8 @@ plugins {
 
 ext {
     getScalaFull = [
-        '2.11': '2.11.9',
-        '2.12': '2.12.1'
+        '2.11': '2.11.11',
+        '2.12': '2.12.2'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.11'
