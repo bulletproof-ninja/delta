@@ -24,8 +24,8 @@ trait MonotonicProcessor[ID, EVT, CH, S]
     */
   protected def exeCtx: PartitionedExecutionContext
   protected def snapshots: SnapshotStore[ID, S]
-  protected def process(txn: TXN, currState: Option[S]): S
   protected def onSnapshotUpdated(id: ID, snapshot: Snapshot[S]): Unit
+  protected def process(txn: TXN, currState: Option[S]): S
 
   protected def snapshotStoreTimeout: FiniteDuration = _defaultTimeout
   private[this] val _defaultTimeout = 10.seconds
