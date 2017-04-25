@@ -15,11 +15,19 @@ trait TransactionSerializer
   type TXN = delta.Transaction[Any, Any, Any]
 
   def write(out: ObjectDataOutput, txn: TXN): Unit = {
-    delta.Transaction.writeObject(txn, out.asInstanceOf[ObjectOutputStream])
+    val output = out match {
+      case out: java.io.ObjectOutput => out
+      case out: java.io.OutputStream => new ObjectOutputStream(out)
+    }
+    delta.Transaction.writeObject(txn, output)
   }
 
   def read(inp: ObjectDataInput): TXN = {
-    delta.Transaction.readObject(inp.asInstanceOf[ObjectInputStream]) {
+    val input = inp match {
+      case inp: java.io.ObjectInput => inp
+      case inp: java.io.InputStream => new ObjectInputStream(inp)
+    }
+    delta.Transaction.readObject(input) {
       case (tick, ch, id, rev, metadata, events) =>
         new TXN(tick, ch, id, rev, metadata, events)
     }
