@@ -28,7 +28,7 @@ final case class Transaction[ID, EVT, CH](
 }
 
 object Transaction {
-  def writeObject(txn: Transaction[_, _, _], out: java.io.ObjectOutputStream): Unit = {
+  def writeObject(txn: Transaction[_, _, _], out: java.io.ObjectOutput): Unit = {
     out.writeLong(txn.tick)
     out.writeObject(txn.channel)
     out.writeObject(txn.stream)
@@ -44,14 +44,14 @@ object Transaction {
   }
   @annotation.tailrec
   private def readEvents(
-    in: java.io.ObjectInputStream,
+    in: java.io.ObjectInput,
     events: List[_ <: AnyRef] = Nil): List[_ <: AnyRef] =
     in.readObject match {
       case null => events
       case evt => readEvents(in, evt :: events)
     }
   def readObject[ID, EVT, CH](
-    inp: java.io.ObjectInputStream)(
+    inp: java.io.ObjectInput)(
       ctor: (Long, CH, ID, Int, Map[String, String], List[EVT]) => Transaction[ID, EVT, CH]): Transaction[ID, EVT, CH] = {
     val tick = inp.readLong()
     val ch = inp.readObject.asInstanceOf[CH]
