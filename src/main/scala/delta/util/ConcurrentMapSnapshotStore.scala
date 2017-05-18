@@ -18,29 +18,29 @@ class ConcurrentMapSnapshotStore[K, V](
     extends SnapshotStore[K, V] {
 
   @annotation.tailrec
-  private def trySave(id: K, snapshot: Snapshot[V]) {
-    cmap.putIfAbsent(id, snapshot) match {
+  private def trySave(key: K, snapshot: Snapshot[V]): Unit = {
+    cmap.putIfAbsent(key, snapshot) match {
       case None => // Success
       case Some(existing) =>
         if (snapshot.revision > existing.revision) { // replace with later revision
-          if (!cmap.replace(id, existing, snapshot)) {
-            trySave(id, snapshot)
+          if (!cmap.replace(key, existing, snapshot)) {
+            trySave(key, snapshot)
           }
         }
     }
   }
-  def write(id: K, snapshot: Snapshot[V]) = try {
-    trySave(id, snapshot)
+  def write(key: K, snapshot: Snapshot[V]) = try {
+    trySave(key, snapshot)
     SnapshotStore.UnitFuture
   } catch {
     case NonFatal(th) => Future failed th
   }
 
-  def read(id: K): Future[Option[Snapshot[V]]] = cmap.get(id) match {
+  def read(key: K): Future[Option[Snapshot[V]]] = cmap.get(key) match {
     case None =>
-      fallback(id).map {
+      fallback(key).map {
         _.map { value =>
-          cmap.putIfAbsent(id, value) getOrElse value
+          cmap.putIfAbsent(key, value) getOrElse value
         }
       }(Threads.PiggyBack)
     case found => Future successful found
@@ -58,7 +58,7 @@ class ConcurrentMapSnapshotStore[K, V](
 
   def writeBatch(map: Map[K, Snapshot[V]]): Future[Unit] = {
     map.foreach {
-      case (id, snapshot) => write(id, snapshot)
+      case (key, snapshot) => write(key, snapshot)
     }
     SnapshotStore.UnitFuture
   }

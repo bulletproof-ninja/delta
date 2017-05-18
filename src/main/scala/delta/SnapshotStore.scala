@@ -20,8 +20,8 @@ private[delta] object SnapshotStore {
   def EmptyMapFuture[K, V] = emptyMapFuture.asInstanceOf[Future[Map[K, V]]]
   private[this] val Empty = new SnapshotStore[Any, AnyRef] {
     def maxTick: Future[Option[Long]] = NoneFuture
-    def read(id: Any): Future[Option[Snapshot[AnyRef]]] = NoneFuture
-    def write(id: Any, snapshot: Snapshot[AnyRef]): Future[Unit] = UnitFuture
+    def read(key: Any): Future[Option[Snapshot[AnyRef]]] = NoneFuture
+    def write(key: Any, snapshot: Snapshot[AnyRef]): Future[Unit] = UnitFuture
     def readBatch(keys: Iterable[Any]): Future[Map[Any, Snapshot[AnyRef]]] = EmptyMapFuture
     def writeBatch(snapshots: Map[Any, Snapshot[AnyRef]]): Future[Unit] = UnitFuture
     def refresh(key: Any, revision: Int, tick: Long): Future[Unit] = UnitFuture
