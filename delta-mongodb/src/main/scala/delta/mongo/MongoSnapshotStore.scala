@@ -12,6 +12,8 @@ import collection.JavaConverters._
 import scala.reflect.{ ClassTag, classTag }
 import java.util.ArrayList
 import scuff.Codec
+import java.util.Arrays
+import com.mongodb.MongoWriteException
 
 class MongoSnapshotStore[K: ClassTag, V](
   snapshotCodec: Codec[V, Document],
@@ -37,18 +39,6 @@ class MongoSnapshotStore[K: ClassTag, V](
 
   private[this] val keyClass = classTag[K].runtimeClass.asInstanceOf[Class[K]]
 
-  private def where(k: K, newRevision: Int, newTick: Long): Document = {
-    val $or = Array(
-      new Document("revision", new Document("$lt", newRevision)),
-      new Document("tick", new Document("$lt", newTick)))
-    _id(k)
-      .append("$or", $or)
-  }
-  private def where(k: K, newRevision: Int): Document = {
-    _id(k)
-      .append("revision", new Document("$lte", newRevision))
-  }
-
   private def _id(k: K) = new Document("_id", k)
   private def _id(keys: java.util.List[K]): Document = new Document("_id", new Document("$in", keys))
 
@@ -68,14 +58,24 @@ class MongoSnapshotStore[K: ClassTag, V](
     withFutureCallback[UpdateResult] { callback =>
       val upsert = new UpdateOptions().upsert(true)
       val contentDoc = snapshotCodec encode snapshot.content
-      val doc = _id(key)
+      val update = new Document("$set", new Document()
         .append("snapshot", contentDoc)
         .append("revision", snapshot.revision)
-        .append("tick", snapshot.tick)
-      val update = new Document("$set", doc)
-      coll.updateOne(where(key, snapshot.revision), update, upsert, callback)
-    } map { _ =>
-      Unit
+        .append("tick", snapshot.tick))
+      coll.updateOne(where(key, snapshot.revision, snapshot.tick), update, upsert, callback)
+    } recover {
+      case we: MongoWriteException if we.getError.getCode == 11000 => Some {
+        UpdateResult.acknowledged(0, 0, null)
+      }
+    } flatMap {
+      case Some(res: UpdateResult) if res.wasAcknowledged && res.getMatchedCount == 0 && res.getUpsertedId == null =>
+        read(key) map {
+          case Some(existing) =>
+            throw SnapshotStore.Exceptions.writeOlderRevision(key, existing, snapshot)
+          case None =>
+            sys.error(s"Failed to update snapshot $key, revision ${snapshot.revision}, tick ${snapshot.tick}")
+        }
+      case _ => Future successful (())
     }
   }
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[V]]] = {
@@ -101,6 +101,15 @@ class MongoSnapshotStore[K: ClassTag, V](
       case (key, snapshot) => write(key, snapshot)
     }
     Future.sequence(futures).map(_ => Unit)
+  }
+
+  private def where(key: K, newRev: Int, newTick: Long): Document = {
+    val $or = Arrays.asList(
+      new Document("revision", new Document("$lt", newRev)),
+      new Document()
+        .append("revision", newRev)
+        .append("tick", new Document("$lte", newTick)))
+    _id(key).append("$or", $or)
   }
   def refresh(key: K, revision: Int, tick: Long): Future[Unit] = {
     withFutureCallback[UpdateResult] { callback =>

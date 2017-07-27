@@ -3,6 +3,7 @@ package delta.hazelcast
 import delta.Snapshot
 import com.hazelcast.map.AbstractEntryProcessor
 import java.util.Map.Entry
+import delta.SnapshotStore
 
 class SnapshotUpdater[K, D] private (
   val update: Either[(Int, Long), Snapshot[D]])
@@ -12,18 +13,29 @@ class SnapshotUpdater[K, D] private (
   def this(revision: Int, tick: Long) = this(Left((revision, tick)))
 
   def process(entry: Entry[K, Snapshot[D]]): Object = {
-    val toUpdate =
-      entry.getValue match {
-        case null => update.right.toOption
-        case existing => update match {
-          case Right(snapshot) if snapshot.revision >= existing.revision =>
-            Some(snapshot)
-          case Left((revision, tick)) if revision > existing.revision || tick > existing.tick =>
-            Some(existing.copy(revision = revision, tick = tick))
-          case _ => None
-        }
+    entry.getValue match {
+      case null => update match {
+        case Right(snapshot) => entry setValue snapshot
+        case Left(_) => throw SnapshotStore.Exceptions.refreshNonExistent(entry.getKey)
       }
-    toUpdate.foreach(entry.setValue)
+      case existing => update match {
+        case Right(snapshot) =>
+          if (snapshot.revision >= existing.revision && snapshot.tick >= existing.tick) {
+            entry setValue snapshot
+          } else {
+            throw SnapshotStore.Exceptions.writeOlderRevision(entry.getKey, existing, snapshot)
+          }
+        case Left((revision, tick)) =>
+          val updated = {
+            val updated = if (revision > existing.revision) existing.copy(revision = revision) else existing
+            if (tick > existing.tick) updated.copy(tick = tick)
+            else updated
+          }
+          if (updated ne existing) {
+            entry setValue updated
+          }
+      }
+    }
     null
   }
 

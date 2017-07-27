@@ -89,9 +89,10 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     UPDATE $tableRef
     SET data = ?, revision = ?, tick = ?
     WHERE $pkNamesEqual
+    AND revision <= ? AND tick <= ?
     """
   }
-  protected def updateRevTickSQL = {
+  protected def refreshRevTickSQL = {
     val pkNamesEqual = pkColumns.map { cd =>
       s"${cd.name} = ?"
     }.mkString(" AND ")
@@ -99,10 +100,11 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     UPDATE $tableRef
     SET revision = ?, tick = ?
     WHERE $pkNamesEqual
+    AND revision <= ? AND tick <= ?
     """
   }
 
-  protected def setKeyParms(ps: PreparedStatement, k: K, offset: Int = 0): PreparedStatement
+  protected def setKeyParms(ps: PreparedStatement, k: K, offset: Int = 0): Int
 
   protected def createTable(conn: Connection): Unit = {
     val stm = conn.createStatement()
@@ -129,11 +131,15 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     val tick = rs.getLong(3)
     new Snapshot(data, revision, tick)
   }
-  private def setSnapshot(ps: PreparedStatement, s: Snapshot[D]): PreparedStatement = {
+  private def setSnapshot(ps: PreparedStatement, s: Snapshot[D]): Int = {
     ps.setObject(1, colType[D].writeAs(s.content))
     ps.setInt(2, s.revision)
     ps.setLong(3, s.tick)
-    ps
+    3
+  }
+  private def setRevTick(ps: PreparedStatement, rev: Int, tick: Long, offset: Int): Unit = {
+    ps.setInt(1 + offset, rev)
+    ps.setLong(2 + offset, tick)
   }
 
   def maxTick: Future[Option[Long]] = Future {
@@ -153,19 +159,24 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   def read(key: K): Future[Option[Snapshot[D]]] = readBatch(List(key)).map(_.get(key))
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[D]]] = Future {
     forQuery { conn =>
-      val ps = conn.prepareStatement(selectOneSQL)
-      try {
-        keys.foldLeft(Map.empty[K, Snapshot[D]]) {
-          case (map, key) =>
-            val rs = setKeyParms(ps, key).executeQuery()
-            try {
-              if (rs.next) {
-                map.updated(key, getSnapshot(rs))
-              } else map
-            } finally Try(rs.close)
-        }
-      } finally Try(ps.close)
+      getAll(conn)(keys)
     }
+  }
+
+  private def getAll(conn: Connection)(keys: Iterable[K], map: Map[K, Snapshot[D]] = Map.empty): Map[K, Snapshot[D]] = {
+    val ps = conn.prepareStatement(selectOneSQL)
+    try {
+      keys.foldLeft(map) {
+        case (map, key) =>
+          setKeyParms(ps, key)
+          val rs = ps.executeQuery()
+          try {
+            if (rs.next) {
+              map.updated(key, getSnapshot(rs))
+            } else map
+          } finally Try(rs.close)
+      }
+    } finally Try(ps.close)
   }
 
   def write(key: K, data: Snapshot[D]): Future[Unit] = Future {
@@ -176,10 +187,16 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   private def set(conn: Connection)(key: K, data: Snapshot[D]): Unit = {
     // Assume common case, which is update, but insert if not
     update(conn)(key, data) match {
-      case 0 =>
-        if (!insert(conn)(key, data)) { // Could be race condition, try update again
-          if (update(conn)(key, data) == 0) {
-            sys.error(s"Failed to both insert and update for key $key, for unknown reason")
+      case 0 => // Update failed; can have 2 reasons: 1) Row doesn't exist yet (thus try insert), 2) Old revision and/or tick
+        if (!insert(conn)(key, data)) { // Could be race condition. Super unlikely, but try update again
+          if (update(conn)(key, data) == 0) { // At this point, it's probably revision and/or tick
+            getAll(conn)(Iterable(key)).get(key) match {
+              case Some(existing) =>
+                throw SnapshotStore.Exceptions.writeOlderRevision(key, existing, data)
+              case None =>
+                sys.error(s"Failed to both insert and update for key $key, for unknown reason")
+            }
+
           }
         }
       case 1 => ()
@@ -191,7 +208,9 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   protected def insert(conn: Connection)(key: K, data: Snapshot[D]): Boolean = {
     val ps = conn.prepareStatement(insertOneSQL)
     try {
-      setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate() != 0
+      val offset = setSnapshot(ps, data)
+      setKeyParms(ps, key, offset)
+      ps.executeUpdate() != 0
     } catch {
       case e: SQLException if isDuplicateKeyViolation(e) =>
         false
@@ -200,7 +219,10 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   protected def update(conn: Connection)(key: K, data: Snapshot[D]): Int = {
     val ps = conn.prepareStatement(updateDataRevTickSQL)
     try {
-      setKeyParms(setSnapshot(ps, data), key, offset = 3).executeUpdate()
+      val snapshotColOffset = setSnapshot(ps, data)
+      val offset = setKeyParms(ps, key, snapshotColOffset)
+      setRevTick(ps, data.revision, data.tick, offset)
+      ps.executeUpdate()
     } finally Try(ps.close)
   }
   def writeBatch(map: Map[K, Snapshot[D]]): Future[Unit] =
@@ -218,14 +240,14 @@ abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
     if (revisions.isEmpty) Future successful Unit
     else Future {
       forUpdate { conn =>
-        val ps = conn.prepareStatement(updateRevTickSQL)
+        val ps = conn.prepareStatement(refreshRevTickSQL)
         try {
           val isBatch = revisions.size != 1
           revisions.foreach {
             case (key, (revision, tick)) =>
-              ps.setInt(1, revision)
-              ps.setLong(2, tick)
-              setKeyParms(ps, key, offset = 2)
+              setRevTick(ps, revision, tick, offset = 0)
+              val offset = setKeyParms(ps, key, offset = 2)
+              setRevTick(ps, revision, tick, offset = offset)
               if (isBatch) ps.addBatch()
           }
           if (isBatch) ps.executeBatch()
@@ -249,9 +271,9 @@ class JdbcSnapshotStore[PK: ColumnType, D: ColumnType](
 
   protected val pkColumns = List(ColumnDef(pkName, colType[PK].typeName))
 
-  protected def setKeyParms(ps: PreparedStatement, k: PK, offset: Int): PreparedStatement = {
+  protected def setKeyParms(ps: PreparedStatement, k: PK, offset: Int): Int = {
     ps.setObject(1 + offset, colType[PK].writeAs(k))
-    ps
+    offset + 1
   }
 
 }
@@ -272,10 +294,10 @@ class JdbcSnapshotStore2[PK1: ColumnType, PK2: ColumnType, D: ColumnType](
     ColumnDef(pk1Name, colType[PK1].typeName),
     ColumnDef(pk2Name, colType[PK2].typeName))
 
-  protected def setKeyParms(ps: PreparedStatement, k: (PK1, PK2), offset: Int): PreparedStatement = {
+  protected def setKeyParms(ps: PreparedStatement, k: (PK1, PK2), offset: Int): Int = {
     ps.setObject(1 + offset, colType[PK1].writeAs(k._1))
     ps.setObject(2 + offset, colType[PK2].writeAs(k._2))
-    ps
+    offset + 2
   }
 
 }

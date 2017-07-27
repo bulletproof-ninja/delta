@@ -32,5 +32,21 @@ class TestSnapshotStore {
     assertEquals(3333L, store.maxTick.await.get)
     rm1 = store.read(k1).await.get
     assertEquals(Snapshot("Xyz:88888", 33, 3333L), rm1)
+    try {
+      store.write(k1, Snapshot("Xyz:4444", rm1.revision - 1, rm1.tick + 1)).await
+      fail("Should have failed on older revision")
+    } catch {
+      case ise: IllegalStateException =>
+        assertTrue(ise.getMessage.contains(rm1.revision.toString))
+        assertTrue(ise.getMessage.contains((rm1.revision - 1).toString))
+    }
+    try {
+      store.write(k1, Snapshot("Xyz:4444", rm1.revision, rm1.tick - 1)).await
+      fail("Should have failed on older tick")
+    } catch {
+      case ise: IllegalStateException =>
+        assertTrue(ise.getMessage.contains(rm1.tick.toString))
+        assertTrue(ise.getMessage.contains((rm1.tick - 1).toString))
+    }
   }
 }
