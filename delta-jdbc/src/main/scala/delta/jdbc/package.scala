@@ -31,9 +31,6 @@ package jdbc {
     def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
   }
 
-}
-
-package object jdbc {
   object UUIDBinaryColumn extends ColumnType[UUID] {
     def typeName = "BINARY(16)"
     override def writeAs(uuid: UUID): Array[Byte] = {
@@ -53,14 +50,6 @@ package object jdbc {
     override def writeAs(uuid: UUID): String = uuid.toString
     def readFrom(row: ResultSet, col: Int) = UUID fromString row.getString(col)
   }
-  implicit object LongColumn extends ColumnType[Long] {
-    def typeName = "BIGINT"
-    def readFrom(row: ResultSet, col: Int) = row.getLong(col)
-  }
-  implicit object IntColumn extends ColumnType[Int] {
-    def typeName = "INT"
-    def readFrom(row: ResultSet, col: Int) = row.getInt(col)
-  }
 
   object ClobColumn extends ColumnType[String] {
     def typeName = "CLOB"
@@ -68,6 +57,26 @@ package object jdbc {
       val clob = row.getClob(col)
       clob.getSubString(1L, clob.length.toInt)
     }
+  }
+  object BlobColumn extends ColumnType[Array[Byte]] {
+    def typeName = "BLOB"
+    def readFrom(row: ResultSet, col: Int): Array[Byte] = {
+      val blob = row.getBlob(col)
+      blob.getBytes(1L, blob.length.toInt)
+    }
+    override def writeAs(bytes: Array[Byte]) = new ByteArrayInputStream(bytes)
+  }
+
+}
+
+package object jdbc {
+  implicit object LongColumn extends ColumnType[Long] {
+    def typeName = "BIGINT"
+    def readFrom(row: ResultSet, col: Int) = row.getLong(col)
+  }
+  implicit object IntColumn extends ColumnType[Int] {
+    def typeName = "INT"
+    def readFrom(row: ResultSet, col: Int) = row.getInt(col)
   }
   implicit object BigIntegerColumn extends ColumnType[BigInteger] {
     def typeName = "NUMERIC"
@@ -78,14 +87,6 @@ package object jdbc {
     def typeName = BigIntegerColumn.typeName
     def readFrom(row: ResultSet, col: Int): BigInt = BigIntegerColumn.readFrom(row, col)
     override def writeAs(bint: BigInt) = BigIntegerColumn.writeAs(bint.underlying)
-  }
-  object BlobColumn extends ColumnType[Array[Byte]] {
-    def typeName = "BLOB"
-    def readFrom(row: ResultSet, col: Int): Array[Byte] = {
-      val blob = row.getBlob(col)
-      blob.getBytes(1L, blob.length.toInt)
-    }
-    override def writeAs(bytes: Array[Byte]) = new ByteArrayInputStream(bytes)
   }
 
   implicit object UnitColumn extends ColumnType[Unit] {
