@@ -14,6 +14,7 @@ import delta.jdbc.h2.H2Dialect
 import delta.util.LocalPublishing
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
+import scuff.jdbc.DataSourceConnection
 
 object TestCollege {
   implicit object StringColumn extends VarCharColumn

@@ -6,6 +6,7 @@ import java.sql._
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext }
 import delta._
+import scuff.jdbc.ConnectionProvider
 
 abstract class AbstractJdbcSnapshotStore[K, D: ColumnType] protected (
   table: String, schema: Option[String])(

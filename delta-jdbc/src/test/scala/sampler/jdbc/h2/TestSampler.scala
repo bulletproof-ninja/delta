@@ -17,6 +17,7 @@ import delta.util.LocalPublishing
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import java.sql.Connection
+import scuff.jdbc.DataSourceConnection
 
 object TestSampler {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"

@@ -7,6 +7,7 @@ import scala.util.{ Failure, Success, Try }
 
 import scuff.concurrent.{ StreamCallback, Threads }
 import delta.{ EventCodec, EventStore }
+import scuff.jdbc.ConnectionProvider
 
 private object JdbcEventStore {
   lazy val DefaultThreadPool = {

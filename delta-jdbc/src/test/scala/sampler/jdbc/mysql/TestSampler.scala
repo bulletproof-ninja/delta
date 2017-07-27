@@ -15,6 +15,7 @@ import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalPublishing
 import org.junit.AfterClass
+import scuff.jdbc.DataSourceConnection
 
 object TestSampler {
   val db = "delta_testing_sampler"

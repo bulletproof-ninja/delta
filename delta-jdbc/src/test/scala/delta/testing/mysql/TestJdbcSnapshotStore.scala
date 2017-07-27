@@ -5,7 +5,7 @@ import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
 import org.junit._
 import delta.SnapshotStore
 import delta.jdbc.JdbcSnapshotStore
-import delta.jdbc.DataSourceConnection
+import scuff.jdbc.DataSourceConnection
 import delta.testing.RandomDelayExecutionContext
 import delta.jdbc.VarCharColumn
 import delta.jdbc.mysql.MySQLSnapshotStore
