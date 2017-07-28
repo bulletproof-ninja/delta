@@ -22,10 +22,12 @@ class ConcurrentMapSnapshotStore[K, V](
     cmap.putIfAbsent(key, snapshot) match {
       case None => // Success
       case Some(existing) =>
-        if (snapshot.revision > existing.revision) { // replace with later revision
+        if (snapshot.revision > existing.revision || (snapshot.revision == existing.revision && snapshot.tick >= existing.tick)) { // replace with later revision
           if (!cmap.replace(key, existing, snapshot)) {
             trySave(key, snapshot)
           }
+        } else {
+          throw SnapshotStore.Exceptions.writeOlderRevision(key, existing, snapshot)
         }
     }
   }
