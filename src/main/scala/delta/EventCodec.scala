@@ -11,7 +11,7 @@ trait EventCodec[EVT, SF] {
 
   /** Unique name of event. */
   def name(cls: EventClass): String
-  /** Event version number (> 0). */
+  /** Event version number. Must be strictly > 0. */
   def version(cls: EventClass): Byte
 
   /** Encode event data. */
@@ -29,19 +29,20 @@ trait EventCodec[EVT, SF] {
 trait NoVersioning[EVT, SF] {
   codec: EventCodec[EVT, SF] =>
 
-  private[this] final val NoVersion = 0: Byte
-
-  final def version(evt: EventClass) = NoVersion
-  override final def version(evt: EVT) = NoVersion
+  final def version(evt: EventClass) = NoVersioning.NoVersion
+  override final def version(evt: EVT) = NoVersioning.NoVersion
 
   override final def decode(name: String, version: Byte, data: SF): EVT = {
-    if (version != NoVersion) {
+    if (version != NoVersioning.NoVersion) {
       throw new IllegalStateException(s"""Event "$name" is not versioned, yet version $version was passed""")
     }
     decode(name, data)
   }
   def decode(name: String, data: SF): EVT
 
+}
+private[delta] object NoVersioning {
+  final val NoVersion: Byte = 0
 }
 
 class EventCodecAdapter[EVT, A, B](
