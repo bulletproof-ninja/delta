@@ -1,11 +1,11 @@
 package delta.util
 
-import scuff._
 import scala.reflect.{ ClassTag, classTag }
 import java.lang.reflect.Method
 import delta.EventCodec
 import scala.compat.Platform
 import delta.NoVersioning
+import java.util.{ HashMap => JMap }
 
 /**
   * Will look for event decode methods, which must match
@@ -33,7 +33,22 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
     if (isMethodNameEventName) method.getName
     else codec.name(method.getReturnType.asInstanceOf[Class[EVT]])
 
-  private[this] lazy val decoderMethods: Map[String, Method] = {
+  private def decoder(evtName: String, data: SF, version: Byte = NoVersioning.NoVersion): EVT = {
+    val isVersioned = version != NoVersioning.NoVersion
+    decoderMethods.get(evtName) match {
+      case null =>
+        val versionArg = if (isVersioned) "version: Byte, " else ""
+        val methodName = if (isMethodNameEventName) evtName else "<decoderMethod>"
+        val signature = s"def $methodName(${versionArg}data: ${classTag[SF].runtimeClass.getName}): EVT"
+        val message = s"""No decoding method found for event "$evtName". Must match the following signature, where EVT is a sub-type of ${classTag[EVT].runtimeClass.getName}: $signature"""
+        throw new IllegalStateException(message)
+      case method => {
+        if (isVersioned) method.invoke(this, Byte box version, data)
+        else method.invoke(this, data)
+      }.asInstanceOf[EVT]
+    }
+  }
+  private[this] lazy val decoderMethods: JMap[String, Method] = {
     val noVersion = codec.isInstanceOf[NoVersioning[_, _]]
     val argCount = if (noVersion) 1 else 2
     val ByteClass = classOf[Byte]
@@ -66,9 +81,11 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
         Some(codec.name(evtType))
       } else None
     }.toSet
-    val decoderMethodsByName = decoderMethods.toMap
+    val decoderMethodsByName = decoderMethods.foldLeft(new JMap[String, Method]) {
+      case (jmap, (name, method)) => jmap.put(name, method); jmap
+    }
     assert(decoderMethodsByName.size == decoderMethods.size)
-    val missingDecoders = encoderEvents.filterNot(decoderMethodsByName.contains)
+    val missingDecoders = encoderEvents.filterNot(decoderMethodsByName.containsKey)
     if (missingDecoders.nonEmpty) {
       val missing = missingDecoders.mkString("[", ", ", "]")
       throw new IllegalStateException(s"No decoder methods found in ${getClass} for events $missing")
@@ -76,19 +93,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
     decoderMethodsByName
   }
 
-  private def decoderNotFound(evtName: String, noVersion: Boolean): Nothing = {
-    val versionArg = if (noVersion) "" else "version: Byte, "
-    val signature = s"def methodName(${versionArg}data: ${classTag[SF].runtimeClass.getName}): EVT"
-    val message = s"""No decoding method found for event "$evtName". Must match the following signature, where EVT is a sub-type of ${classTag[EVT].runtimeClass.getName}: $signature"""
-    throw new IllegalStateException(message)
-  }
+  def decode(name: String, version: Byte, data: SF): EVT = decoder(name, data, version)
+  def decode(name: String, data: SF) = decoder(name, data)
 
-  def decode(name: String, version: Byte, data: SF): EVT = {
-    val decoderMethod = decoderMethods.getOrElse(name, decoderNotFound(name, noVersion = false))
-    decoderMethod.invoke(this, Byte box version, data).asInstanceOf[EVT]
-  }
-  def decode(name: String, data: SF) = {
-    val decoderMethod = decoderMethods.getOrElse(name, decoderNotFound(name, noVersion = true))
-    decoderMethod.invoke(this, data).asInstanceOf[EVT]
-  }
 }
