@@ -54,7 +54,6 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     snapshot: Option[Snapshot],
     lastSeenRevision: Int,
     replay: StreamCallback[TXN] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
-    //    case class Builder(applyEventsAfter: Int, stateOrNull: S, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
     case class Builder(applyEventsAfter: Int, mutator: Mutator, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
     val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.content)))
     val futureBuilt = StreamPromise.fold(replay)(initBuilder) {
