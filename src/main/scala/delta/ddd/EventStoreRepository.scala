@@ -52,10 +52,11 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
 
   private def buildCurrentSnapshot(
     snapshot: Option[Snapshot],
-    lastSeenRevision: Int,
+    expectedRevision: Option[Int],
     replay: StreamCallback[TXN] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
     case class Builder(applyEventsAfter: Int, mutator: Mutator, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
     val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.content)))
+    val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
     val futureBuilt = StreamPromise.fold(replay)(initBuilder) {
       case (b, txn) =>
         if (txn.revision > b.applyEventsAfter) {
@@ -75,18 +76,17 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   }
 
   private def loadLatest(id: RID, snapshot: Future[Option[Snapshot]], assumeSnapshotCurrent: Boolean, expectedRevision: Option[Int]): Future[(Snapshot, List[EVT])] = {
-    val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
     val futureState: Future[Option[(Snapshot, List[EVT])]] = snapshot.flatMap { maybeSnapshot =>
       maybeSnapshot match {
         case Some(snapshot) =>
           if (assumeSnapshotCurrent && expectedRevision.forall(_ <= snapshot.revision)) {
             Future successful Some(snapshot -> Nil)
           } else {
-            val replayFromRev = (snapshot.revision min lastSeenRevision) + 1
-            buildCurrentSnapshot(maybeSnapshot, lastSeenRevision, eventStore.replayStreamFrom(id, replayFromRev))
+            val minRev = expectedRevision.map(math.min(_, snapshot.revision)) getOrElse snapshot.revision
+            buildCurrentSnapshot(maybeSnapshot, expectedRevision, eventStore.replayStreamFrom(id, minRev + 1))
           }
         case None =>
-          buildCurrentSnapshot(maybeSnapshot, lastSeenRevision, eventStore.replayStream(id))
+          buildCurrentSnapshot(maybeSnapshot, expectedRevision, eventStore.replayStream(id))
       }
     }
     futureState.map(opt => opt.getOrElse(throw new UnknownIdException(id)))
