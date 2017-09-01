@@ -79,7 +79,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     val futureState: Future[Option[(Snapshot, List[EVT])]] = snapshot.flatMap { maybeSnapshot =>
       maybeSnapshot match {
         case Some(snapshot) =>
-          if (lastSeenRevision == snapshot.revision && assumeSnapshotCurrent) {
+          if (assumeSnapshotCurrent && expectedRevision.forall(_ <= snapshot.revision)) {
             Future successful Some(snapshot -> Nil)
           } else {
             val replayFromRev = (snapshot.revision min lastSeenRevision) + 1
