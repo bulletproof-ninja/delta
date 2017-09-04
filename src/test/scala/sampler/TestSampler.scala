@@ -3,14 +3,11 @@ package sampler
 import scala.util.{ Failure, Success, Try }
 
 import org.junit.Assert._
-import scuff.ddd.Repository
-import delta.ddd.{ EntityRepository }
-import scuff.ddd.DuplicateIdException
 import org.junit.Test
 
 import delta.{ EventStore, LamportTicker }
+import delta.ddd.{ DuplicateIdException, EntityRepository, Repository, Revision }
 import delta.testing.RandomDelayExecutionContext
-import scuff.ddd.Revision
 import delta.util.{ LocalPublishing, TransientEventStore }
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 
@@ -67,9 +64,9 @@ class TestSampler {
         case (emp, _) =>
           emp(UpdateSalary(45000))
       }.await
-      fail("Should throw a Revision.Mismatch")
+      fail("Should throw a Revision.MismatchException")
     } catch {
-      case Revision.Mismatch(expected, actual) =>
+      case Revision.MismatchException(expected, actual) =>
         assertEquals(3, expected)
         assertEquals(0, actual)
     }
@@ -96,7 +93,7 @@ class TestSampler {
       }.await
       fail("Should throw a Revision.Mismatch")
     } catch {
-      case Revision.Mismatch(expected, actual) =>
+      case Revision.MismatchException(expected, actual) =>
         assertEquals(0, expected)
         assertEquals(1, actual)
     }

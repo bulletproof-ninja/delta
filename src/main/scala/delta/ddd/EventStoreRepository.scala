@@ -3,14 +3,13 @@ package delta.ddd
 import scala.concurrent.{ ExecutionContext, Future }
 
 import scuff.concurrent.{ StreamCallback, StreamPromise }
-import scuff.ddd.{ DuplicateIdException, Repository, UnknownIdException }
 import delta.EventStore
 import scala.util.control.NonFatal
 import delta.Ticker
 import delta.SnapshotStore
 
 /**
-  * [[delta.EventStore]]-based [[scuff.ddd.Repository]] implementation.
+  * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
   * @tparam ESID Event store id type
   * @tparam EVT Repository event type
   * @tparam CH Channel type

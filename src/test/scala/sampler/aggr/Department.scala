@@ -1,7 +1,7 @@
 package sampler.aggr
 
 import collection.immutable.Seq
-import scuff.ddd._
+import delta.ddd._
 import delta.ddd._
 
 import sampler._

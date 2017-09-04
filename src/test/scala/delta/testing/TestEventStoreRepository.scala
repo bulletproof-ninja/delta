@@ -12,7 +12,7 @@ import org.junit._
 import org.junit.Assert._
 import rapture.json.jsonStringContext
 import scuff._
-import scuff.ddd.{ Repository, UnknownIdException }
+import delta.ddd.{ Repository, UnknownIdException }
 import scuff.reflect.Surgeon
 import delta.ddd._
 import delta.util._
@@ -24,7 +24,6 @@ import delta.SysClockTicker
 import scala.{ SerialVersionUID => version }
 import delta.Fold
 import delta.Snapshot
-import scuff.ddd.Revision
 
 trait AggrEventHandler {
   type RT

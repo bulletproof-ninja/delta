@@ -1,5 +1,5 @@
 package college
 
 package object student {
-  type Repository = scuff.ddd.Repository[StudentId, Student]
+  type Repository = delta.ddd.Repository[StudentId, Student]
 }

@@ -3,12 +3,11 @@ package delta.ddd
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
-import scuff.ddd._
 import delta.{ EventStore, Ticker }
 import delta.SnapshotStore
 
 /**
-  * [[delta.ddd.Entity]]-based [[scuff.ddd.Repository]] implementation.
+  * [[delta.ddd.Entity]]-based [[delta.ddd.Repository]] implementation.
   * @tparam ESID Event store id type
   * @tparam EVT Repository event type
   * @tparam CH Channel type
