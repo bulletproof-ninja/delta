@@ -277,27 +277,3 @@ class JdbcSnapshotStore[PK: ColumnType, D: ColumnType](
   }
 
 }
-
-class JdbcSnapshotStore2[PK1: ColumnType, PK2: ColumnType, D: ColumnType](
-  table: String, schema: Option[String] = None)(
-    implicit jdbcCtx: ExecutionContext)
-    extends AbstractJdbcSnapshotStore[(PK1, PK2), D](table, schema) {
-  cp: ConnectionProvider =>
-
-  def this(table: String, schema: String)(
-    implicit jdbcCtx: ExecutionContext) = this(table, schema.optional)
-
-  protected def pk1Name = "id_1"
-  protected def pk2Name = "id_2"
-
-  protected val pkColumns = List(
-    ColumnDef(pk1Name, colType[PK1].typeName),
-    ColumnDef(pk2Name, colType[PK2].typeName))
-
-  protected def setKeyParms(ps: PreparedStatement, k: (PK1, PK2), offset: Int): Int = {
-    ps.setObject(1 + offset, colType[PK1].writeAs(k._1))
-    ps.setObject(2 + offset, colType[PK2].writeAs(k._2))
-    offset + 2
-  }
-
-}
