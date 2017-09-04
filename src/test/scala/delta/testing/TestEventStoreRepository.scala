@@ -114,7 +114,7 @@ abstract class AbstractEventStoreRepositoryTest {
     "random" -> math.random.toString)
 
   @Test
-  def loadUnknownId = doAsync { done =>
+  def loadUnknownId() = doAsync { done =>
     repo.load("Foo").onComplete {
       case Success(_) => done.complete(Try(fail("Should have failed as unknown")))
       case Failure(e: UnknownIdException) =>
@@ -125,7 +125,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   @Test
-  def failedInvariants = doAsync { done =>
+  def failedInvariants() = doAsync { done =>
     val id = "Foo"
     val newFoo = TheOneAggr.create()
     newFoo apply AddNewNumber(-1)
@@ -140,7 +140,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   @Test
-  def saveNewThenUpdate = doAsync { done =>
+  def saveNewThenUpdate() = doAsync { done =>
     val id = "Foo"
     val newFoo = TheOneAggr.create()
     repo.insert(id, newFoo, metadata).onSuccess {
@@ -154,7 +154,7 @@ abstract class AbstractEventStoreRepositoryTest {
           case Failure(t) => done.failure(t)
           case Success(rev) =>
             assertEquals(0, rev)
-            repo.update("Foo", Revision.Exactly(0)) {
+            repo.update(id, Revision.Exactly(0)) {
               case (foo, rev) =>
                 assertEquals(0, rev)
                 assertEquals("New", foo.aggr.status)
@@ -200,7 +200,7 @@ abstract class AbstractEventStoreRepositoryTest {
     }
   }
   @Test
-  def update = doAsync { done =>
+  def update() = doAsync { done =>
     val id = "Foo"
     val newFoo = TheOneAggr.create()
     newFoo(AddNewNumber(42))
@@ -210,7 +210,7 @@ abstract class AbstractEventStoreRepositoryTest {
     }
     val update1 = repo.insert(id, newFoo).flatMap {
       case _ =>
-        repo.update("Foo", Revision(0)) {
+        repo.update(id, Revision(0)) {
           case (foo, rev) =>
             assertEquals(0, rev)
             foo(AddNewNumber(42))
@@ -224,7 +224,7 @@ abstract class AbstractEventStoreRepositoryTest {
       case Failure(t) => done.failure(t)
       case Success(revision) =>
         assertEquals(1, revision)
-        repo.load("Foo").onComplete {
+        repo.load(id).onComplete {
           case Failure(t) => done.failure(t)
           case Success((foo, rev)) =>
             assertEquals(1, rev)
@@ -237,7 +237,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   @Test
-  def `idempotent insert` = doAsync { done =>
+  def `idempotent insert`() = doAsync { done =>
     val id = "Baz"
     val baz = TheOneAggr.create()
     repo.insert(id, baz).onSuccess {
@@ -252,7 +252,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   @Test
-  def `concurrent update` = doAsync { done =>
+  def `concurrent update`() = doAsync { done =>
     val executor = java.util.concurrent.Executors.newScheduledThreadPool(16)
     val id = "Foo"
     val foo = TheOneAggr.create()
@@ -266,8 +266,8 @@ abstract class AbstractEventStoreRepositoryTest {
         for (i ← range) {
           val runThis = new Runnable {
             def run {
-              val fut = repo.update("Foo", Revision(0), metadata) {
-                case (foo, rev) =>
+              val fut = repo.update(id, Revision(0), metadata) {
+                case (foo, _) =>
                   foo(AddNewNumber(i))
                   Future successful foo
               }
@@ -282,7 +282,7 @@ abstract class AbstractEventStoreRepositoryTest {
         } else {
           assertEquals(range.size, updateRevisions.size)
           val revisions = updateRevisions.map {
-            case (i, f) => Await.result(f, Duration.Inf)
+            case (_, f) => Await.result(f, Duration.Inf)
           }.toSeq.sorted
           done.complete(Try(assertEquals((1 to range.size).toSeq, revisions)))
         }
@@ -295,8 +295,10 @@ abstract class AbstractEventStoreRepositoryTest {
     repo.insert(id, foo).onComplete {
       case Failure(t) => done.failure(t)
       case Success(_) =>
-        repo.update("Foo", Revision(0)) {
-          case (foo, rev) => Future successful foo
+        repo.update(id, Revision(0)) {
+          case (foo, rev) =>
+            assertEquals(0, rev)
+            Future successful foo
         }.onComplete {
           case Failure(t) => done.failure(t)
           case Success(newRevision) =>
@@ -368,7 +370,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
   }
 
   @Before
-  def setup {
+  def setup() {
 
     es = new TransientEventStore[String, AggrEvent, Unit, String](
       RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
@@ -415,7 +417,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   }
 
   @Before
-  def setup {
+  def setup() {
       def ?[T](implicit t: T) = implicitly[T]
     es = new TransientEventStore[String, AggrEvent, Unit, String](
       RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {

@@ -1,36 +1,18 @@
 package sampler
 
-import java.io.File
-import java.sql.ResultSet
-import scala.concurrent.{ Await, ExecutionContext }
-import scala.concurrent.Future
-import scala.concurrent.duration.DurationInt
-import scala.util.{ Failure, Random, Success, Try }
-import org.junit.{ Before, Test }
-import org.junit.AfterClass
+import scala.util.{ Failure, Success, Try }
+
 import org.junit.Assert._
-import sampler.aggr._
-import scuff._
 import scuff.ddd.Repository
-import delta.EventStore
 import delta.ddd.{ EntityRepository }
-import delta.SysClockTicker
-import delta.util.LocalPublishing
 import scuff.ddd.DuplicateIdException
-import scuff.concurrent.{
-  StreamCallback,
-  StreamPromise
-}
-import delta.EventSource
-import scala.concurrent.Promise
-import delta._
-import scuff.reflect.Surgeon
-import delta.util.TransientEventStore
-import sampler.aggr.emp.EmpEvent
-import sampler.aggr.emp.EmpEvent
-import sampler.aggr.dept.DeptEvent
+import org.junit.Test
+
+import delta.{ EventStore, LamportTicker }
 import delta.testing.RandomDelayExecutionContext
 import scuff.ddd.Revision
+import delta.util.{ LocalPublishing, TransientEventStore }
+import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 
 class TestSampler {
 
@@ -51,7 +33,7 @@ class TestSampler {
     new EntityRepository(Aggr.Dept, Department.Def)(es)
 
   @Test
-  def inserting {
+  def inserting() {
     val id = new EmpId
     assertFalse(EmployeeRepo.exists(id).await.isDefined)
     val register = RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor")
@@ -68,13 +50,13 @@ class TestSampler {
     emp.apply(UpdateSalary(40000))
     Try(EmployeeRepo.insert(id, emp, metadata).await) match {
       case Success(revision) => fail(s"Should fail, but inserted revision $revision")
-      case Failure(th: DuplicateIdException) => // Expected
+      case Failure(DuplicateIdException(dupe)) => assertEquals(id, dupe)
       case Failure(th) => fail(s"Should have thrown ${classOf[DuplicateIdException].getSimpleName}, not $th")
     }
   }
 
   @Test
-  def updating {
+  def updating() {
     val id = new EmpId
     assertTrue(EmployeeRepo.exists(id).await.isEmpty)
     val emp = register(id, RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor"))
@@ -82,7 +64,7 @@ class TestSampler {
     assertEquals(0, insertRev)
     try {
       EmployeeRepo.update(id, Revision(3), metadata) {
-        case (emp, revision) =>
+        case (emp, _) =>
           emp(UpdateSalary(45000))
       }.await
       fail("Should throw a Revision.Mismatch")

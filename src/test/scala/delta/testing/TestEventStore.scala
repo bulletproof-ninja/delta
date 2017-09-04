@@ -1,7 +1,6 @@
 package delta.testing
 
 import java.io.{ ObjectInputStream, ObjectOutputStream }
-import scala.language.implicitConversions
 import org.junit.Test
 import org.junit.Assert._
 import scuff.io.{ ByteInputStream, ByteOutputStream }
@@ -37,7 +36,7 @@ class TestEventStore {
   }
 
   @Test
-  def serialization {
+  def serialization() {
     val wallClock = System.currentTimeMillis
     val txn = new es.TXN(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
