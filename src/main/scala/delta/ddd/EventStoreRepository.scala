@@ -67,9 +67,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
         b.copy(concurrentUpdates = newUpdates, lastTxnOrNull = txn)
     }
     futureBuilt.map {
-      case b @ Builder(_, _, _, null) =>
+      case Builder(_, _, _, null) =>
         snapshot.map(_ -> Nil)
-      case b @ Builder(_, mutator, concurrentUpdates, lastTxn) =>
+      case Builder(_, mutator, concurrentUpdates, lastTxn) =>
         Some(new Snapshot(mutator.state, lastTxn.revision, lastTxn.tick) -> concurrentUpdates)
     }
   }
