@@ -12,15 +12,14 @@ abstract class Fold[S, E: ClassTag] extends Serializable {
   def next(s: S, e: E): S
 
   def process(os: Option[S], te: Traversable[_ >: E]): S = {
-    val verified = te.collect {
-      case e: E => e
-    }
-    val (s, es) = os.map(_ -> verified) getOrElse (init(verified.head) -> verified.tail)
-    if (es.isEmpty) s
-    else es.foldLeft(s) {
+    val verified = verifyEvents(te)
+    val (s, evts) = os.map(_ -> verified) getOrElse (init(verified.head) -> verified.tail)
+    if (evts.isEmpty) s
+    else evts.foldLeft(s) {
       case (s, e) => next(s, e)
     }
   }
+  protected def verifyEvents(evts: Traversable[_ >: E]): Traversable[E] = evts.collect { case e: E => e }
 }
 
 final class FoldAdapter[S1, S2, E: ClassTag](fold: Fold[S2, E], codec: Codec[S1, S2])
