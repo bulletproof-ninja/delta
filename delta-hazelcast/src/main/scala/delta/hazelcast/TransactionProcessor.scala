@@ -8,6 +8,10 @@ import scala.collection.immutable.TreeMap
 import com.hazelcast.map.AbstractEntryProcessor
 
 import delta.{ Fold, Snapshot, Transaction }
+import com.hazelcast.core.IMap
+import scala.concurrent.Future
+import com.hazelcast.core.ExecutionCallback
+import scala.concurrent.Promise
 
 case class EntryState[D, EVT](
   snapshot: Snapshot[D],
@@ -19,32 +23,25 @@ case object IgnoredDuplicate extends EntryUpdateResult
 case class MissingRevisions(range: Range) extends EntryUpdateResult
 case class Updated[D](snapshot: Snapshot[D]) extends EntryUpdateResult
 
-final class EntryStateUpdater[K, D, EVT](val snapshot: Snapshot[D])
-    extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
-
-  type S = EntryState[D, EVT]
-
-  def process(entry: Entry[K, S]): Object = {
-    entry.getValue match {
-      case null =>
-        entry setValue new EntryState(snapshot, contentUpdated = true)
-
-      case EntryState(null, _, unapplied) =>
-        val remainingUnapplied = unapplied.dropWhile(_._1 <= snapshot.revision)
-        entry setValue new EntryState(snapshot, contentUpdated = remainingUnapplied.isEmpty, remainingUnapplied)
-
-      case EntryState(Snapshot(_, revision, _), _, unapplied) if snapshot.revision > revision =>
-        val remainingUnapplied = unapplied.dropWhile(_._1 <= snapshot.revision)
-        entry setValue new EntryState(snapshot, contentUpdated = remainingUnapplied.isEmpty, remainingUnapplied)
-
-      case _ => // Ignore
+object TransactionProcessor {
+  /**
+    * Process transaction, ensuring proper sequencing.
+    */
+  def apply[K, D >: Null, EVT](imap: IMap[K, EntryState[D, EVT]], fold: Fold[D, EVT])(
+    txn: Transaction[K, EVT, _]): Future[EntryUpdateResult] = {
+    val processor = new TransactionProcessor[K, D, EVT](txn, fold)
+    val promise = Promise[EntryUpdateResult]()
+    val callback = new ExecutionCallback[EntryUpdateResult] {
+      def onResponse(response: EntryUpdateResult) = promise success response
+      def onFailure(th: Throwable) = promise failure th
     }
-    null
-  }
+    imap.submitToKey(txn.stream, processor, callback)
+    promise.future
 
+  }
 }
 
-final class TransactionProcessor[K, D >: Null, EVT](
+final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
   val txn: Transaction[K, EVT, _],
   val stateFold: Fold[D, EVT])
     extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
