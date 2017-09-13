@@ -17,7 +17,6 @@ class RedisSnapshotStore[K, T](
   keyCodec: Serializer[K],
   snapshotCodec: Serializer[Snapshot[T]],
   hashName: String,
-  maxTickImpl: () => Future[Option[Long]],
   blockingCtx: ExecutionContext)(
     jedisProvider: ((BinaryJedis => Any) => Any))
     extends SnapshotStore[K, T] {
@@ -26,8 +25,6 @@ class RedisSnapshotStore[K, T](
   private[this] val hash = RedisEncoder encode hashName
 
   private def jedis[R](thunk: BinaryJedis => R): R = blocking(jedisProvider(thunk)).asInstanceOf[R]
-
-  def maxTick = maxTickImpl()
 
   def read(key: K): Future[Option[Snapshot[T]]] = Future {
     val binKey = keyCodec encode key

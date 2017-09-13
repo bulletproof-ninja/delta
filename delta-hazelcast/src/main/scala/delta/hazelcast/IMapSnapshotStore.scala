@@ -23,11 +23,8 @@ import delta.{ SnapshotStore, Snapshot }
   */
 class IMapSnapshotStore[K, V](
   imap: IMap[K, Snapshot[V]],
-  maxTickImpl: => Future[Option[Long]],
   logger: ILogger)(implicit ec: ExecutionContext)
     extends SnapshotStore[K, V] {
-
-  def maxTick: Future[Option[Long]] = maxTickImpl
 
   def read(id: K): Future[Option[Snapshot[V]]] = {
     val f = imap.getAsync(id)

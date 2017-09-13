@@ -77,9 +77,4 @@ class ConcurrentMapSnapshotStore[K, V](
     SnapshotStore.UnitFuture
   }
 
-  def maxTick: Future[Option[Long]] = {
-    if (cmap.isEmpty) SnapshotStore.NoneFuture
-    else Future successful Some(cmap.values.maxBy(_.tick).tick)
-  }
-
 }

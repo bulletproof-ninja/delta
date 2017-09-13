@@ -4,7 +4,6 @@ import collection.Map
 import scala.concurrent.Future
 
 trait SnapshotStore[K, S] {
-  def maxTick: Future[Option[Long]]
   def read(key: K): Future[Option[Snapshot[S]]]
   def write(key: K, snapshot: Snapshot[S]): Future[Unit]
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[S]]]
@@ -19,7 +18,6 @@ private[delta] object SnapshotStore {
   private[this] val emptyMapFuture = Future successful collection.immutable.Map.empty[Any, AnyRef]
   def EmptyMapFuture[K, V] = emptyMapFuture.asInstanceOf[Future[Map[K, V]]]
   private[this] val Empty = new SnapshotStore[Any, AnyRef] {
-    def maxTick: Future[Option[Long]] = NoneFuture
     def read(key: Any): Future[Option[Snapshot[AnyRef]]] = NoneFuture
     def write(key: Any, snapshot: Snapshot[AnyRef]): Future[Unit] = UnitFuture
     def readBatch(keys: Iterable[Any]): Future[Map[Any, Snapshot[AnyRef]]] = EmptyMapFuture
