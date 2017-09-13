@@ -26,4 +26,7 @@ final class FoldAdapter[S1, S2, E: ClassTag](fold: Fold[S2, E], codec: Codec[S1,
     extends Fold[S1, E] {
   def init(e: E) = codec decode fold.init(e)
   def next(s: S1, e: E) = codec decode fold.next(codec encode s, e)
+
+  override def process(os: Option[S1], te: Traversable[_ >: E]): S1 =
+    codec decode fold.process(os.map(codec.encode), te)
 }
