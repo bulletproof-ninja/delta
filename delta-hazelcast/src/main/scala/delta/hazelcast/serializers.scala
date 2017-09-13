@@ -76,11 +76,7 @@ trait SnapshotUpdaterSerializer
   }
 
   def read(inp: ObjectDataInput): Updater = {
-    inp.readObject[Either[(Int, Long), Snapshot[Any]]] match {
-      case Right(snapshot) => new Updater(snapshot)
-      case Left((rev, tick)) => new Updater(rev, tick)
-    }
-
+    new Updater(inp.readObject[Either[(Int, Long), Snapshot[Any]]])
   }
 }
 

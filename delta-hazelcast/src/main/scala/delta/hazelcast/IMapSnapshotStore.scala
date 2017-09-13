@@ -48,7 +48,7 @@ class IMapSnapshotStore[K, V](
         }
         def onResponse(v: Void) = promise success Unit
       }
-      imap.submitToKey(id, new SnapshotUpdater(snapshot), callback)
+      imap.submitToKey(id, new SnapshotUpdater(Right(snapshot)), callback)
       promise.future
     } catch {
       case NonFatal(th) =>
@@ -85,7 +85,7 @@ class IMapSnapshotStore[K, V](
         }
         def onResponse(v: Void) = promise success Unit
       }
-      imap.submitToKey(key, new SnapshotUpdater(revision, tick), callback)
+      imap.submitToKey(key, new SnapshotUpdater(Left(revision -> tick)), callback)
       promise.future
     } catch {
       case NonFatal(th) =>

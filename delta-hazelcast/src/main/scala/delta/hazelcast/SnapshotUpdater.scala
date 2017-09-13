@@ -1,19 +1,17 @@
 package delta.hazelcast
 
-import delta.Snapshot
-import com.hazelcast.map.AbstractEntryProcessor
 import java.util.Map.Entry
-import delta.SnapshotStore
 
-class SnapshotUpdater[K, D] private (
+import com.hazelcast.map.AbstractEntryProcessor
+
+import delta.{ Snapshot, SnapshotStore }
+
 /**
  * Internal class used by [[delta.hazelcast.IMapSnapshotStore]].
  */
+class SnapshotUpdater[K, D] private[hazelcast] (
   val update: Either[(Int, Long), Snapshot[D]])
     extends AbstractEntryProcessor[K, Snapshot[D]](true) {
-
-  def this(snapshot: Snapshot[D]) = this(Right(snapshot))
-  def this(revision: Int, tick: Long) = this(Left((revision, tick)))
 
   def process(entry: Entry[K, Snapshot[D]]): Object = {
     entry.getValue match {
