@@ -14,7 +14,7 @@ object EntryStateUpdater {
     * Update entry state.
     */
   def apply[K, D >: Null, EVT](imap: IMap[K, EntryState[D, EVT]])(key: K, snapshot: Snapshot[D]): Future[Unit] = {
-    val updater = new EntryStateUpdater[K, D](snapshot)
+    val updater = new EntryStateUpdater[K, D, EVT](snapshot)
     val promise = Promise[Unit]()
     val callback = new ExecutionCallback[Any] {
       def onResponse(response: Any) = promise.success(())
@@ -25,10 +25,10 @@ object EntryStateUpdater {
   }
 }
 
-private final class EntryStateUpdater[K, D] private[hazelcast] (val snapshot: Snapshot[D])
-    extends AbstractEntryProcessor[K, EntryState[D, Any]](true) {
+private final class EntryStateUpdater[K, D, EVT] private[hazelcast] (val snapshot: Snapshot[D])
+    extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
 
-  type S = EntryState[D, Any]
+  type S = EntryState[D, EVT]
 
   def process(entry: Entry[K, S]): Object = {
     entry.getValue match {
