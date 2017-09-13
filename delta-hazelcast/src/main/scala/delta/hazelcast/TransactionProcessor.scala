@@ -12,6 +12,7 @@ import com.hazelcast.core.IMap
 import scala.concurrent.Future
 import com.hazelcast.core.ExecutionCallback
 import scala.concurrent.Promise
+import scala.reflect.{ ClassTag, classTag }
 
 case class EntryState[D, EVT](
   snapshot: Snapshot[D],
@@ -27,9 +28,15 @@ object TransactionProcessor {
   /**
     * Process transaction, ensuring proper sequencing.
     */
-  def apply[K, D >: Null, EVT](imap: IMap[K, EntryState[D, EVT]], fold: Fold[D, EVT])(
-    txn: Transaction[K, EVT, _]): Future[EntryUpdateResult] = {
-    val processor = new TransactionProcessor[K, D, EVT](txn, fold)
+  def apply[K, D >: Null, EVT: ClassTag](imap: IMap[K, EntryState[D, EVT]], fold: Fold[D, EVT])(
+    txn: Transaction[K, _ >: EVT, _]): Future[EntryUpdateResult] = {
+    val verifiedTxn: Transaction[K, EVT, _] = {
+      txn.events.collect { case evt: EVT => evt } match {
+        case Nil => sys.error(s"${txn.channel} transaction ${txn.stream}(rev:${txn.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
+        case events => txn.copy(events = events)
+      }
+    }
+    val processor = new TransactionProcessor[K, D, EVT](verifiedTxn, fold)
     val promise = Promise[EntryUpdateResult]()
     val callback = new ExecutionCallback[EntryUpdateResult] {
       def onResponse(response: EntryUpdateResult) = promise success response
@@ -37,7 +44,6 @@ object TransactionProcessor {
     }
     imap.submitToKey(txn.stream, processor, callback)
     promise.future
-
   }
 }
 
@@ -47,11 +53,12 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
     extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
 
   type S = EntryState[D, EVT]
+  type TXN = Transaction[_, EVT, _]
 
   def process(entry: Entry[K, S]): Object = processTransaction(entry, this.txn)
 
   @tailrec
-  private def processTransaction(entry: Entry[K, S], txn: Transaction[_, EVT, _]): EntryUpdateResult = {
+  private def processTransaction(entry: Entry[K, S], txn: TXN): EntryUpdateResult = {
     entry.getValue match {
 
       case null => // First transaction seen
