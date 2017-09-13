@@ -11,6 +11,12 @@ import scuff.concurrent.{ ScuffScalaFuture, Threads }
 
 /**
   * Implementation that stores snapshots in a [[scala.collection.concurrent.Map]].
+  * Useful when doing batch processing of past events, as a fast in-memory store.
+  * If the backing map is either empty or incomplete (this would be expected, to 
+  * save both memory and load time), provide a fallback lookup mechanism for keys
+  * not found.
+  * @param cmap The concurrent map implementation
+  * @param fallback Optional persistent store fallback, if snapshots are persisted
   */
 class ConcurrentMapSnapshotStore[K, V](
   cmap: collection.concurrent.Map[K, Snapshot[V]],

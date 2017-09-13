@@ -6,6 +6,9 @@ import java.util.Map.Entry
 import delta.SnapshotStore
 
 class SnapshotUpdater[K, D] private (
+/**
+ * Internal class used by [[delta.hazelcast.IMapSnapshotStore]].
+ */
   val update: Either[(Int, Long), Snapshot[D]])
     extends AbstractEntryProcessor[K, Snapshot[D]](true) {
 
