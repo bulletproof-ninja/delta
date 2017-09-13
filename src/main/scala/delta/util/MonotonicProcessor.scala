@@ -54,7 +54,9 @@ trait MonotonicProcessor[ID, EVT, CH, S]
 
   private[this] val unappliedTxns = new TrieMap[ID, TreeSet[TXN]]
 
-  private implicit def TxnOrdering = Ordering.by((txn: TXN) => txn.revision)
+  private def RevOrdering = new Ordering[TXN] {
+    def compare(x: TXN, y: TXN): Int = x.revision - y.revision
+  }
 
   @annotation.tailrec
   private def processUnapplied(
@@ -101,7 +103,7 @@ trait MonotonicProcessor[ID, EVT, CH, S]
 
   def apply(txn: TXN): Unit = exeCtx.submit(txn.stream.##) {
     val toBeApplied = unappliedTxns.remove(txn.stream) match {
-      case None => TreeSet(txn)
+      case None => TreeSet(txn)(RevOrdering)
       case Some(unapplied) => unapplied + txn
     }
       @annotation.tailrec
