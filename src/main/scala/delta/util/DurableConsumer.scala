@@ -53,7 +53,7 @@ trait DurableConsumer[ID, EVT, CH] {
     *     1) Out-of-order revisions
     *     2) Duplicate transactions
     *     3) Concurrent calls (depending on pub/sub implementation)
-    * For condition 3, the [[SerialAsyncProcessing]] class
+    * For condition 3, the [[MonotonicProcessor]] class
     * can be used to serialize processing.
     */
   protected def realTimeProcessor[T <: ES](es: T): Future[TXN => Unit]
