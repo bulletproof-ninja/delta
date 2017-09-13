@@ -44,4 +44,12 @@ class TestSnapshotStore {
         assertTrue(ise.getMessage.contains((rm1.tick - 1).toString))
     }
   }
+
+  @Test
+  def `snapshot map`() {
+    val snapshot = Snapshot(98765, 123, 9999L).map(_.toString)
+    assertEquals("98765", snapshot.content)
+    assertEquals(123, snapshot.revision)
+    assertEquals(9999L, snapshot.tick)
+  }
 }
