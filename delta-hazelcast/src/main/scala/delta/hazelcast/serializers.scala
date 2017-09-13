@@ -56,7 +56,7 @@ trait TransactionProcessorSerializer
 
   def write(out: ObjectDataOutput, ep: delta.hazelcast.TransactionProcessor[Any, Any, Any]): Unit = {
     out writeObject ep.txn
-    out writeObject ep.stateFold
+    out writeObject ep.fold
   }
 
   def read(inp: ObjectDataInput) = {

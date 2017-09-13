@@ -43,18 +43,10 @@ object TransactionProcessor {
 
 final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
   val txn: Transaction[K, EVT, _],
-  val stateFold: Fold[D, EVT])
+  val fold: Fold[D, EVT])
     extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
 
   type S = EntryState[D, EVT]
-
-  private def apply(events: List[EVT], dataOrNull: D): D = events match {
-    case Nil => dataOrNull.ensuring(_ != null)
-    case evt :: tail => dataOrNull match {
-      case null => apply(tail, stateFold.init(evt))
-      case data => apply(tail, stateFold.next(data, evt))
-    }
-  }
 
   def process(entry: Entry[K, S]): Object = processTransaction(entry, this.txn)
 
@@ -64,7 +56,7 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
 
       case null => // First transaction seen
         if (txn.revision == 0) { // First transaction, as expected
-          val model = new Snapshot(apply(txn.events, null), txn.revision, txn.tick)
+          val model = new Snapshot(fold.process(None, txn.events), txn.revision, txn.tick)
           entry setValue new S(model, true)
           Updated(model)
         } else { // Not first, so missing some
@@ -74,7 +66,7 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
 
       case EntryState(null, _, unapplied) => // Un-applied transactions exists, no model yet
         if (txn.revision == 0) { // This transaction is first, so apply
-          val model = new Snapshot(apply(txn.events, null), txn.revision, txn.tick)
+          val model = new Snapshot(fold.process(None, txn.events), txn.revision, txn.tick)
           entry setValue new S(model, true, unapplied.tail)
           processTransaction(entry, unapplied.head._2)
         } else { // Still not first transaction
@@ -86,7 +78,7 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
       case EntryState(model, _, unapplied) =>
         val expectedRev = model.revision + 1
         if (txn.revision == expectedRev) { // Expected revision, apply
-          val updModel = new Snapshot(apply(txn.events, model.content), txn.revision, txn.tick)
+          val updModel = new Snapshot(fold.process(Some(model.content), txn.events), txn.revision, txn.tick)
           unapplied.headOption match {
             case None =>
               val dataUpdated = model.content != updModel.content
