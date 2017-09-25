@@ -15,4 +15,6 @@ package object testing {
     def await = Await.result(f, AwaitDuration)
   }
 
+  implicit def unit2fut(unit: Unit) = Future successful unit
+
 }

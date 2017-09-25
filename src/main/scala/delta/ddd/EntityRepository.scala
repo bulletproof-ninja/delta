@@ -28,13 +28,13 @@ import delta.SnapshotStore
   * @param ticker Ticker implementation
   */
 class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, E](
-  channel: CH,
-  entity: Entity { type Type = E; type Id = ID; type Mutator <: StateMutator { type State = S; type Event = EVT } })(
+    channel: CH,
+    entity: Entity { type Type = E; type Id = ID; type Mutator <: StateMutator { type State = S; type Event = EVT } })(
     eventStore: EventStore[ESID, _ >: EVT, CH],
     snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
     assumeCurrentSnapshots: Boolean = false)(
-      implicit exeCtx: ExecutionContext, ticker: Ticker)
-    extends Repository[ID, E] {
+    implicit exeCtx: ExecutionContext, ticker: Ticker)
+  extends Repository[ID, E] with MutableState[ID, E] {
 
   private val repo = new EventStoreRepository(channel, entity.newMutator, snapshots, assumeCurrentSnapshots)(eventStore)
 
@@ -48,17 +48,20 @@ class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, E](
     }(exeCtx)
   }
 
-  protected def update(
-    id: ID, expectedRevision: Option[Int],
-    metadata: Map[String, String], updateThunk: (E, Int) => Future[E]): Future[Int] = {
-    repo.update(id, Revision(expectedRevision), metadata) {
+  protected def update[R](
+      expectedRevision: Revision, id: ID,
+      metadata: Map[String, String], updateThunk: (E, Int) => Future[R]): Future[(R, Int)] = {
+    @volatile var returnValue = null.asInstanceOf[R]
+    val futureRev = repo.update(id, expectedRevision, metadata) {
       case ((state, mergeEvents), revision) =>
         val instance = entity.init(entity.newMutator.init(state), mergeEvents)
-        updateThunk(instance, revision).map { ar =>
+        updateThunk(instance, revision).map { ret =>
+          returnValue = ret
           val mutator = entity.getMutator(instance)
           mutator.state -> mutator.appliedEvents
-        }(exeCtx)
+        }
     }
+    futureRev.map(returnValue -> _)
   }
 
   def insert(id: ID, instance: E, metadata: Map[String, String]): Future[Int] = {

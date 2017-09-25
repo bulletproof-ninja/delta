@@ -2,11 +2,12 @@ package delta.ddd
 
 import scala.collection.immutable.Map
 import scala.concurrent.Future
+import language.higherKinds
 
 /**
   * Entity repository.
   */
-trait Repository[ID, E] {
+trait Repository[ID, E] extends Updates[ID, E] {
 
   /**
     * Get current revision, if exists.
@@ -22,10 +23,25 @@ trait Repository[ID, E] {
     */
   def load(id: ID): Future[(E, Int)]
 
-  protected def update(
-    id: ID, expectedRevision: Option[Int],
-    metadata: Map[String, String],
-    updateThunk: (E, Int) => Future[E]): Future[Int]
+  /**
+    * Insert new entity. Will, by definition, be given revision `0`.
+    * @param id The instance id
+    * @param entity The instance to insert
+    * @param metadata Optional metadata.
+    * @return The revision (always `0`) if successful,
+    * or [[delta.ddd.DuplicateIdException]] if id already exists
+    */
+  def insert(id: ID, entity: E, metadata: Map[String, String] = Map.empty): Future[Int]
+}
+
+sealed trait Updates[ID, S] {
+  type UT[_]
+  type UM[_]
+
+  protected def update[R](
+      expectedRevision: Revision, id: ID,
+      metadata:    Map[String, String],
+      updateThunk: (S, Int) => Future[UT[R]]): Future[UM[R]]
 
   /**
     * Update entity.
@@ -36,14 +52,14 @@ trait Repository[ID, E] {
     * Will receive the instance and revision.
     * @return New revision, or [[delta.ddd.UnknownIdException]] if unknown id.
     */
-  final def update(
-    id: ID, expectedRevision: Revision = Revision.Latest, metadata: Map[String, String] = Map.empty)(
-      updateThunk: (E, Int) => Future[E]): Future[Int] = {
-    val proxy = (entity: E, revision: Int) => {
+  final def update[R](
+      id: ID, expectedRevision: Revision = Revision.Latest, metadata: Map[String, String] = Map.empty)(
+      updateThunk: (S, Int) => Future[UT[R]]): Future[UM[R]] = {
+    val proxy = (state: S, revision: Int) => {
       expectedRevision.validate(revision)
-      updateThunk(entity, revision)
+      updateThunk(state, revision)
     }
-    update(id, expectedRevision.value, metadata, proxy)
+    update(expectedRevision, id, metadata, proxy)
   }
 
   /**
@@ -54,20 +70,27 @@ trait Repository[ID, E] {
     * Will receive the instance and current revision.
     * @return New revision, or [[delta.ddd.UnknownIdException]] if unknown id.
     */
-  final def update(
-    id: ID, metadata: Map[String, String])(
-      updateThunk: (E, Int) => Future[E]): Future[Int] =
+  final def update[R](
+      id: ID, metadata: Map[String, String])(
+      updateThunk: (S, Int) => Future[UT[R]]): Future[UM[R]] =
     update(id, Revision.Latest, metadata)(updateThunk)
 
-  /**
-    * Insert new entity. Will, by definition, be given revision `0`.
-    * @param id The instance id
-    * @param entity The instance to insert
-    * @param metadata Optional metadata.
-    * @return The revision (always `0`) if successful,
-    * or [[delta.ddd.DuplicateIdException]] if id already exists
-    */
-  def insert(id: ID, entity: E, metadata: Map[String, String] = Map.empty): Future[Int]
+}
+
+trait MutableState[ID, S] {
+  repo: Repository[ID, S] =>
+
+  type UT[R] = R
+  type UM[R] = (R, Int)
+
+}
+
+trait ImmutableState[ID, S] {
+  repo: Repository[ID, S] =>
+
+  type UT[_] = S
+  type UM[_] = Int
+
 }
 
 final case class UnknownIdException(id: Any) extends RuntimeException(s"Unknown id: $id")

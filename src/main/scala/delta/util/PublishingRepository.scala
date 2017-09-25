@@ -2,19 +2,21 @@ package delta.util
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
-import scuff.concurrent.Threads
+import scuff.concurrent.Threads.PiggyBack
 import delta.ddd.Repository
 import delta.ddd.Revision
+import delta.ddd.ImmutableState
 
 /**
- * [[delta.ddd.Repository]] wrapper for non-event-sourced
- * repositories.
- */
+  * [[delta.ddd.Repository]] wrapper for non-event-sourced
+  * repositories, while still publishing events.
+  */
 abstract class PublishingRepository[ID, T <: AnyRef, EVT](
-  val impl: Repository[ID, T], publishCtx: ExecutionContext)
-    extends Repository[ID, (T, List[EVT])] {
+    val impl: Repository[ID, T] with ImmutableState[ID, T],
+    publishCtx: ExecutionContext)
+  extends Repository[ID, (T, List[EVT])] with ImmutableState[ID, (T, List[EVT])] {
 
-  final type RepoType = (T, List[EVT])
+  final type E = (T, List[EVT])
 
   protected def publish(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String])
 
@@ -25,27 +27,30 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
   }
 
   def exists(id: ID): Future[Option[Int]] = impl.exists(id)
-  def load(id: ID): Future[(RepoType, Int)] = impl.load(id).map {
+  def load(id: ID): Future[(E, Int)] = impl.load(id).map {
     case (entity, rev) => entity -> Nil -> rev
-  }(Threads.PiggyBack)
+  }(PiggyBack)
 
-  protected def update(
-    id: ID, expectedRevision: Option[Int],
-    metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = {
-    @volatile var updatedE: Future[RepoType] = null
-    val proxy = (entity: T, rev: Int) => {
-      updatedE = updateThunk(entity -> Nil, rev)
-      updatedE.map(_._1)(Threads.PiggyBack)
+  protected def update[R](
+      expectedRevision: Revision, id: ID,
+      metadata: Map[String, String],
+      updateThunk: (E, Int) => Future[UT[R]]): Future[impl.UM[R]] = {
+    @volatile var toPublish: List[EVT] = Nil
+    val updated = impl.update(id, expectedRevision, metadata) {
+      case (e, rev) =>
+        updateThunk(e -> Nil, rev).map {
+          case (result, events) =>
+            toPublish = events
+            result
+        }(PiggyBack)
     }
-    val updatedRev = impl.update(id, Revision(expectedRevision), metadata)(proxy)
-      implicit def pubCtx = publishCtx
-    for (rev <- updatedRev; (entity, events) <- updatedE) {
-      publishEvents(id, rev, events, metadata)
-    }
-    updatedRev
+    updated.foreach {
+      case rev => publishEvents(id, rev, toPublish, metadata)
+    }(publishCtx)
+    updated
   }
 
-  def insert(id: ID, content: RepoType, metadata: Map[String, String]): Future[Int] = {
+  def insert(id: ID, content: E, metadata: Map[String, String]): Future[Int] = {
     val (state, events) = content
     val inserted = impl.insert(id, state, metadata)
     inserted.foreach { rev =>

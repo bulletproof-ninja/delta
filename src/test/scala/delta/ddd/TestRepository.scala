@@ -17,31 +17,34 @@ class TestRepository {
     thunk(latch)
     assertTrue(latch.await(5, TimeUnit.SECONDS))
   }
-
+  import language.implicitConversions
+  implicit def toFut[T](t: T) = Future successful t
   case class Customer(name: String, postCode: String)
 
   @Test
   def `insert success`() {
     withLatch(5) { latch =>
-      val repo = new MapRepository[Int, Customer]
+      val repo = new MapRepository[BigInt, Customer]
       val hank = Customer("Hank", "12345")
       repo.insert(5, hank).foreach { rev =>
         assertEquals(0, rev)
         latch.countDown()
-        repo.update(5, Revision(0)) {
+        val update1 = repo.update(5, Revision(0)) {
           case (customer, rev) =>
             assertEquals(0, rev)
             latch.countDown()
-            Future successful customer
-        }.foreach { rev =>
+            customer
+        }
+        update1.foreach { rev =>
           assertEquals(1, rev)
           latch.countDown()
-          repo.update(5, Map("hello"->"world")) {
+          val update2 = repo.update(5, Map("hello"->"world")) {
             case (customer, rev) =>
               assertEquals(1, rev)
               latch.countDown()
-              Future successful customer.copy(name = customer.name.toUpperCase)
-          }.foreach { rev =>
+              customer.copy(name = customer.name.toUpperCase)
+          }
+          update2.foreach { rev =>
             assertEquals(2, rev)
             latch.countDown()
           }
@@ -56,24 +59,24 @@ class TestRepository {
 
   @Test
   def `event publishing`() {
-    case class Notification(id: Int, revision: Int, events: List[VeryBasicEvent])
+    case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Map[String, String])
     val notifications = new LinkedBlockingQueue[Notification]
-    val repo = new PublishingRepository[Int, Customer, VeryBasicEvent](new MapRepository, global) {
+    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new MapRepository, global) {
       type Event = VeryBasicEvent
-      def publish(id: Int, revision: Int, events: List[Event], metadata: Map[String, String]) {
-        notifications offer Notification(id, revision, events)
+      def publish(id: Long, revision: Int, events: List[Event], metadata: Map[String, String]) {
+        notifications offer Notification(id, revision, events, metadata)
       }
     }
     val hank = Customer("Hank", "12345")
-    repo.insert(5, hank -> List(CustomerCreated))
+    repo.insert(5L, hank -> List(CustomerCreated))
     val n1 = notifications.take
-    assertEquals(5, n1.id)
+    assertEquals(5L, n1.id)
     assertEquals(0, n1.revision)
     assertEquals(1, n1.events.size)
     assertEquals(CustomerCreated, n1.events.head)
-    repo.update(5, Revision(0)) {
-      case ((hank, _), rev) =>
-        Future successful hank.copy(name = "Hankster") -> List(CustomerUpdated)
+    repo.update[Nothing](5, Revision(0)) {
+      case ((hank, _), _) =>
+        hank.copy(name = "Hankster") -> List(CustomerUpdated)
     }
     val n2 = notifications.take
     assertEquals(5, n2.id)

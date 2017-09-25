@@ -24,6 +24,7 @@ class TestCollege {
 
   implicit def sem2fut(s: Semester): Future[Semester] = Future successful s
   implicit def stu2fut(s: Student): Future[Student] = Future successful s
+  implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
 
   lazy val eventStore: EventStore[Int, CollegeEvent, String] =
     new TransientEventStore[Int, CollegeEvent, String, Array[Byte]](
@@ -36,10 +37,10 @@ class TestCollege {
 
   type TXN = eventStore.TXN
 
-  lazy val StudentRepository: student.Repository =
+  lazy val StudentRepository =
     new EntityRepository("Student", student.Student)(eventStore)
 
-  lazy val SemesterRepository: semester.Repository =
+  lazy val SemesterRepository =
     new EntityRepository("Semester", semester.Semester)(eventStore)
 
   private def randomName(): String = (
@@ -83,7 +84,6 @@ class TestCollege {
         SemesterRepository.update(semesterId) {
           case (semester, _) =>
             semester(EnrollStudent(studentId))
-            semester
         }
       }
     }
@@ -92,19 +92,16 @@ class TestCollege {
         SemesterRepository.update(randomSemester) {
           case (semester, _) =>
             semester(EnrollStudent(studentId))
-            semester
         }
       }
       StudentRepository.update(studentId) {
         case (student, _) =>
           student(ChangeStudentName(randomName))
-          student
       }
       if (rand.nextBoolean) {
         SemesterRepository.update(randomSemester) {
           case (semester, _) =>
             semester(EnrollStudent(studentId))
-            semester
         }
       }
     }

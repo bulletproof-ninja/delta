@@ -6,7 +6,7 @@ import org.junit.Assert._
 import org.junit.Test
 
 import delta.{ EventStore, LamportTicker }
-import delta.ddd.{ DuplicateIdException, EntityRepository, Repository, Revision }
+import delta.ddd.{ DuplicateIdException, EntityRepository, Revision }
 import delta.testing.RandomDelayExecutionContext
 import delta.util.{ LocalPublishing, TransientEventStore }
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
@@ -24,10 +24,8 @@ class TestSampler {
   implicit def ec = RandomDelayExecutionContext
   implicit lazy val ticker = LamportTicker(es)
 
-  lazy val EmployeeRepo: Repository[EmpId, Employee] =
-    new EntityRepository(Aggr.Empl, Employee.Def)(es)
-  lazy val DepartmentRepo: Repository[DeptId, Department] =
-    new EntityRepository(Aggr.Dept, Department.Def)(es)
+  lazy val EmployeeRepo = new EntityRepository(Aggr.Empl, Employee.Def)(es)
+  lazy val DepartmentRepo = new EntityRepository(Aggr.Dept, Department.Def)(es)
 
   @Test
   def inserting() {
@@ -70,26 +68,25 @@ class TestSampler {
         assertEquals(3, expected)
         assertEquals(0, actual)
     }
-    @volatile var updateRev = -1
-    var updatedRev = EmployeeRepo.update(id, Revision(0), metadata) {
+    var revs = EmployeeRepo.update(id, Revision(0), metadata) {
       case (emp, revision) =>
-        updateRev = revision
         emp(UpdateSalary(45000))
+        revision
     }.await
-    assertEquals(0, updateRev)
-    assertEquals(1, updatedRev)
-    updatedRev = EmployeeRepo.update(id, Revision(0), metadata) {
+    assertEquals(0, revs._1)
+    assertEquals(1, revs._2)
+    revs = EmployeeRepo.update(id, Revision(0), metadata) {
       case (emp, revision) =>
-        updateRev = revision
         emp(UpdateSalary(45000))
+        revision
     }.await
-    assertEquals(1, updateRev)
-    assertEquals(1, updatedRev)
+    assertEquals(1, revs._1)
+    assertEquals(1, revs._2)
     try {
       EmployeeRepo.update(id, Revision.Exactly(0), metadata) {
         case (emp, revision) =>
-          updateRev = revision
           emp(UpdateSalary(66000))
+          revision
       }.await
       fail("Should throw a Revision.Mismatch")
     } catch {

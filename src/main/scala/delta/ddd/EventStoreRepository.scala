@@ -1,12 +1,10 @@
 package delta.ddd
 
 import scala.concurrent.{ ExecutionContext, Future }
-
-import scuff.concurrent.{ StreamCallback, StreamPromise }
-import delta.EventStore
 import scala.util.control.NonFatal
-import delta.Ticker
-import delta.SnapshotStore
+
+import delta.{ EventStore, SnapshotStore, Ticker }
+import scuff.concurrent.{ StreamCallback, StreamPromise }
 
 /**
   * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
@@ -29,13 +27,13 @@ import delta.SnapshotStore
   * @param ticker Ticker implementation
   */
 class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
-  channel: CH,
-  newMutator: => StateMutator { type Event = EVT; type State = S },
-  snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
-  assumeCurrentSnapshots: Boolean = false)(
+    channel: CH,
+    newMutator: => StateMutator { type Event = EVT; type State = S },
+    snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
+    assumeCurrentSnapshots: Boolean = false)(
     es: EventStore[ESID, _ >: EVT, CH])(
-      implicit exeCtx: ExecutionContext, ticker: Ticker)
-    extends Repository[RID, (S, List[EVT])] {
+    implicit exeCtx: ExecutionContext, ticker: Ticker)
+  extends Repository[RID, (S, List[EVT])] with ImmutableState[RID, (S, List[EVT])] {
 
   private type Snapshot = delta.Snapshot[S]
   private type Mutator = StateMutator { type Event = EVT; type State = S }
@@ -50,9 +48,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   private type TXN = eventStore.TXN
 
   private def buildCurrentSnapshot(
-    snapshot: Option[Snapshot],
-    expectedRevision: Option[Int],
-    replay: StreamCallback[TXN] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
+      snapshot: Option[Snapshot],
+      expectedRevision: Option[Int],
+      replay: StreamCallback[TXN] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
     case class Builder(applyEventsAfter: Int, mutator: Mutator, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
     val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.content)))
     val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
@@ -131,9 +129,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   protected def onUpdateCollision(id: RID, revision: Int, ar: CH): Unit = ()
 
   private def loadAndUpdate(
-    id: RID, expectedRevision: Option[Int], metadata: Map[String, String],
-    maybeSnapshot: Future[Option[Snapshot]], assumeSnapshotCurrent: Boolean,
-    updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = {
+      id: RID, expectedRevision: Option[Int], metadata: Map[String, String],
+      maybeSnapshot: Future[Option[Snapshot]], assumeSnapshotCurrent: Boolean,
+      updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = {
 
     loadLatest(id, maybeSnapshot, assumeSnapshotCurrent, expectedRevision).flatMap {
       case (snapshot, mergeEvents) =>
@@ -156,10 +154,10 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     }
   }
 
-  protected def update(
-    id: RID, expectedRevision: Option[Int],
-    metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
-    loadAndUpdate(id, expectedRevision, metadata, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
+  protected def update[_](
+      expectedRevision: Revision, id: RID,
+      metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
+    loadAndUpdate(id, expectedRevision.value, metadata, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
   } catch {
     case NonFatal(th) => Future failed th
   }

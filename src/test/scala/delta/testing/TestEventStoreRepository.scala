@@ -40,7 +40,7 @@ case class ChangeStatus(newStatus: String)
 case class AggrState(status: String, numbers: Set[Int])
 
 final class AggrStateMutator
-    extends StateMutator {
+  extends StateMutator {
 
   type Event = AggrEvent
   type State = AggrState
@@ -99,7 +99,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   @volatile var es: EventStore[String, AggrEvent, Unit] = _
-  @volatile var repo: Repository[String, Aggr] = _
+  @volatile var repo: Repository[String, Aggr] with MutableState[String, Aggr] = _
 
   private def doAsync(f: Promise[Any] => Unit) {
     val something = Promise[Any]
@@ -151,20 +151,18 @@ abstract class AbstractEventStoreRepositoryTest {
           case (foo, rev) =>
             assertEquals(0, rev)
             assertEquals("New", foo.aggr.status)
-            Future successful foo
         }.onComplete {
           case Failure(t) => done.failure(t)
-          case Success(rev) =>
+          case Success((_, rev)) =>
             assertEquals(0, rev)
             repo.update(id, Revision.Exactly(0)) {
               case (foo, rev) =>
                 assertEquals(0, rev)
                 assertEquals("New", foo.aggr.status)
                 foo(AddNewNumber(44))
-                Future successful foo
             }.onComplete {
               case Failure(t) => done.failure(t)
-              case Success(rev) =>
+              case Success((_, rev)) =>
                 assertEquals(1, rev)
                 repo.update("Foo", Revision(0)) {
                   case (foo, rev) =>
@@ -172,10 +170,9 @@ abstract class AbstractEventStoreRepositoryTest {
                     assertTrue(foo.mergeEvents.contains(NewNumberWasAdded(44)))
                     assertEquals("New", foo.aggr.status)
                     foo(AddNewNumber(44))
-                    Future successful foo
                 }.onComplete {
                   case Failure(t) => done.failure(t)
-                  case Success(rev) =>
+                  case Success((_, rev)) =>
                     assertEquals(1, rev)
                     repo.update("Foo", Revision(1), metadata) {
                       case (foo, rev) =>
@@ -183,10 +180,9 @@ abstract class AbstractEventStoreRepositoryTest {
                         assertTrue(foo.mergeEvents.isEmpty)
                         assertEquals("New", foo.aggr.status)
                         foo(ChangeStatus("NotNew"))
-                        Future successful foo
                     }.onComplete {
                       case Failure(t) => done.failure(t)
-                      case Success(rev) =>
+                      case Success((_, rev)) =>
                         assertEquals(2, rev)
                         repo.load("Foo").onSuccess {
                           case (foo, rev) =>
@@ -219,12 +215,11 @@ abstract class AbstractEventStoreRepositoryTest {
             assertEquals(0, foo.appliedEvents.size)
             foo(AddNewNumber(99))
             assertEquals(1, foo.appliedEvents.size)
-            Future successful foo
         }
     }
     update1.onComplete {
       case Failure(t) => done.failure(t)
-      case Success(revision) =>
+      case Success((_, revision)) =>
         assertEquals(1, revision)
         repo.load(id).onComplete {
           case Failure(t) => done.failure(t)
@@ -273,7 +268,7 @@ abstract class AbstractEventStoreRepositoryTest {
                   foo(AddNewNumber(i))
                   Future successful foo
               }
-              updateRevisions += i -> fut
+              updateRevisions += i -> fut.map(_._2)
               latch.countDown()
             }
           }
@@ -303,7 +298,7 @@ abstract class AbstractEventStoreRepositoryTest {
             Future successful foo
         }.onComplete {
           case Failure(t) => done.failure(t)
-          case Success(newRevision) =>
+          case Success((_, newRevision)) =>
             assertEquals(0, newRevision)
             done.success(Unit)
         }
@@ -349,8 +344,8 @@ object TheOneAggr extends Entity {
 class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTest {
 
   implicit object Codec
-      extends EventCodec[AggrEvent, String]
-      with NoVersioning[AggrEvent, String] {
+    extends EventCodec[AggrEvent, String]
+    with NoVersioning[AggrEvent, String] {
 
     import rapture.json._, jsonBackends.jackson._
 
@@ -386,10 +381,10 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
 class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepositoryTest {
 
   implicit object Codec
-      extends ReflectiveDecoder[AggrEvent, String]
-      with AggrEventHandler
-      with EventCodec[AggrEvent, String]
-      with NoVersioning[AggrEvent, String] {
+    extends ReflectiveDecoder[AggrEvent, String]
+    with AggrEventHandler
+    with EventCodec[AggrEvent, String]
+    with NoVersioning[AggrEvent, String] {
 
     type Return = String
 

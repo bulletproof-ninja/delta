@@ -2,18 +2,18 @@ package delta.util
 
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
+
+import delta.ddd.{ DuplicateIdException, Repository, Revision, UnknownIdException }
 import scuff.concurrent.{ ScuffScalaFuture, Threads }
-import delta.ddd.DuplicateIdException
-import delta.ddd.Repository
-import delta.ddd.UnknownIdException
+import delta.ddd.ImmutableState
 
 /**
   * Repository backed by concurrent map.
   * Mostly useful for testing.
   */
 class MapRepository[K, V <: AnyRef](
-  map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
-    extends Repository[K, V] {
+    map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
+  extends Repository[K, V] with ImmutableState[K, V] {
 
   def insert(id: K, entity: V, metadata: Map[String, String]): Future[Int] = Future {
     map.putIfAbsent(id, entity -> 0) match {
@@ -31,7 +31,7 @@ class MapRepository[K, V <: AnyRef](
     }
   }
 
-  private def tryUpdate(id: K, expectedRevision: Option[Int], metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] = {
+  private def tryUpdate[R](id: K, expectedRevision: Revision, metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] = {
     map.get(id) match {
       case None => Future failed new UnknownIdException(id)
       case Some(oldE @ (ar, rev)) =>
@@ -46,9 +46,9 @@ class MapRepository[K, V <: AnyRef](
     }
   }
 
-  def update(
-    id: K, expectedRevision: Option[Int],
-    metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] =
+  def update[_](
+      expectedRevision: Revision, id: K,
+      metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] =
     Future(tryUpdate(id, expectedRevision, metadata, updateThunk)).flatten
 
 }
