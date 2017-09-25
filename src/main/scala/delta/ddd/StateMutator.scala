@@ -23,8 +23,8 @@ trait StateMutator {
   private[ddd] final def mutate(evt: Event): Unit = fold(evt)
   private[this] var _applied = List.empty[Event]
   private[ddd] final def appliedEvents = _applied match {
-    case head :: Nil => _applied
-    case _ => _applied.reverse
+    case one @ _ :: Nil => one
+    case more => more.reverse
   }
 
   @inline
