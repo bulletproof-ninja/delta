@@ -9,7 +9,7 @@ trait JsonCodec
     extends EmpEventHandler {
   this: ReflectiveDecoder[_, String] =>
 
-  type RT = JSON
+  type Return = JSON
 
   private val IsoDate = """(\d{4})-(\d{2})-(\d{2})""".r
 

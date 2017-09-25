@@ -26,12 +26,12 @@ import delta.Fold
 import delta.Snapshot
 
 trait AggrEventHandler {
-  type RT
-  def dispatch(evt: AggrEvent): RT = evt.dispatch(this)
+  type Return
+  def dispatch(evt: AggrEvent): Return = evt.dispatch(this)
 
-  def on(evt: AggrCreated): RT
-  def on(evt: NewNumberWasAdded): RT
-  def on(evt: StatusChanged): RT
+  def on(evt: AggrCreated): Return
+  def on(evt: NewNumberWasAdded): Return
+  def on(evt: StatusChanged): Return
 }
 
 case class AddNewNumber(n: Int)
@@ -58,7 +58,7 @@ final class AggrStateMutator
   //  def process(evt: AggrEvent) = dispatch(evt)
 
   private class EvtHandler(state: AggrState = null) extends AggrEventHandler {
-    type RT = AggrState
+    type Return = AggrState
 
     def on(evt: AggrCreated) = {
       require(state == null)
@@ -74,16 +74,19 @@ final class AggrStateMutator
   }
 }
 
-sealed abstract class AggrEvent extends DoubleDispatch[AggrEventHandler]
+sealed abstract class AggrEvent extends DoubleDispatch {
+  type Callback = AggrEventHandler
+}
+
 @version(1)
 case class NewNumberWasAdded(n: Int)
-  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
+  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.Return = cb.on(this) }
 @version(1)
 case class AggrCreated(status: String)
-  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
+  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.Return = cb.on(this) }
 @version(1)
 case class StatusChanged(newStatus: String)
-  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.RT = cb.on(this) }
+  extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.Return = cb.on(this) }
 
 abstract class AbstractEventStoreRepositoryTest {
 
@@ -388,7 +391,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
       with EventCodec[AggrEvent, String]
       with NoVersioning[AggrEvent, String] {
 
-    type RT = String
+    type Return = String
 
     import rapture.json._, jsonBackends.jackson._
 
@@ -396,19 +399,19 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
-    def on(evt: AggrCreated): RT = json""" { "status": ${evt.status} } """.toBareString
+    def on(evt: AggrCreated): Return = json""" { "status": ${evt.status} } """.toBareString
     def decodeAggrCreated(json: String): AggrCreated = {
       val ast = Json.parse(json)
       AggrCreated(status = ast.status.as[String])
     }
 
-    def on(evt: NewNumberWasAdded): RT = json""" { "num": ${evt.n} } """.toBareString
+    def on(evt: NewNumberWasAdded): Return = json""" { "num": ${evt.n} } """.toBareString
     def decodeNewNumberWasAdded(json: String): NewNumberWasAdded = {
       val ast = Json.parse(json)
       NewNumberWasAdded(n = ast.num.as[Int])
     }
 
-    def on(evt: StatusChanged): RT = json""" { "status": ${evt.newStatus} } """.toBareString
+    def on(evt: StatusChanged): Return = json""" { "status": ${evt.newStatus} } """.toBareString
     def decodeStatusChanged(json: String): StatusChanged = {
       val ast = Json.parse(json)
       StatusChanged(newStatus = ast.status.as[String])

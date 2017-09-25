@@ -1,3 +1,5 @@
 package sampler.aggr
 
-abstract class DomainEvent
+import scuff.DoubleDispatch
+
+abstract class DomainEvent extends DoubleDispatch

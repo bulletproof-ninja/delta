@@ -17,7 +17,7 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
       extends ReflectiveDecoder[AggrEvent, String]
       with EventCodec[AggrEvent, String]
       with AggrEventHandler {
-    type RT = String
+    type Return = String
     def name(cls: EventClass) = cls.getSimpleName
     def version(cls: EventClass) = scuff.serialVersionUID(cls).toByte
 

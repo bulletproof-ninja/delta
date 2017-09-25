@@ -8,9 +8,9 @@ trait JsonCodec
     extends DeptEventHandler {
   this: ReflectiveDecoder[_, String] =>
 
-  type RT = JSON
+  type Return = JSON
 
-  def on(evt: DeptCreated): RT = json"""{
+  def on(evt: DeptCreated): Return = json"""{
   "name": ${evt.name}
 }""".toBareString
   def onDeptCreated(version: Byte, json: String): DeptCreated = version match {
@@ -19,7 +19,7 @@ trait JsonCodec
     }
   }
 
-  def on(evt: EmployeeAdded): RT = json"""{
+  def on(evt: EmployeeAdded): Return = json"""{
   "employee": ${evt.id.int}
 }""".toBareString
   def onEmployeeAdded(version: Byte, json: String): EmployeeAdded = version match {
@@ -29,7 +29,7 @@ trait JsonCodec
     }
   }
 
-  def on(evt: EmployeeRemoved): RT = json"""{
+  def on(evt: EmployeeRemoved): Return = json"""{
   "employee": ${evt.id.int}
 }""".toBareString
   def onEmployeeRemoved(version: Byte, json: String): EmployeeRemoved = version match {
@@ -39,7 +39,7 @@ trait JsonCodec
     }
   }
 
-  def on(evt: NameChanged): RT = json"""{
+  def on(evt: NameChanged): Return = json"""{
   "name": ${evt.newName},
   "reason": ${evt.reason}
 }""".toBareString

@@ -11,19 +11,19 @@ case class State(
 private class StateHandler(state: State = null)
     extends DeptEventHandler {
 
-  type RT = State
+  type Return = State
 
-  def on(evt: DeptCreated): RT = {
+  def on(evt: DeptCreated): Return = {
     require(state == null)
     new State(evt.name)
   }
-  def on(evt: EmployeeAdded): RT = {
+  def on(evt: EmployeeAdded): Return = {
     state.copy(employees = state.employees + evt.id)
   }
-  def on(evt: EmployeeRemoved): RT = {
+  def on(evt: EmployeeRemoved): Return = {
     state.copy(employees = state.employees - evt.id)
   }
-  def on(evt: NameChanged): RT = {
+  def on(evt: NameChanged): Return = {
     state.copy(name = evt.newName)
   }
 

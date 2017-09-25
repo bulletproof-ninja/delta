@@ -59,7 +59,7 @@ package object sampler {
       with aggr.emp.JsonCodec
       with aggr.dept.JsonCodec {
 
-    override type RT = JSON
+    override type Return = JSON
 
     def encode(evt: DomainEvent) = evt match {
       case evt: aggr.dept.DeptEvent => evt.dispatch(this)

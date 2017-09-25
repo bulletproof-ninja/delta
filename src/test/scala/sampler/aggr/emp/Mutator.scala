@@ -14,18 +14,18 @@ case class State(
 private class StateHandler(state: State = null)
     extends EmpEventHandler {
 
-  type RT = State
+  type Return = State
 
-  def on(evt: EmployeeRegistered): RT = {
+  def on(evt: EmployeeRegistered): Return = {
     require(state == null)
     State(name = evt.name, soch = evt.soch, dob = evt.dob, salary = evt.annualSalary, title = evt.title)
   }
 
-  def on(evt: EmployeeSalaryChange): RT = {
+  def on(evt: EmployeeSalaryChange): Return = {
     state.copy(salary = evt.newSalary)
   }
 
-  def on(evt: EmployeeTitleChange): RT = {
+  def on(evt: EmployeeTitleChange): Return = {
     state.copy(title = evt.newTitle)
   }
 

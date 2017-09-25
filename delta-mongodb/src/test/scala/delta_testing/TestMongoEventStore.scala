@@ -40,7 +40,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
       extends ReflectiveDecoder[AggrEvent, Document]
       with EventCodec[AggrEvent, Document]
       with AggrEventHandler {
-    type RT = Document
+    type Return = Document
     def version(evt: EventClass) = scuff.serialVersionUID(evt).toByte
     def name(evt: EventClass) = evt.getSimpleName
 
