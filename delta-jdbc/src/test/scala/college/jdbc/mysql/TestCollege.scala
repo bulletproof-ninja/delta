@@ -1,8 +1,6 @@
 package college.jdbc.mysql
 
-import java.sql.Connection
-
-import org.junit.Assert.assertTrue
+import org.junit.Assert._
 import org.junit._
 
 import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
@@ -25,7 +23,7 @@ object TestCollege {
     ds
   }
   @AfterClass
-  def dropDb {
+  def dropDb() {
     val conn = ds.getConnection
     try {
       val stm = conn.createStatement()
@@ -50,7 +48,7 @@ class TestCollege extends college.TestCollege {
   }
 
   @Test
-  def mock {
+  def mock() {
     assertTrue(true)
   }
 

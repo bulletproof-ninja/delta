@@ -27,7 +27,7 @@ class TestSampler extends sampler.TestSampler {
   }
 
   @Test
-  def mock {
+  def mock() {
     assertTrue(true)
   }
 }

@@ -23,14 +23,14 @@ object TestCollege {
   @volatile private var client: MongoClient = _
 
   @BeforeClass
-  def setupClass {
+  def setupClass() {
     client = MongoClients.create()
     val ns = new MongoNamespace("unit-testing", getClass.getName.replaceAll("[\\.\\$]+", "_"))
     coll = MongoEventStore.getCollection(ns, client)
 
   }
   @AfterClass
-  def teardownClass {
+  def teardownClass() {
     withBlockingCallback[Void]()(coll.drop(_))
     client.close()
   }
@@ -55,7 +55,7 @@ class TestCollege extends college.TestCollege {
   }
 
   @Test
-  def mock {
+  def mock() {
     assertTrue(true)
   }
 

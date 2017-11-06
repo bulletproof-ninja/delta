@@ -1,10 +1,10 @@
 package delta.cassandra
 
-import org.junit._, Assert._
+import org.junit._
 
 import com.datastax.driver.core.{ Cluster, Session, SocketOptions }
 import delta.util._
-import scala.reflect.{ ClassTag, classTag }
+import scala.reflect.classTag
 import scala.util.Try
 import delta.ddd.EntityRepository
 import delta._
@@ -59,7 +59,7 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   var session: Session = _
 
   @Before
-  def setup {
+  def setup() {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, Unit, String](
@@ -72,7 +72,7 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))
   }
   @After
-  def teardown {
+  def teardown() {
     deleteAll(session)
   }
 }

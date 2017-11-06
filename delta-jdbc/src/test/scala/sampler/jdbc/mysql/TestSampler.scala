@@ -1,7 +1,5 @@
 package sampler.jdbc.mysql
 
-import java.sql.Connection
-
 import org.junit.Assert.assertTrue
 import org.junit._
 

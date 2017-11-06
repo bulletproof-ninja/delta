@@ -1,19 +1,9 @@
 package sampler
 
-import scuff.serialVersionUID
-import delta.EventCodec
-import delta.util.ReflectiveDecoder
-import language.implicitConversions
-import org.bson.Document
-import org.bson.codecs.EncoderContext
-import org.bson.BsonWriter
-import org.bson.codecs.DecoderContext
-import org.bson.BsonReader
-import org.bson.codecs.Codec
-import org.bson.codecs.configuration.CodecRegistry
-import org.bson.codecs.configuration.CodecConfigurationException
-import sampler.aggr.dept.DeptEvent
-import sampler.aggr.emp.EmpEvent
+import org.bson.{ BsonReader, BsonWriter, Document }
+import org.bson.codecs.{ Codec, DecoderContext, EncoderContext }
+import org.bson.codecs.configuration.{ CodecConfigurationException, CodecRegistry }
+
 import sampler.aggr.DomainEvent
 
 package object mongo {
@@ -24,7 +14,7 @@ package object mongo {
       extends CodecRegistry {
     val codec: Codec[Aggr.Value] = new AggrRootCodec
     def get[T](cls: Class[T]): Codec[T] = {
-      byClass.getOrElse(cls, throw new CodecConfigurationException("Cannot find codec for $cls")).asInstanceOf[Codec[T]]
+      byClass.getOrElse(cls, throw new CodecConfigurationException(s"Cannot find codec for $cls")).asInstanceOf[Codec[T]]
     }
     private[this] val byClass: Map[Class[_], Codec[_]] = {
       val codecs = Aggr.values.toSeq.map { aggr =>

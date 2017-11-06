@@ -20,12 +20,12 @@ object TestMongoEventStore {
   @volatile private var client: MongoClient = _
 
   @BeforeClass
-  def setupClass {
+  def setupClass() {
     client = MongoClients.create()
     coll = client.getDatabase("test").getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_"))
   }
   @AfterClass
-  def teardownClass {
+  def teardownClass() {
     withBlockingCallback[Void]()(coll.drop(_))
     client.close()
   }
@@ -63,7 +63,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   }
 
   @Before
-  def setup {
+  def setup() {
     val result = deleteAll()
     assertTrue(result.wasAcknowledged)
     es = new MongoEventStore[String, AggrEvent, Unit](coll) with LocalPublishing[String, AggrEvent, Unit] {
@@ -78,7 +78,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     result.get
   }
   @After
-  def teardown {
+  def teardown() {
     val result = deleteAll()
     assertTrue(result.wasAcknowledged)
   }
