@@ -18,5 +18,5 @@ variation of a variable or function.
 MATHEMATICS
 a finite increment.
 
-### (https://en.wikipedia.org/wiki/Delta_encoding)[Delta encoding]
+### [Delta encoding](https://en.wikipedia.org/wiki/Delta_encoding)
 > Delta encoding is a way of storing or transmitting data in the form of differences (deltas) between sequential data
