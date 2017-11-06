@@ -11,7 +11,7 @@ import delta.ddd.ImmutableState
   * Repository backed by concurrent map.
   * Mostly useful for testing.
   */
-class MapRepository[K, V <: AnyRef](
+class ConcurrentMapRepository[K, V <: AnyRef](
     map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
   extends Repository[K, V] with ImmutableState[K, V] {
 

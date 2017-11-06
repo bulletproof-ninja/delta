@@ -4,7 +4,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
-import scuff.concurrent.StreamCallback
+import scuff.concurrent.StreamConsumer
 import delta.{ EventCodec, EventStore }
 
 /**
@@ -76,20 +76,20 @@ abstract class TransientEventStore[ID, EVT, CH, SF](
     }
   }
 
-  private def withCallback(callback: StreamCallback[TXN])(thunk: => Unit): Unit = Future {
+  private def withCallback(callback: StreamConsumer[TXN, Any])(thunk: => Unit): Unit = Future {
     Try(thunk) match {
-      case Success(_) => callback.onCompleted()
+      case Success(_) => callback.onDone()
       case Failure(th) => callback.onError(th)
     }
   }
 
-  def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
+  def replayStream(stream: ID)(callback: StreamConsumer[TXN, Any]): Unit = withCallback(callback) {
     val txns = txnMap.getOrElse(stream, Vector.empty)
     txns.map(_.toTransaction).foreach(callback.onNext)
   }
-  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit =
+  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit =
     replayStreamRange(stream, fromRevision to Int.MaxValue)(callback)
-  def replayStreamRange(stream: ID, revisionRange: collection.immutable.Range)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
+  def replayStreamRange(stream: ID, revisionRange: collection.immutable.Range)(callback: StreamConsumer[TXN, Any]): Unit = withCallback(callback) {
     val txns = txnMap.getOrElse(stream, Vector.empty)
     val sliced = revisionRange.last match {
       case Int.MaxValue => txns.drop(revisionRange.head)
@@ -97,13 +97,13 @@ abstract class TransientEventStore[ID, EVT, CH, SF](
     }
     sliced.map(_.toTransaction).foreach(callback.onNext)
   }
-  def query(selector: Selector)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
+  def query(selector: Selector)(callback: StreamConsumer[TXN, Any]): Unit = withCallback(callback) {
     txnMap.valuesIterator.flatten
       .map(_.toTransaction)
       .filter(selector.include)
       .foreach(callback.onNext)
   }
-  def querySince(sinceTick: Long, selector: Selector)(callback: StreamCallback[TXN]): Unit = withCallback(callback) {
+  def querySince(sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, Any]): Unit = withCallback(callback) {
     txnMap.valuesIterator.flatten
       .filter(_.tick >= sinceTick)
       .map(_.toTransaction)

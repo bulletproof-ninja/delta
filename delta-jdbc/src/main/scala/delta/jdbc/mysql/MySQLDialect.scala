@@ -8,7 +8,7 @@ import delta.jdbc._
   * MySQL dialect. Doesn't support schema.
   */
 class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
-    extends delta.jdbc.Dialect[ID, EVT, CH, SF](schema.optional) {
+  extends delta.jdbc.Dialect[ID, EVT, CH, SF](schema.optional) {
 
   import MySQLDialect._
 
@@ -30,4 +30,5 @@ class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: 
 
 private[mysql] object MySQLDialect {
   def isIndexAlreadyExists(sqlEx: SQLException): Boolean = sqlEx.getErrorCode == 1061
+  def isIndexDoesNotExist(sqlEx: SQLException): Boolean = sqlEx.getErrorCode == 1146
 }

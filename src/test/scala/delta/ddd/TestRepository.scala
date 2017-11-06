@@ -7,7 +7,7 @@ import scala.concurrent.Future
 
 import org.junit.Assert._
 import org.junit.Test
-import delta.util.MapRepository
+import delta.util.ConcurrentMapRepository
 import delta.util.PublishingRepository
 
 class TestRepository {
@@ -24,7 +24,7 @@ class TestRepository {
   @Test
   def `insert success`() {
     withLatch(5) { latch =>
-      val repo = new MapRepository[BigInt, Customer]
+      val repo = new ConcurrentMapRepository[BigInt, Customer]
       val hank = Customer("Hank", "12345")
       repo.insert(5, hank).foreach { rev =>
         assertEquals(0, rev)
@@ -61,7 +61,7 @@ class TestRepository {
   def `event publishing`() {
     case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Map[String, String])
     val notifications = new LinkedBlockingQueue[Notification]
-    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new MapRepository, global) {
+    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new ConcurrentMapRepository, global) {
       type Event = VeryBasicEvent
       def publish(id: Long, revision: Int, events: List[Event], metadata: Map[String, String]) {
         notifications offer Notification(id, revision, events, metadata)

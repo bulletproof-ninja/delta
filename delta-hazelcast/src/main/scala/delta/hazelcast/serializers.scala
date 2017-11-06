@@ -27,7 +27,7 @@ trait TransactionSerializer
       case inp: java.io.ObjectInput => inp
       case inp: java.io.InputStream => new ObjectInputStream(inp)
     }
-    delta.Transaction.readObject(input) {
+    delta.Transaction.readObject[Any, Any, Any](input) {
       case (tick, ch, id, rev, metadata, events) =>
         new TXN(tick, ch, id, rev, metadata, events)
     }

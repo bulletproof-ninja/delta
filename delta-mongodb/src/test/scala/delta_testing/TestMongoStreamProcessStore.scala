@@ -9,7 +9,7 @@ import org.bson.codecs._
 import org.bson.BsonReader
 import org.bson.Document
 
-object TestMongoSnapshotStore {
+object TestMongoStreamProcessStore {
   import com.mongodb.async.client._
   import org.bson.Document
 
@@ -30,7 +30,7 @@ object TestMongoSnapshotStore {
     }
   }
 
-  implicit def ec = RandomDelayExecutionContext
+  implicit val ec = RandomDelayExecutionContext
 
   @volatile var coll: MongoCollection[Document] = _
   @volatile private var client: MongoClient = _
@@ -49,13 +49,14 @@ object TestMongoSnapshotStore {
 }
 
 //@Ignore // For some reason fails in setupClass
-class TestMongoSnapshotStore extends TestSnapshotStore {
-  import TestMongoSnapshotStore._
+class TestMongoStreamProcessStore extends TestStreamProcessStore {
+  import TestMongoStreamProcessStore._
+  implicit def exeCtx = ec
   val strCdc = new scuff.Codec[String, Document] {
     def encode(str: String) = new Document("string", str)
     def decode(doc: Document) = doc.getString("string")
   }
-  override val store = new MongoSnapshotStore[Long, String](strCdc, coll)
+  override def newStore = new MongoStreamProcessStore[Long, String](strCdc, coll)
 
   @Test
   def mock() {

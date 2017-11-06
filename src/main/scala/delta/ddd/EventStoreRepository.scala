@@ -4,7 +4,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
 import delta.{ EventStore, SnapshotStore, Ticker }
-import scuff.concurrent.{ StreamCallback, StreamPromise }
+import scuff.concurrent.{ StreamConsumer, StreamPromise }
 
 /**
   * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
@@ -50,11 +50,11 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   private def buildCurrentSnapshot(
       snapshot: Option[Snapshot],
       expectedRevision: Option[Int],
-      replay: StreamCallback[TXN] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
+      replayer: StreamConsumer[TXN, Any] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
     case class Builder(applyEventsAfter: Int, mutator: Mutator, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
     val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.content)))
     val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
-    val futureBuilt = StreamPromise.fold(replay)(initBuilder) {
+    val futureBuilt = StreamPromise.fold(initBuilder, replayer) {
       case (b, txn) =>
         if (txn.revision > b.applyEventsAfter) {
           txn.events.foreach(b.mutator.mutate)

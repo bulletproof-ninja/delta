@@ -6,7 +6,7 @@ import scala.collection.Map
 import scala.collection.JavaConverters._
 import scala.concurrent.{ ExecutionContext, Future, blocking }
 
-import delta.{ Snapshot, SnapshotStore }
+import delta.SnapshotStore
 import scuff.Serializer
 
 /**
@@ -15,7 +15,7 @@ import scuff.Serializer
  */
 class RedisSnapshotStore[K, T](
   keyCodec: Serializer[K],
-  snapshotCodec: Serializer[Snapshot[T]],
+  snapshotCodec: Serializer[delta.Snapshot[T]],
   hashName: String,
   blockingCtx: ExecutionContext)(
     jedisProvider: ((BinaryJedis => Any) => Any))
@@ -26,7 +26,7 @@ class RedisSnapshotStore[K, T](
 
   private def jedis[R](thunk: BinaryJedis => R): R = blocking(jedisProvider(thunk)).asInstanceOf[R]
 
-  def read(key: K): Future[Option[Snapshot[T]]] = Future {
+  def read(key: K): Future[Option[Snapshot]] = Future {
     val binKey = keyCodec encode key
     jedis(_.hget(hash, binKey)) match {
       case null => None
@@ -34,25 +34,25 @@ class RedisSnapshotStore[K, T](
     }
   }(blockingCtx)
 
-  def write(key: K, snapshot: Snapshot[T]): Future[Unit] = Future {
+  def write(key: K, snapshot: Snapshot): Future[Unit] = Future {
     val binKey = keyCodec encode key
     val binSnapshot = snapshotCodec encode snapshot
     jedis(_.hset(hash, binKey, binSnapshot))
     ()
   }(blockingCtx)
-  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot[T]]] = Future {
+  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] = Future {
     val binKeys = keys.iterator.map(keyCodec.encode).toSeq
     jedis(_.hmget(hash, binKeys: _*))
       .iterator.asScala
       .zip(keys.iterator)
-      .foldLeft(Map.empty[K, Snapshot[T]]) {
+      .foldLeft(Map.empty[K, Snapshot]) {
         case (map, (valBytes, key)) =>
           if (valBytes != null) {
             map.updated(key, snapshotCodec decode valBytes)
           } else map
       }
   }(blockingCtx)
-  def writeBatch(snapshots: Map[K, Snapshot[T]]): Future[Unit] = Future {
+  def writeBatch(snapshots: Map[K, Snapshot]): Future[Unit] = Future {
     val jmap = snapshots.iterator.foldLeft(newJUHashMap(snapshots.size)) {
       case (jmap, (key, snapshot)) =>
         jmap.put(keyCodec encode key, snapshotCodec encode snapshot)

@@ -17,6 +17,6 @@ trait LocalPublishing[ID, EVT, CH]
   protected def publish(ch: CH, txn: PublishTXN) = pubSub.publish(txn)
 
   def subscribe(selector: MonotonicSelector)(
-    callback: TXN => Unit): Subscription = pubSub.subscribe(selector.include)(callback)
+    callback: TXN => Any): Subscription = pubSub.subscribe(selector.include)(callback)
 
 }

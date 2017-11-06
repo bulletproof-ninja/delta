@@ -1,127 +1,131 @@
 package delta.util
 
+import delta._
+import scala.concurrent._
 import scala.collection.concurrent.TrieMap
-import scala.collection.immutable.TreeSet
-import scala.concurrent.Future
-import scala.concurrent.duration.{ DurationInt, FiniteDuration }
-import scala.util.control.NonFatal
+import scala.util._, control.NonFatal
+import scuff.concurrent.Threads
 
-import delta.{ Snapshot, SnapshotStore, Transaction }
-import scuff.concurrent._
+private object MonotonicProcessor {
+  private type TXN = Transaction[_, _, _]
+  val RevOrdering = new Ordering[TXN] {
+    def compare(x: TXN, y: TXN): Int = {
+      assert(x.stream == y.stream)
+      x.revision - y.revision
+    }
+  }
+}
 
-trait MonotonicProcessor[ID, EVT, CH, S]
-    extends (Transaction[ID, EVT, CH] => Unit) {
+trait MonotonicProcessor[ID, EVT, S]
+  extends (Transaction[ID, _ >: EVT, _ >: Any] => Future[Unit]) {
 
-  type TXN = Transaction[ID, EVT, CH]
+  type TXN = Transaction[ID, _ >: EVT, _ >: Any]
+  type Snapshot = delta.Snapshot[S]
+  type Update = processStore.Update
 
-  /**
-    * The execution context to ensure same-thread
-    * processing of streams.
-    * NOTE: Because strict ordering is guaranteed,
-    * execution will block on the provided threads,
-    * thus the number of threads should not necessarily
-    * be limited to the number of cores.
-    */
-  protected def exeCtx: PartitionedExecutionContext
-  protected def snapshots: SnapshotStore[ID, S]
-  protected def onSnapshotUpdated(id: ID, snapshot: Snapshot[S]): Unit
+  protected val processStore: StreamProcessStore[ID, S]
+  protected def executionContext(id: ID): ExecutionContext
+
+  sealed private abstract class StreamStatus
+  private final case class Inactive(unapplied: List[TXN]) extends StreamStatus
+  private final case class Active(unapplied: List[TXN]) extends StreamStatus
+  private final val ActiveNil = Active(Nil)
+  /** Set active. A non-empty list indicates success. */
+  private def setActive(txn: TXN): List[TXN] = {
+    streamStatus.get(txn.stream) match {
+      case None =>
+        if (streamStatus.putIfAbsent(txn.stream, ActiveNil).isEmpty) List(txn)
+        else setActive(txn)
+      case Some(inactive @ Inactive(unapplied)) =>
+        if (streamStatus.replace(txn.stream, inactive, ActiveNil)) txn :: unapplied
+        else setActive(txn)
+      case Some(active @ Active(unapplied)) =>
+        if (streamStatus.replace(txn.stream, active, Active(txn :: unapplied))) Nil
+        else setActive(txn)
+    }
+  }
+  private def forceInactive(stream: ID, unapplied: List[TXN]): Unit = {
+    assert(unapplied.nonEmpty)
+    val active @ Active(newUnapplied) = streamStatus(stream)
+    val allUnapplied = unapplied ++ newUnapplied
+    if (!streamStatus.replace(stream, active, Inactive(allUnapplied))) {
+      forceInactive(stream, allUnapplied)
+    }
+  }
+  /** Set inactive. An empty list indicates success. */
+  private def setInactive(stream: ID, stillUnapplied: List[TXN]): List[TXN] = {
+    val active @ Active(newUnapplied) = streamStatus(stream)
+    if (newUnapplied.isEmpty) {
+      if (stillUnapplied.isEmpty) {
+        if (streamStatus.remove(stream, active)) Nil
+        else setInactive(stream, stillUnapplied)
+      } else {
+        if (streamStatus.replace(stream, active, Inactive(stillUnapplied))) Nil
+        else setInactive(stream, stillUnapplied)
+      }
+    } else {
+      if (streamStatus.replace(stream, active, ActiveNil)) newUnapplied ++ stillUnapplied
+      else setInactive(stream, stillUnapplied)
+    }
+  }
+
+  private[this] val streamStatus = new TrieMap[ID, StreamStatus]
+
+  protected def onUpdate(id: ID, update: Update): Unit
+  protected def onMissingRevisions(id: ID, missing: Range): Unit
+
   protected def process(txn: TXN, currState: Option[S]): S
-
-  protected def snapshotStoreTimeout: FiniteDuration = _defaultTimeout
-  private[this] val _defaultTimeout = 10.seconds
-
-  private def updateOnPartitionThread(
-    key: ID, thunk: Option[Snapshot[S]] => Option[Snapshot[S]]): Option[Snapshot[S]] = {
-
-    val oldSnapshot = snapshots.read(key).await(snapshotStoreTimeout, exeCtx.reportFailure)
-    val newSnapshot = thunk(oldSnapshot)
-    if (oldSnapshot ne newSnapshot) newSnapshot.foreach { newSnapshot =>
-      if (oldSnapshot.forall(_.content != newSnapshot.content)) {
-        snapshots.write(key, newSnapshot).await(snapshotStoreTimeout, exeCtx.reportFailure)
-        onSnapshotUpdated(key, newSnapshot)
-      } else if (oldSnapshot.get.revision != newSnapshot.revision || oldSnapshot.get.tick != newSnapshot.tick) {
-        snapshots.refresh(key, newSnapshot.revision, newSnapshot.tick).await(snapshotStoreTimeout, exeCtx.reportFailure)
-        onSnapshotUpdated(key, newSnapshot)
-      }
+  protected def processAsync(txn: TXN, currState: Option[S]): Future[S] =
+    try Future successful process(txn, currState) catch {
+      case NonFatal(th) => Future failed th
     }
-    newSnapshot
-  }
 
-  /** Thread-safe update of snapshot. */
-  protected def updateSnapshot(key: ID)(
-    thunk: Option[Snapshot[S]] => Option[Snapshot[S]]): Future[Option[Snapshot[S]]] =
-    exeCtx.submit(key.##)(updateOnPartitionThread(key, thunk))
-
-  private[this] val unappliedTxns = new TrieMap[ID, TreeSet[TXN]]
-
-  private def RevOrdering = new Ordering[TXN] {
-    def compare(x: TXN, y: TXN): Int = x.revision - y.revision
-  }
-
-  @annotation.tailrec
-  private def processUnapplied(
-    currState: Option[Snapshot[S]],
-    unapplied: TreeSet[TXN]): (Option[Snapshot[S]], TreeSet[TXN]) = {
-
-    val expectedRevision = currState.map(_.revision + 1) getOrElse 0
-
-    unapplied.headOption match {
-      case Some(txn) if txn.revision == expectedRevision =>
-        val currTick = currState.map(_.tick) getOrElse Long.MinValue
-        val updated = process(txn, currState.map(_.content))
-        processUnapplied(Some(Snapshot(updated, txn.revision, currTick max txn.tick)), unapplied.tail)
-      case Some(txn) if txn.revision < expectedRevision =>
-        processUnapplied(currState, unapplied.tail)
-      case _ =>
-        currState -> unapplied
+  private def applyTransactions(txns: List[TXN], snapshot: Option[Snapshot]): Future[(Option[Snapshot], List[TXN])] = {
+    txns match {
+      case txn :: remainingTxns =>
+        val expectedRev = snapshot.map(_.revision + 1) getOrElse 0
+        if (txn.revision == expectedRev) {
+          processAsync(txn, snapshot.map(_.content)).flatMap { updated =>
+            val tick = snapshot.map(_.tick max txn.tick) getOrElse txn.tick
+            applyTransactions(remainingTxns, Some(Snapshot(updated, txn.revision, tick)))
+          }(Threads.PiggyBack)
+        } else if (txn.revision < expectedRev) { // Already processed
+          applyTransactions(remainingTxns, snapshot)
+        } else { // txn.revision > expectedRev
+          onMissingRevisions(txn.stream, expectedRev until txn.revision)
+          Future successful (snapshot -> txns)
+        }
+      case Nil =>
+        Future successful snapshot -> Nil
     }
+
   }
 
-  @annotation.tailrec
-  private def saveUnapplied(key: ID, unapplied: TreeSet[TXN]): Unit = {
-    unappliedTxns.putIfAbsent(key, unapplied) match {
-      case None => // Ok!
-      case Some(other) =>
-        val combined = unapplied ++ other
-        if (!unappliedTxns.replace(key, other, combined)) {
-          saveUnapplied(key, combined)
+  private def upsertUntilInactive(stream: ID, unapplied: List[TXN])(
+      implicit ec: ExecutionContext): Future[Unit] = {
+    val upsertResult = processStore.upsert(stream) { existingSnapshot =>
+      applyTransactions(unapplied.sorted(MonotonicProcessor.RevOrdering), existingSnapshot)
+    }
+    val inactiveFuture = upsertResult.flatMap {
+      case (update, stillUnapplied) =>
+        update.foreach(onUpdate(stream, _))
+        setInactive(stream, stillUnapplied) match {
+          case Nil => Future successful (())
+          case moreUnapplied => upsertUntilInactive(stream, moreUnapplied)
         }
     }
-  }
-  @annotation.tailrec
-  private def saveUnappliedIfEmptyElseReturnAllUnapplied(key: ID, unapplied: TreeSet[TXN]): Option[TreeSet[TXN]] = {
-    unappliedTxns.putIfAbsent(key, unapplied) match {
-      case None => None
-      case Some(existing) =>
-        if (unappliedTxns.remove(key, existing)) {
-          Some(existing ++ unapplied)
-        } else {
-          saveUnappliedIfEmptyElseReturnAllUnapplied(key, unapplied)
-        }
+    inactiveFuture.andThen {
+      case Failure(_) =>
+        forceInactive(stream, unapplied)
     }
   }
 
-  def apply(txn: TXN): Unit = exeCtx.submit(txn.stream.##) {
-    val toBeApplied = unappliedTxns.remove(txn.stream) match {
-      case None => TreeSet(txn)(RevOrdering)
-      case Some(unapplied) => unapplied + txn
+  def apply(txn: TXN): Future[Unit] = {
+    setActive(txn) match {
+      case Nil => Future successful Unit
+      case unapplied =>
+        upsertUntilInactive(txn.stream, unapplied)(executionContext(txn.stream))
     }
-      @annotation.tailrec
-      def updateThunk(toBeApplied: TreeSet[TXN])(snapshot: Option[Snapshot[S]]): Option[Snapshot[S]] = {
-        val (updatedSnapshot, unapplied) = processUnapplied(snapshot, toBeApplied)
-        if (unapplied.isEmpty) updatedSnapshot
-        else {
-          saveUnappliedIfEmptyElseReturnAllUnapplied(txn.stream, unapplied) match {
-            case None => updatedSnapshot
-            case Some(combinedUnapplied) =>
-              updateThunk(combinedUnapplied)(updatedSnapshot)
-          }
-        }
-      }
-    try updateOnPartitionThread(txn.stream, updateThunk(toBeApplied)) catch {
-      case NonFatal(th) =>
-        exeCtx.reportFailure(th)
-        saveUnapplied(txn.stream, toBeApplied)
-    }
+
   }
 }

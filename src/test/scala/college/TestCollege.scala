@@ -18,12 +18,11 @@ import language.implicitConversions
 import scala.collection.concurrent.TrieMap
 import delta.util.LocalPublishing
 import delta.testing.RandomDelayExecutionContext
+import scala.reflect.ClassTag
 
 // FIXME: Something's not right with the test case. Code coverage is incomplete.
 class TestCollege {
 
-  implicit def sem2fut(s: Semester): Future[Semester] = Future successful s
-  implicit def stu2fut(s: Student): Future[Student] = Future successful s
   implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
 
   lazy val eventStore: EventStore[Int, CollegeEvent, String] =
@@ -37,11 +36,14 @@ class TestCollege {
 
   type TXN = eventStore.TXN
 
-  lazy val StudentRepository =
-    new EntityRepository("Student", student.Student)(eventStore)
+  protected var StudentRepository: EntityRepository[Int, StudentEvent, String, student.State, StudentId, student.Student] = _
+  protected var SemesterRepository: EntityRepository[Int, SemesterEvent, String, semester.State, SemesterId, semester.Semester] = _
 
-  lazy val SemesterRepository =
-    new EntityRepository("Semester", semester.Semester)(eventStore)
+  @Before
+  def setup() {
+    StudentRepository = new EntityRepository("Student", student.Student)(eventStore)
+    SemesterRepository = new EntityRepository("Semester", semester.Semester)(eventStore)
+  }
 
   private def randomName(): String = (
     rand.nextInRange('A' to 'Z') +: (1 to rand.nextInRange(2 to 12)).map(_ => rand.nextInRange('a' to 'z'))).mkString
@@ -58,7 +60,7 @@ class TestCollege {
     Future.sequence(ids).await(60.seconds)
   }
   // Count not exact, since we can potentially generate id clashes
-  private def addSemesters(approx: Int) = {
+  private def addSemesters(approx: Int): Seq[SemesterId] = {
     val ids =
       for (_ <- 1 to approx) yield {
         val name = randomName() + " " + (100 + rand.nextInRange(1 to 9))
@@ -69,11 +71,47 @@ class TestCollege {
     Future.sequence(ids).await
   }
 
+  private def populate(studentCount: Int, semesterCount: Int): (Seq[StudentId], Seq[SemesterId]) = {
+    val studentIds = addStudents(studentCount)
+    val semesterIds = addSemesters(semesterCount)
+      def randomSemester: SemesterId = {
+        val idx = rand.nextInRange(0 until semesterIds.size)
+        semesterIds(idx)
+      }
+    studentIds.foreach { studentId =>
+      val semesters = (1 to rand.nextInRange(1 to 10)).map(_ => randomSemester).distinct
+      semesters.foreach { semesterId =>
+        SemesterRepository.update(semesterId) {
+          case (semester, _) =>
+            semester(EnrollStudent(studentId))
+        }
+      }
+    }
+    studentIds.filter(_ => rand.nextFloat >= 0.5f).foreach { studentId =>
+      if (rand.nextBoolean) {
+        SemesterRepository.update(randomSemester) {
+          case (semester, _) =>
+            semester(EnrollStudent(studentId))
+        }
+      }
+      StudentRepository.update(studentId) {
+        case (student, _) =>
+          student(ChangeStudentName(randomName))
+      }
+      if (rand.nextBoolean) {
+        SemesterRepository.update(randomSemester) {
+          case (semester, _) =>
+            semester(EnrollStudent(studentId))
+        }
+      }
+    }
+    studentIds.toIndexedSeq -> semesterIds.toIndexedSeq
+  }
+
   @Test
   def `many-to-many relationship`() {
     val Unknown = "<unknown>"
-    val studentIds = addStudents(200)
-    val semesterIds = addSemesters(30).toIndexedSeq
+    val (studentIds, semesterIds) = populate(200, 30)
       def randomSemester: SemesterId = {
         val idx = rand.nextInRange(0 until semesterIds.size)
         semesterIds(idx)
@@ -111,7 +149,7 @@ class TestCollege {
 
     val allStudents = new TrieMap[StudentId, (Set[SemesterId], String)].withDefaultValue(Set.empty -> Unknown)
     val readModel = new TrieMap[SemesterId, Map[StudentId, String]].withDefaultValue(Map.empty)
-    val done = StreamPromise.foreach(enrollmentQuery) { txn =>
+    val done = StreamPromise.foreach(enrollmentQuery) { txn: TXN =>
         def onSemester(semesterId: SemesterId)(evt: CollegeEvent) = evt match {
           case StudentEnrolled(studentId) =>
             val semesterStudents = readModel(semesterId)

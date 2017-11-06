@@ -12,7 +12,7 @@ import scala.util.control.NonFatal
 import com.datastax.driver.core._
 
 import scuff.Memoizer
-import scuff.concurrent.{ StreamCallback, exeCtxToExecutor }
+import scuff.concurrent.{ StreamConsumer, exeCtxToExecutor }
 import delta.{ EventCodec, EventStore }
 
 private[cassandra] object CassandraEventStore {
@@ -148,13 +148,13 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
   }
 
   // TODO: Make fully non-blocking
-  private def queryAsync(stream: Some[ID], callback: StreamCallback[TXN], stm: BoundStatement) {
+  private def queryAsync(stream: Some[ID], callback: StreamConsumer[TXN, Any], stm: BoundStatement) {
     execute(stm) { rs =>
       Try {
         val iter = rs.iterator().asScala.map(row => toTransaction(stream, row, StreamColumnsIdx))
         while (iter.hasNext) callback.onNext(iter.next)
       } match {
-        case Success(_) => callback.onCompleted()
+        case Success(_) => callback.onDone()
         case Failure(NonFatal(e)) => callback.onError(e)
       }
     }
@@ -297,7 +297,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
-  def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit = {
+  def replayStream(stream: ID)(callback: StreamConsumer[TXN, Any]): Unit = {
     val stm = ReplayStream(stream)
     queryAsync(Some(stream), callback, stm)
   }
@@ -307,7 +307,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, fromRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
   }
-  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit = {
+  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit = {
     if (fromRevision == 0) {
       replayStream(stream)(callback)
     } else {
@@ -321,7 +321,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, toRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
   }
-  override def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamCallback[TXN]): Unit = {
+  override def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit = {
     val stm = ReplayStreamTo(stream, toRevision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -340,7 +340,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       ps.bind(ct[ID].writeAs(id), first, last)
     }
   }
-  def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamCallback[TXN]): Unit = {
+  def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, Any]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val from = revisionRange.head
     val to = revisionRange.last
@@ -362,7 +362,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       AND revision = ?""").setConsistencyLevel(ConsistencyLevel.SERIAL)
     (stream: ID, rev: Int) => ps.bind(ct[ID].writeAs(stream), Int box rev)
   }
-  private def replayStreamRevision(stream: ID, revision: Int)(callback: StreamCallback[TXN]): Unit = {
+  private def replayStreamRevision(stream: ID, revision: Int)(callback: StreamConsumer[TXN, Any]): Unit = {
     val stm = ReplayStreamRevision(stream, revision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -426,11 +426,11 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
 
   }
 
-  def query(selector: Selector)(callback: StreamCallback[TXN]): Unit = {
+  def query(selector: Selector)(callback: StreamConsumer[TXN, Any]): Unit = {
     resolve(selector, None) match {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {
-          case Success(_) => callback.onCompleted()
+          case Success(_) => callback.onDone()
           case Failure(NonFatal(th)) => callback.onError(th)
         }(exeCtx)
       case Left((id, stm)) =>
@@ -438,11 +438,11 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     }
   }
 
-  def querySince(sinceTick: Long, selector: Selector)(callback: StreamCallback[TXN]): Unit = {
+  def querySince(sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, Any]): Unit = {
     resolve(selector, Some(sinceTick)) match {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {
-          case Success(_) => callback.onCompleted()
+          case Success(_) => callback.onDone()
           case Failure(NonFatal(th)) => callback.onError(th)
         }(exeCtx)
       case Left((id, stm)) =>

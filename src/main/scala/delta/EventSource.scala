@@ -3,7 +3,7 @@ package delta
 import scala.concurrent.Future
 
 import scuff.Subscription
-import scuff.concurrent.StreamCallback
+import scuff.concurrent.StreamConsumer
 
 /**
   * Event source.
@@ -16,24 +16,24 @@ trait EventSource[ID, EVT, CH] {
   def maxTick(): Future[Option[Long]]
 
   /** Replay complete stream. */
-  def replayStream(stream: ID)(callback: StreamCallback[TXN]): Unit
+  def replayStream(stream: ID)(callback: StreamConsumer[TXN, Any]): Unit
   /** Replay stream from provided revision range. */
-  def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamCallback[TXN]): Unit
+  def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, Any]): Unit
   /** Replay stream from provided revision to current. */
-  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamCallback[TXN]): Unit
+  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit
   /** Replay stream from revision 0 to specific revision (inclusive). */
-  def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamCallback[TXN]): Unit =
+  def replayStreamTo(stream: ID, toRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit =
     replayStreamRange(stream, 0 to toRevision)(callback)
 
   /** Query across streams, optionally providing a selector to filter results. */
-  def query(selector: Selector = Everything)(callback: StreamCallback[TXN]): Unit
+  def query(selector: Selector = Everything)(callback: StreamConsumer[TXN, Any]): Unit
   /** Query across streams, optionally providing a selector to filter results. */
-  def querySince(sinceTick: Long, selector: Selector = Everything)(callback: StreamCallback[TXN]): Unit
+  def querySince(sinceTick: Long, selector: Selector = Everything)(callback: StreamConsumer[TXN, Any]): Unit
 
   /** Subscribe to published transactions. */
   def subscribe(
     selector: MonotonicSelector = Everything)(
-      callback: TXN => Unit): Subscription
+      callback: TXN => Any): Subscription
 
   type CEVT = Class[_ <: EVT]
 

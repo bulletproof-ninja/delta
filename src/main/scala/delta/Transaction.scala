@@ -1,7 +1,7 @@
 package delta
 
 @SerialVersionUID(1)
-final case class Transaction[ID, EVT, CH](
+final case class Transaction[+ID, +EVT, +CH](
     tick: Long,
     channel: CH,
     stream: ID,

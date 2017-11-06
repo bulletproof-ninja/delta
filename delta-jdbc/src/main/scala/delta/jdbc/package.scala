@@ -6,6 +6,7 @@ import java.math.BigInteger
 import java.sql.ResultSet
 import scuff.Numbers._
 import java.io.ByteArrayInputStream
+import java.sql.PreparedStatement
 
 package jdbc {
   class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
@@ -26,7 +27,7 @@ package jdbc {
     def readFrom(row: ResultSet, col: Int) = row.getString(col)
   }
   abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
-      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
+    extends ColumnType[EV] with conv.ScalaEnumType[EV] {
     def typeName = "VARCHAR(255)"
     def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
   }
@@ -100,4 +101,23 @@ package object jdbc {
       def typeName = "VARCHAR(255)"
       def readFrom(row: ResultSet, col: Int) = byName(row.getString(col))
     }
+  implicit def OptionColumn[T: ColumnType]: ColumnType[Option[T]] = new ColumnType[Option[T]] {
+    def typeName = implicitly[ColumnType[T]].typeName
+    def readFrom(row: ResultSet, col: Int): Option[T] = {
+      val value = implicitly[ColumnType[T]].readFrom(row, col)
+      if (row.wasNull || value == null) None
+      else new Some(value)
+    }
+    override def writeAs(option: Option[T]) = option match {
+      case Some(value) => implicitly[ColumnType[T]] writeAs value
+      case None => null
+    }
+  }
+
+  private[jdbc] implicit class DeltaPrep(private val ps: PreparedStatement) extends AnyVal {
+    def setValue[T: ColumnType](colIdx: Int, value: T): Unit = ps.setObject(colIdx, implicitly[ColumnType[T]] writeAs value)
+  }
+  private[jdbc] implicit class DeltaRes(private val rs: ResultSet) extends AnyVal {
+    def getValue[T: ColumnType](colIdx: Int): T = implicitly[ColumnType[T]].readFrom(rs, colIdx)
+  }
 }

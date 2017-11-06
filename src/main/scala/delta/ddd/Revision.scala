@@ -2,7 +2,9 @@ package delta.ddd
 
 /** Revision. */
 sealed abstract class Revision {
-  private[ddd] def validate(actual: Int): Unit
+  private[ddd] def validate(actual: Int): Unit =
+    if (!matches(actual)) throw new Revision.MismatchException(value.get, actual)
+  def matches(actual: Int): Boolean
   def value: Option[Int]
 }
 object Revision {
@@ -22,11 +24,7 @@ object Revision {
     */
   case class Exactly(expected: Int) extends Revision {
     def value = Some(expected)
-    private[ddd] def validate(actual: Int): Unit = {
-      if (expected != actual) {
-        throw new MismatchException(expected, actual)
-      }
-    }
+    def matches(actual: Int): Boolean = expected == actual
   }
 
   /**
@@ -35,11 +33,7 @@ object Revision {
     */
   case class Minimum(expected: Int) extends Revision {
     def value = Some(expected)
-    private[ddd] def validate(actual: Int): Unit = {
-      if (expected > actual) {
-        throw new MismatchException(expected, actual)
-      }
-    }
+    def matches(actual: Int): Boolean = actual >= expected
   }
   /**
     * Latest revsion.
@@ -47,7 +41,7 @@ object Revision {
     */
   case object Latest extends Revision {
     def value = None
-    private[ddd] def validate(actual: Int): Unit = ()
+    def matches(actual: Int): Boolean = true
   }
 
   /** Revision mismatch exception. */

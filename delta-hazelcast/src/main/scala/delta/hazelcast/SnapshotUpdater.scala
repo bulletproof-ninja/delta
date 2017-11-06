@@ -4,7 +4,8 @@ import java.util.Map.Entry
 
 import com.hazelcast.map.AbstractEntryProcessor
 
-import delta.{ Snapshot, SnapshotStore }
+import delta.Snapshot
+import delta.util.Exceptions
 
 /**
  * Internal class used by [[delta.hazelcast.IMapSnapshotStore]].
@@ -17,14 +18,14 @@ class SnapshotUpdater[K, D] private[hazelcast] (
     entry.getValue match {
       case null => update match {
         case Right(snapshot) => entry setValue snapshot
-        case Left(_) => throw SnapshotStore.Exceptions.refreshNonExistent(entry.getKey)
+        case Left(_) => throw Exceptions.refreshNonExistent(entry.getKey)
       }
       case existing => update match {
         case Right(snapshot) =>
           if (snapshot.revision >= existing.revision && snapshot.tick >= existing.tick) {
             entry setValue snapshot
           } else {
-            throw SnapshotStore.Exceptions.writeOlderRevision(entry.getKey, existing, snapshot)
+            throw Exceptions.writeOlder(entry.getKey, existing, snapshot)
           }
         case Left((revision, tick)) =>
           val updated = {

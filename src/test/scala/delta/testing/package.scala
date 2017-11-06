@@ -15,6 +15,7 @@ package object testing {
     def await = Await.result(f, AwaitDuration)
   }
 
+  import language.implicitConversions
   implicit def unit2fut(unit: Unit) = Future successful unit
 
 }

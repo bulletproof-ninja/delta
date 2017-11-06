@@ -2,7 +2,6 @@ package delta.testing
 
 import scuff._
 import scala.concurrent._
-
 import scala.util.Random
 
 class RandomDelayExecutionContext(exeCtx: ExecutionContext) extends ExecutionContext {

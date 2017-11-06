@@ -22,7 +22,7 @@ trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
     getTopic(channel).publish(txn)
   }
 
-  private class Subscriber(selector: Selector, callback: TXN => Unit)
+  private class Subscriber(selector: Selector, callback: TXN => _)
       extends MessageListener[PublishTXN] {
     def onMessage(msg: Message[PublishTXN]): Unit = {
       val txn = publishCodec decode msg.getMessageObject
@@ -30,7 +30,7 @@ trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
     }
   }
 
-  private def subscribe(channels: Iterable[CH], selector: MonotonicSelector, callback: TXN => Unit): List[Subscription] = {
+  private def subscribe(channels: Iterable[CH], selector: MonotonicSelector, callback: TXN => _): List[Subscription] = {
     channels.toList.map { ch =>
       val topic = getTopic(ch)
       val regId = topic addMessageListener new Subscriber(selector, callback)
@@ -41,11 +41,11 @@ trait TopicPublishing[ID, EVT, CH] extends Publishing[ID, EVT, CH] {
   }
 
   def subscribe(selector: MonotonicSelector)(
-    callback: TXN => Unit): Subscription = {
+    callback: TXN => Any): Subscription = {
     val subscriptions = selector match {
       case Everything => subscribe(allChannels, selector, callback)
       case ChannelSelector(channels) => subscribe(channels, selector, callback)
-      case StreamSelector(id, channel) => subscribe(List(channel), selector, callback)
+      case StreamSelector(_, channel) => subscribe(List(channel), selector, callback)
     }
     new Subscription {
       def cancel() = subscriptions.foreach(s => Try(s.cancel))

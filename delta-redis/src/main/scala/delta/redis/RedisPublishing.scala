@@ -26,7 +26,7 @@ trait RedisPublishing[ID, EVT, CH]
     val exclusive = rwLock.writeLock
     (rwLock.readLock, exclusive, exclusive.newCondition)
   }
-  private class FilteredSubscriber(selector: MonotonicSelector, sub: TXN => Unit) {
+  private class FilteredSubscriber(selector: MonotonicSelector, sub: TXN => _) {
     def tell(txn: TXN) =
       if (selector.include(txn)) {
         publishCtx execute new Runnable {
@@ -59,7 +59,7 @@ trait RedisPublishing[ID, EVT, CH]
 
   def subscribe(
     selector: MonotonicSelector)(
-      callback: TXN => Unit): Subscription = {
+      callback: TXN => Any): Subscription = {
     val filteredSub = new FilteredSubscriber(selector, callback)
     exclusiveLock {
       if (subscribers.isEmpty) {

@@ -2,16 +2,16 @@ package delta.testing
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
-import scala.collection.JavaConverters._
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable.Buffer
 
 import org.junit.Assert._
 import org.junit.Test
 
 import delta.{ Fold, Snapshot, Transaction }
-import delta.util.{ ConcurrentMapSnapshotStore, MonotonicProcessor }
+import delta.util.{ ConcurrentMapStore, MonotonicProcessor }
 import scuff.concurrent.PartitionedExecutionContext
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext
 
 class TestMonotonicProcessor {
   @Test
@@ -21,25 +21,34 @@ class TestMonotonicProcessor {
         snapshotMap.clear()
         latch = new CountDownLatch(1)
       }
-      val snapshotMap = new TrieMap[Int, Snapshot[String]]
-      var lastSnapshotUpdate: Snapshot[String] = _
+      val snapshotMap = new TrieMap[Int, Option[Snapshot[String]]]
+      @volatile var lastSnapshotUpdate: Snapshot[String] = _
       @volatile var latch: CountDownLatch = _
     }
-    val mp = new MonotonicProcessor[Int, Char, Unit, String] {
-      def onSnapshotUpdated(key: Int, newSnapshot: Snapshot[String]) {
+    class Mono(ec: ExecutionContext) extends MonotonicProcessor[Int, Char, String] {
+      def onMissingRevisions(id: Int, missing: Range) = ()
+      def onUpdate(key: Int, update: Update) = {
+        //        println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
         assertEquals(42, key)
-        Tracker.lastSnapshotUpdate = newSnapshot
-        if (newSnapshot.revision == 4) Tracker.latch.countDown()
+        Tracker.lastSnapshotUpdate = update.snapshot
+        if (update.snapshot.revision == 4) {
+          assertEquals(1L, Tracker.latch.getCount)
+          Tracker.latch.countDown()
+        }
       }
       object Concat extends Fold[String, Char] {
         def init(c: Char) = new String(Array(c))
         def next(str: String, c: Char) = s"$str$c"
       }
-      val snapshots = new ConcurrentMapSnapshotStore(Tracker.snapshotMap)
-      val exeCtx = PartitionedExecutionContext(1)
-      def process(txn: TXN, state: Option[String]) = Concat.process(state, txn.events)
+      val processStore = new ConcurrentMapStore(Tracker.snapshotMap, (_: Int) => Future successful None)
+      def executionContext(id: Int) = ec
+      def process(txn: TXN, state: Option[String]) = {
+        val newState = Concat.process(state, txn.events)
+        //        println(s"Txn ${txn.revision}: $state => $newState")
+        newState
+      }
     }
-    val txns = java.util.Arrays.asList(
+    val txns = List(
       Transaction(
         stream = 42, revision = 0,
         events = List('H', 'e', 'l', 'l'),
@@ -65,21 +74,29 @@ class TestMonotonicProcessor {
         events = List('r', 'l', 'd', '!'),
         tick = 666, channel = (), metadata = Map.empty))
 
-      def processAndVerify(txns: Buffer[Transaction[Int, Char, Unit]], n: Int) {
+      def processAndVerify(ec: ExecutionContext, txns: List[Transaction[Int, Char, Unit]], n: Int) {
         Tracker.clear()
-        txns.foreach(mp.apply)
+        val txnSequence = { txns.map(_.revision).mkString(",") }
+        //        println(s"----------------- $n: $txnSequence using $ec ---------------")
+        val mp = new Mono(ec)
+        txns.map(mp).foreach(_.await)
         assertTrue(
-          s"Timed out on number $n with the following revision sequence: ${txns.map(_.revision).mkString(",")}",
-          Tracker.latch.await(2, TimeUnit.SECONDS))
-        assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.snapshotMap(42))
+          s"(Latch: ${Tracker.latch.getCount}) Timed out on number $n with the following revision sequence: $txnSequence, using EC $ec",
+          Tracker.latch.await(5, TimeUnit.SECONDS))
+        assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.snapshotMap(42).get)
         assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.lastSnapshotUpdate)
       }
 
-    processAndVerify(txns.asScala, 1)
-    processAndVerify(txns.asScala.reverse, 2)
-    for (n <- 3 to 100) {
-      java.util.Collections.shuffle(txns)
-      processAndVerify(txns.asScala, n)
+    val partitioned = PartitionedExecutionContext(1)
+    val ecs = List(partitioned.singleThread(42), ExecutionContext.global)
+    ecs.foreach(processAndVerify(_, txns, 1))
+    ecs.foreach(processAndVerify(_, txns.reverse, 2))
+    for (n <- 3 to 1000) {
+      val random = util.Random.shuffle(txns)
+      ecs.foreach(processAndVerify(_, random, n))
+    }
+    for (n <- 1001 to 1025) {
+      processAndVerify(RandomDelayExecutionContext, util.Random.shuffle(txns), n)
     }
 
   }

@@ -4,6 +4,7 @@ import java.sql._
 
 import scuff._
 import delta.EventCodec
+import scala.util.Try
 
 class DefaultDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
   extends Dialect[ID, EVT, CH, SF](schema.optional)
@@ -38,7 +39,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
     try stm.execute(ddl) finally stm.close()
   }
 
-  protected def schemaDDL(schema: String): String = s"CREATE SCHEMA IF NOT EXISTS $schema"
+  protected def schemaDDL(name: String): String = s"CREATE SCHEMA IF NOT EXISTS $name"
   def createSchema(conn: Connection): Unit = schema.foreach(schema => executeDDL(conn, schemaDDL(schema)))
 
   protected def streamTableDDL: String = s"""
@@ -116,13 +117,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   """
   def createMetadataTable(conn: Connection): Unit = executeDDL(conn, metadataTableDDL)
 
-  protected def setObject[T: ColumnType](ps: PreparedStatement)(colIdx: Int, value: T) {
-    ps.setObject(colIdx, implicitly[ColumnType[T]].writeAs(value))
-  }
   private def prepareStatement[R](sql: String)(thunk: PreparedStatement => R)(
-    implicit conn: Connection): R = {
+      implicit conn: Connection): R = {
     val ps = conn.prepareStatement(sql)
-    try thunk(ps) finally ps.close()
+    try thunk(ps) finally Try(ps.close)
   }
   private def executeQuery[R](ps: PreparedStatement)(thunk: ResultSet => R): R = {
     val rs = ps.executeQuery()
@@ -134,10 +132,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       VALUES (?, ?)
   """
   def insertStream(stream: ID, channel: CH)(
-    implicit conn: Connection) {
+      implicit conn: Connection) {
     prepareStatement(streamInsert) { ps =>
-      setObject(ps)(1, stream)
-      setObject(ps)(2, channel)
+      ps.setValue(1, stream)
+      ps.setValue(2, channel)
       ps.executeUpdate()
     }
   }
@@ -147,9 +145,9 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
         VALUES (?, ?, ?)
   """
   def insertTransaction(stream: ID, rev: Int, tick: Long)(
-    implicit conn: Connection) {
+      implicit conn: Connection) {
     prepareStatement(transactionInsert) { ps =>
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       ps.setInt(2, rev)
       ps.setLong(3, tick)
       ps.executeUpdate()
@@ -161,17 +159,17 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
         VALUES (?, ?, ?, ?, ?, ?)
   """
   def insertEvents(stream: ID, rev: Int, events: List[EVT])(
-    implicit conn: Connection, codec: EventCodec[EVT, SF]) {
+      implicit conn: Connection, codec: EventCodec[EVT, SF]) {
     prepareStatement(eventInsert) { ps =>
       val isBatch = events.tail.nonEmpty
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       ps.setInt(2, rev)
       events.iterator.zipWithIndex.foreach {
         case (evt, idx) =>
           ps.setByte(3, idx.toByte)
           ps.setString(4, codec name evt)
           ps.setByte(5, codec version evt)
-          setObject(ps)(6, codec encode evt)
+          ps.setValue(6, codec encode evt)
           if (isBatch) ps.addBatch()
       }
       if (isBatch) ps.executeBatch()
@@ -184,10 +182,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       VALUES (?, ?, ?, ?)
   """
   def insertMetadata(stream: ID, rev: Int, metadata: Map[String, String])(
-    implicit conn: Connection) = if (metadata.nonEmpty) {
+      implicit conn: Connection) = if (metadata.nonEmpty) {
     prepareStatement(metadataInsert) { ps =>
       val isBatch = metadata.size > 1
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       ps.setInt(2, rev)
       metadata.foreach {
         case (key, value) =>
@@ -215,10 +213,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   private val TxnColumnsIdx = Columns(TxnColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
 
   private[jdbc] case class Columns(
-    stream_id: Int, revision: Int,
-    tick: Int, channel: Int,
-    event_idx: Int, event_name: Int, event_version: Int, event_data: Int,
-    metadata_key: Int, metadata_val: Int)
+      stream_id: Int, revision: Int,
+      tick: Int, channel: Int,
+      event_idx: Int, event_name: Int, event_version: Int, event_data: Int,
+      metadata_key: Int, metadata_val: Int)
   private object Columns {
     def apply(colIdx: String => Int): Columns = {
       new Columns(
@@ -244,7 +242,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   def selectMaxRevision(stream: ID)(implicit conn: Connection): Option[Int] = {
     prepareStatement(maxRevisionQuery) { ps =>
       ps.setFetchSize(1)
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       executeQuery(ps) { rs =>
         if (rs.next) Some(rs.getInt(1))
         else None
@@ -282,7 +280,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   """
 
   def selectTransactionsByChannels(channels: Set[CH], sinceTick: Long = Long.MinValue)(
-    thunk: (ResultSet, Columns) => Unit)(
+      thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
     val prefix = if (tickBound) {
@@ -294,7 +292,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
-        setObject(ps)(colIdx.next, channel)
+        ps.setValue(colIdx.next, channel)
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxnColumnsIdx)
@@ -302,7 +300,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
     }
   }
   def selectTransactionsByEvents(eventsByChannel: Map[CH, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
-    thunk: (ResultSet, Columns) => Unit)(
+      thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection, codec: EventCodec[EVT, SF]): Unit = {
     val tickBound = sinceTick != Long.MinValue
     val prefix = if (tickBound) {
@@ -316,7 +314,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
-        setObject(ps)(colIdx.next, channel)
+        ps.setValue(colIdx.next, channel)
       }
       events foreach { evt =>
         ps.setString(colIdx.next, codec.name(evt))
@@ -327,7 +325,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
     }
   }
   def selectTransactions(sinceTick: Long = Long.MinValue)(
-    thunk: (ResultSet, Columns) => Unit)(
+      thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
     val query = if (tickBound) {
@@ -374,9 +372,9 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
 
   private val streamQueryFull = makeStreamQuery()
   def selectStreamFull(stream: ID)(thunk: (ResultSet, Columns) => Unit)(
-    implicit conn: Connection): Unit = {
+      implicit conn: Connection): Unit = {
     prepareStatement(streamQueryFull) { ps =>
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       executeQuery(ps) { rs =>
         thunk(rs, StreamColumnsIdx)
       }
@@ -385,9 +383,9 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
 
   private val streamQuerySingleRevision = makeStreamQuery("AND t.revision = ?")
   def selectStreamRevision(stream: ID, revision: Int)(thunk: (ResultSet, Columns) => Unit)(
-    implicit conn: Connection): Unit = {
+      implicit conn: Connection): Unit = {
     prepareStatement(streamQuerySingleRevision) { ps =>
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       ps.setInt(2, revision)
       executeQuery(ps) { rs =>
         thunk(rs, StreamColumnsIdx)
@@ -396,9 +394,9 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   }
   private val streamQueryRevisionRange = makeStreamQuery("AND t.revision BETWEEN ? AND ?")
   def selectStreamRange(stream: ID, range: Range)(thunk: (ResultSet, Columns) => Unit)(
-    implicit conn: Connection): Unit = {
+      implicit conn: Connection): Unit = {
     prepareStatement(streamQueryRevisionRange) { ps =>
-      setObject(ps)(1, stream)
+      ps.setValue(1, stream)
       ps.setInt(2, range.head)
       ps.setInt(3, range.last)
       executeQuery(ps) { rs =>
