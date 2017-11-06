@@ -43,7 +43,7 @@ allprojects {
     version = rootProject.version
 
     repositories {
-        mavenCentral()
+        mavenLocal()
         jcenter()
     }
     dependencies {
