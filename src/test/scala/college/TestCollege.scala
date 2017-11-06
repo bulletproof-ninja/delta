@@ -189,4 +189,61 @@ class TestCollege {
         }
     }
   }
+
+  @Test
+  def `indirect model`() {
+
+    sealed abstract class Model
+    case class StudentModel(enrolled: Set[SemesterId]) extends Model
+    case object SemesterModelIsEmpty extends Model
+
+    class ModelBuilder(memMap: TrieMap[Int, Option[delta.Snapshot[Model]]])
+      extends MonotonicProcessor[Int, SemesterEvent, Model]
+      with CollateralState[Int, SemesterEvent, Model] {
+
+      def evtTag = implicitly[ClassTag[SemesterEvent]]
+
+      protected def preprocess(streamId: Int, streamRevision: Int, tick: Long, evt: SemesterEvent): Map[Int, Processor] = evt match {
+        case StudentEnrolled(studentId) => Map {
+          studentId.int -> Processor(studentEnrolled(new SemesterId(streamId)) _)
+        }
+        case StudentCancelled(studentId) => Map {
+          studentId.int -> Processor(studentCancelled(new SemesterId(streamId)) _)
+        }
+        case _ => Map.empty
+      }
+      protected val processStore = new ConcurrentMapStore(memMap, (_: Int) => Future successful None)
+      import processStore.Update
+      private val streamPartitions = scuff.concurrent.PartitionedExecutionContext(3)
+      protected def executionContext(id: Int) = streamPartitions.singleThread(id)
+      protected def onMissingRevisions(id: Int, missing: Range) = ()
+      protected def onUpdate(id: Int, update: Update) = update match {
+        case Update(Snapshot(StudentModel(enrolled), _, _), true) =>
+          println(s"Student $id is currently enrolled in: $enrolled")
+        case _ => // Ignore
+      }
+
+      protected def process(txn: TXN, currState: Option[Model]) = SemesterModelIsEmpty
+
+      private def studentEnrolled(semesterId: SemesterId)(model: Option[Model]): StudentModel =
+        model match {
+          case Some(model @ StudentModel(enrolled)) => model.copy(enrolled = enrolled + semesterId)
+          case None => new StudentModel(Set(semesterId))
+          case _ => sys.error("Should never happen")
+        }
+      private def studentCancelled(semesterId: SemesterId)(model: Option[Model]): StudentModel =
+        model match {
+          case Some(model @ StudentModel(enrolled)) => model.copy(enrolled = enrolled - semesterId)
+          case None => sys.error("Out of order processing")
+          case _ => sys.error("Should never happen")
+        }
+
+    }
+
+    val (studentIds, semesterIds) = populate(200, 30)
+    val inMemoryMap = new TrieMap[Int, Option[Snapshot[Model]]]
+    val builder = new ModelBuilder(inMemoryMap)
+    val semesterQuery = eventStore.query(eventStore.Selector("Semester")) _
+    val queryFinished = StreamPromise.foreach(semesterQuery)(builder)
+  }
 }
