@@ -6,3 +6,17 @@
 # Delta [![Build Status](https://semaphoreci.com/api/v1/nilskp/delta/branches/master/badge.svg)](https://semaphoreci.com/nilskp/delta)
 
 DDD-centric event-sourcing library for Scala.
+
+### del·ta
+#### /ˈdeltə/
+_symbol_
+symbol: δ; symbol: Δ; symbol: delta
+1.
+MATHEMATICS
+variation of a variable or function.
+2.
+MATHEMATICS
+a finite increment.
+
+### (https://en.wikipedia.org/wiki/Delta_encoding)[Delta encoding]
+> Delta encoding is a way of storing or transmitting data in the form of differences (deltas) between sequential data
