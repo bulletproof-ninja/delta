@@ -5,7 +5,7 @@
 
 # Delta [![Build Status](https://semaphoreci.com/api/v1/nilskp/delta/branches/master/badge.svg)](https://semaphoreci.com/nilskp/delta)
 
-![Delta](//imgur.com/gjBAIKw)
+![Delta](https://imgur.com/gjBAIKw)
 
 DDD-centric event-sourcing library for Scala.
 
