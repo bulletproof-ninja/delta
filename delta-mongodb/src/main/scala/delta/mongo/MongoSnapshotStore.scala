@@ -32,7 +32,6 @@ class MongoSnapshotStore[K: ClassTag, V](
   }
 
   protected def _id(k: K) = new Document("_id", k)
-  //  private def _id(keys: java.util.List[K]): Document = new Document("_id", new Document("$in", keys))
 
   protected def where(key: K, newRev: Int, newTick: Long): Document = {
     val $or = Arrays.asList(
