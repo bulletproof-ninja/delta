@@ -19,7 +19,7 @@ trait RedisPublishing[ID, EVT, CH]
   protected type PublishTXN = Array[Byte]
   protected def info: JedisShardInfo
   protected def allChannels: Set[CH]
-  protected def channelEncoder: CH => Array[Byte]
+  protected def channelEncoder(ch: CH): Array[Byte]
 
   private val (sharedLock, exclusiveLock, activeSubscribers) = {
     val rwLock = new ReentrantReadWriteLock
