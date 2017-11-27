@@ -39,7 +39,8 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
       case null =>
         val versionArg = if (isVersioned) "version: Byte, " else ""
         val methodName = if (isMethodNameEventName) evtName else "<decoderMethod>"
-        val signature = s"def $methodName(${versionArg}data: ${classTag[SF].runtimeClass.getName}): EVT"
+        val returnType = encoderEvents.get(evtName).map(_.getSimpleName) getOrElse s"<_ <: ${classTag[EVT].runtimeClass.getSimpleName}>"
+        val signature = s"def $methodName(${versionArg}data: ${classTag[SF].runtimeClass.getName}): $returnType"
         val message = s"""No decoding method found for event "$evtName". Must match the following signature, where EVT is a sub-type of ${classTag[EVT].runtimeClass.getName}: $signature"""
         throw new IllegalStateException(message)
       case method => {
@@ -48,6 +49,19 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
       }.asInstanceOf[EVT]
     }
   }
+  private[this] lazy val encoderEvents = getClass.getMethods.flatMap { m =>
+    val EvtClass = classTag[EVT].runtimeClass
+    val FmtClass = classTag[SF].runtimeClass
+    val argTypes = m.getParameterTypes
+    if (argTypes.length == 1 &&
+      EvtClass.isAssignableFrom(argTypes(0)) &&
+      EvtClass != argTypes(0) &&
+      FmtClass.isAssignableFrom(m.getReturnType)) {
+      val evtType = argTypes(0).asInstanceOf[Class[EVT]]
+      Some(codec.name(evtType) -> evtType)
+    } else None
+  }.toMap
+
   private[this] lazy val decoderMethods: JMap[String, Method] = {
     val noVersion = codec.isInstanceOf[NoVersioning[_, _]]
     val argCount = if (noVersion) 1 else 2
@@ -71,16 +85,6 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
             s"""Event "$evtName" has ambiguous decoding by the following methods:$methodsString""")
       }
     }
-    val encoderEvents = getClass.getMethods.flatMap { m =>
-      val argTypes = m.getParameterTypes
-      if (argTypes.length == 1 &&
-        EvtClass.isAssignableFrom(argTypes(0)) &&
-        EvtClass != argTypes(0) &&
-        FmtClass.isAssignableFrom(m.getReturnType)) {
-        val evtType = argTypes(0).asInstanceOf[Class[EVT]]
-        Some(codec.name(evtType))
-      } else None
-    }.toSet
     val decoderMethodsByName = decoderMethods.foldLeft(new JMap[String, Method]) {
       case (jmap, (name, method)) => jmap.put(name, method); jmap
     }
