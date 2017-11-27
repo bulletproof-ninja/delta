@@ -89,7 +89,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
       case (jmap, (name, method)) => jmap.put(name, method); jmap
     }
     assert(decoderMethodsByName.size == decoderMethods.size)
-    val missingDecoders = encoderEvents.filterNot(decoderMethodsByName.containsKey)
+    val missingDecoders = encoderEvents.keys.filterNot(decoderMethodsByName.containsKey)
     if (missingDecoders.nonEmpty) {
       val missing = missingDecoders.mkString("[", ", ", "]")
       throw new IllegalStateException(s"No decoder methods found in ${getClass} for events $missing")
