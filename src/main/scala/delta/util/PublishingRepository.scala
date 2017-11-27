@@ -12,9 +12,9 @@ import delta.ddd.ImmutableState
   * repositories, while still publishing events.
   */
 abstract class PublishingRepository[ID, T <: AnyRef, EVT](
-    val impl: Repository[ID, T] with ImmutableState[ID, T],
+    val impl: Repository[ID, T] with ImmutableState[T],
     publishCtx: ExecutionContext)
-  extends Repository[ID, (T, List[EVT])] with ImmutableState[ID, (T, List[EVT])] {
+  extends Repository[ID, (T, List[EVT])] with ImmutableState[(T, List[EVT])] {
 
   final type E = (T, List[EVT])
 

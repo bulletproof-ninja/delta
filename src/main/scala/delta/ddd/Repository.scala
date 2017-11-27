@@ -77,16 +77,16 @@ sealed trait Updates[ID, S] {
 
 }
 
-trait MutableState[ID, S] {
-  repo: Repository[ID, S] =>
+trait MutableState {
+  repo: Repository[_, _] =>
 
   type UT[R] = R
   type UM[R] = (R, Int)
 
 }
 
-trait ImmutableState[ID, S] {
-  repo: Repository[ID, S] =>
+trait ImmutableState[S] {
+  repo: Repository[_, S] =>
 
   type UT[_] = S
   type UM[_] = Int

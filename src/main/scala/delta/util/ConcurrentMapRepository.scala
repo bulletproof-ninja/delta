@@ -13,7 +13,7 @@ import delta.ddd.ImmutableState
   */
 class ConcurrentMapRepository[K, V <: AnyRef](
     map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
-  extends Repository[K, V] with ImmutableState[K, V] {
+  extends Repository[K, V] with ImmutableState[V] {
 
   def insert(id: K, entity: V, metadata: Map[String, String]): Future[Int] = Future {
     map.putIfAbsent(id, entity -> 0) match {

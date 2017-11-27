@@ -34,7 +34,7 @@ class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, E](
     snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
     assumeCurrentSnapshots: Boolean = false)(
     implicit exeCtx: ExecutionContext, ticker: Ticker)
-  extends Repository[ID, E] with MutableState[ID, E] {
+  extends Repository[ID, E] with MutableState {
 
   private val repo = new EventStoreRepository(channel, entity.newMutator, snapshots, assumeCurrentSnapshots)(eventStore)
 
