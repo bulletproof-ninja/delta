@@ -49,7 +49,7 @@ trait CollateralState[ID, EVT, S]
     *  and the associated processing function.
     *  @param streamId The stream id of event
     *  @param streamRevision If duplicate processing is not idempotent, this can be used
-    *  @param tick If causal ordering is unavoidable, use this
+    *  @param tick If causal ordering is necessary, use this
     *  @param evt Event from stream
     *  @return Map of collateral id and state processor(s) derivable from event, if any.
     */
