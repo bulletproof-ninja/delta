@@ -58,6 +58,18 @@ package object mongo {
       byName apply stringCodec.decode(reader, decoderContext)
     }
   }
+  def ScalaEnumCodec[E <: Enumeration](enum: E): Codec[E#Value] = new Codec[E#Value] {
+    val getEncoderClass = enum.values.head.getClass.asInstanceOf[Class[E#Value]]
+    private[this] val byName = enum.values.foldLeft(Map.empty[String, E#Value]) {
+      case (map, enum) => map.updated(enum.toString, enum)
+    }
+    def encode(writer: BsonWriter, value: E#Value, encoderContext: EncoderContext) {
+      stringCodec.encode(writer, value.toString, encoderContext)
+    }
+    def decode(reader: BsonReader, decoderContext: DecoderContext): E#Value = {
+      byName apply stringCodec.decode(reader, decoderContext)
+    }
+  }
 
   def withFutureCallback[R](
       thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {
