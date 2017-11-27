@@ -60,7 +60,7 @@ package object mongo {
   }
 
   def withFutureCallback[R](
-    thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {
+      thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {
     val promise = Promise[Option[R]]
     var used = false
       def callback = if (!used) new SingleResultCallback[R] {
@@ -76,7 +76,7 @@ package object mongo {
   }
 
   def withBlockingCallback[R](
-    timeout: FiniteDuration = 30.seconds)(
+      timeout: FiniteDuration = 30.seconds)(
       thunk: (=> SingleResultCallback[R]) => Unit): Option[R] = {
     val queue = new ArrayBlockingQueue[Try[R]](1)
     var used = false
