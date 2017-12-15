@@ -55,9 +55,9 @@ private[delta] object NoVersioning {
 }
 
 class EventCodecAdapter[EVT, A, B](
-  fmtCodec: Codec[B, A])(
+    fmtCodec: Codec[B, A])(
     implicit evtCodec: EventCodec[EVT, B])
-    extends EventCodec[EVT, A] {
+  extends EventCodec[EVT, A] {
 
   def nameOf(cls: EventClass) = evtCodec name cls
   def versionOf(cls: EventClass) = evtCodec version cls

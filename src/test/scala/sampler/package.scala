@@ -50,10 +50,10 @@ package object sampler {
   implicit def id2int(id: Id[_]) = id.int
 
   implicit object JsonDomainEventCodec
-      extends ReflectiveDecoder[DomainEvent, JSON]
-      with AbstractEventCodec[JSON]
-      with aggr.emp.JsonCodec
-      with aggr.dept.JsonCodec {
+    extends ReflectiveDecoder[DomainEvent, JSON]
+    with AbstractEventCodec[JSON]
+    with aggr.emp.JsonCodec
+    with aggr.dept.JsonCodec {
 
     override type Return = JSON
 
