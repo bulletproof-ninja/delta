@@ -24,7 +24,7 @@ private[cassandra] object CassandraEventStore {
       case (key, cls: Class[_]) => s"'$key':'${cls.getName}'"
       case (key, any) => s"'$key':$any"
     }.mkString("{", ",", "}")
-      def cqlName[T: ColumnType]: String = implicitly[ColumnType[ID]].typeName
+      def cqlName[T: ColumnType]: String = implicitly[ColumnType[T]].typeName
     session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH REPLICATION = $replicationStr")
     session.execute(s"""
       CREATE TABLE IF NOT EXISTS $keyspace.$table (
