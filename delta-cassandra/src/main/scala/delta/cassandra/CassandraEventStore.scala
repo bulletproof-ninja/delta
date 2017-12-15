@@ -1,6 +1,7 @@
 package delta.cassandra
 
 import java.util.{ ArrayList, List => JList }
+import java.lang.{ Byte => JByte }
 
 import scala.{ Left, Right }
 import scala.collection.JavaConverters._
@@ -108,7 +109,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       }
     }
     val eventNames = row.getList(columns.event_names, classOf[String])
-    val eventVersions = row.getList(columns.event_versions, classOf[Byte])
+    val eventVersions = row.getList(columns.event_versions, classOf[JByte])
     val eventData = row.getList(columns.event_data, ct[SF].jvmType)
     val events = fromJLists(eventNames, eventVersions, eventData)
     Transaction(tick, channel, stream, revision, metadata, events)
@@ -160,7 +161,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     }
   }
 
-  private def fromJLists(types: JList[String], vers: JList[Byte], data: JList[SF]): List[EVT] = {
+  private def fromJLists(types: JList[String], vers: JList[JByte], data: JList[SF]): List[EVT] = {
     val size = types.size
     assert(vers.size == size && data.size == size)
     var idx = size - 1
@@ -171,9 +172,9 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     }
     list
   }
-  private def toJLists(events: List[EVT]): (JList[String], JList[Int], JList[SF]) = {
+  private def toJLists(events: List[EVT]): (JList[String], JList[JByte], JList[SF]) = {
     val types = new ArrayList[String](8)
-    val typeVers = new ArrayList[Int](8)
+    val typeVers = new ArrayList[JByte](8)
     val data = new ArrayList[SF](8)
     events.foreach { evt =>
       types add codec.name(evt)
