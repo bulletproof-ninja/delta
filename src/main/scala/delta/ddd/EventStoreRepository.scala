@@ -33,7 +33,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     assumeCurrentSnapshots: Boolean = false)(
     es: EventStore[ESID, _ >: EVT, CH])(
     implicit exeCtx: ExecutionContext, ticker: Ticker)
-  extends Repository[RID, (S, List[EVT])] with ImmutableState[(S, List[EVT])] {
+  extends Repository[RID, (S, List[EVT])] with ImmutableEntity[(S, List[EVT])] {
 
   private type Snapshot = delta.Snapshot[S]
   private type Mutator = StateMutator { type Event = EVT; type State = S }

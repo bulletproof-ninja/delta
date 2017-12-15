@@ -5,7 +5,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 
 import delta.ddd.{ DuplicateIdException, Repository, Revision, UnknownIdException }
 import scuff.concurrent.{ ScuffScalaFuture, Threads }
-import delta.ddd.ImmutableState
+import delta.ddd.ImmutableEntity
 
 /**
   * Repository backed by concurrent map.
@@ -13,7 +13,7 @@ import delta.ddd.ImmutableState
   */
 class ConcurrentMapRepository[K, V <: AnyRef](
     map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
-  extends Repository[K, V] with ImmutableState[V] {
+  extends Repository[K, V] with ImmutableEntity[V] {
 
   def insert(id: K, entity: V, metadata: Map[String, String]): Future[Int] = Future {
     map.putIfAbsent(id, entity -> 0) match {

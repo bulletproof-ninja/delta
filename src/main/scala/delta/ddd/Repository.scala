@@ -34,14 +34,14 @@ trait Repository[ID, E] extends Updates[ID, E] {
   def insert(id: ID, entity: E, metadata: Map[String, String] = Map.empty): Future[Int]
 }
 
-sealed trait Updates[ID, S] {
+sealed trait Updates[ID, E] {
   type UT[_]
   type UM[_]
 
   protected def update[R](
       expectedRevision: Revision, id: ID,
       metadata:    Map[String, String],
-      updateThunk: (S, Int) => Future[UT[R]]): Future[UM[R]]
+      updateThunk: (E, Int) => Future[UT[R]]): Future[UM[R]]
 
   /**
     * Update entity.
@@ -54,10 +54,10 @@ sealed trait Updates[ID, S] {
     */
   final def update[R](
       id: ID, expectedRevision: Revision = Revision.Latest, metadata: Map[String, String] = Map.empty)(
-      updateThunk: (S, Int) => Future[UT[R]]): Future[UM[R]] = {
-    val proxy = (state: S, revision: Int) => {
+      updateThunk: (E, Int) => Future[UT[R]]): Future[UM[R]] = {
+    val proxy = (entity: E, revision: Int) => {
       expectedRevision.validate(revision)
-      updateThunk(state, revision)
+      updateThunk(entity, revision)
     }
     update(expectedRevision, id, metadata, proxy)
   }
@@ -72,12 +72,12 @@ sealed trait Updates[ID, S] {
     */
   final def update[R](
       id: ID, metadata: Map[String, String])(
-      updateThunk: (S, Int) => Future[UT[R]]): Future[UM[R]] =
+      updateThunk: (E, Int) => Future[UT[R]]): Future[UM[R]] =
     update(id, Revision.Latest, metadata)(updateThunk)
 
 }
 
-trait MutableState {
+trait MutableEntity {
   repo: Repository[_, _] =>
 
   type UT[R] = R
@@ -85,10 +85,10 @@ trait MutableState {
 
 }
 
-trait ImmutableState[S] {
-  repo: Repository[_, S] =>
+trait ImmutableEntity[E] {
+  repo: Repository[_, E] =>
 
-  type UT[_] = S
+  type UT[_] = E
   type UM[_] = Int
 
 }

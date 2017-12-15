@@ -99,7 +99,7 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 
   @volatile var es: EventStore[String, AggrEvent, Unit] = _
-  @volatile var repo: Repository[String, Aggr] with MutableState = _
+  @volatile var repo: Repository[String, Aggr] with MutableEntity = _
 
   private def doAsync(f: Promise[Any] => Unit) {
     val something = Promise[Any]

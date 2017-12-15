@@ -5,16 +5,16 @@ import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
 import delta.ddd.Repository
 import delta.ddd.Revision
-import delta.ddd.ImmutableState
+import delta.ddd.ImmutableEntity
 
 /**
   * [[delta.ddd.Repository]] wrapper for non-event-sourced
   * repositories, while still publishing events.
   */
 abstract class PublishingRepository[ID, T <: AnyRef, EVT](
-    val impl: Repository[ID, T] with ImmutableState[T],
+    val impl: Repository[ID, T] with ImmutableEntity[T],
     publishCtx: ExecutionContext)
-  extends Repository[ID, (T, List[EVT])] with ImmutableState[(T, List[EVT])] {
+  extends Repository[ID, (T, List[EVT])] with ImmutableEntity[(T, List[EVT])] {
 
   final type E = (T, List[EVT])
 
