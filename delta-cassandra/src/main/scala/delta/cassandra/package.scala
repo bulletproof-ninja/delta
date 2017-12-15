@@ -99,9 +99,10 @@ package object cassandra {
     }
 
   implicit object UnitColumn extends ColumnType[Unit] {
-    def typeName = "boolean"
+    private[this] val Zero = java.lang.Byte.valueOf(0: Byte)
+    def typeName = "tinyint"
     def readFrom(row: Row, col: Int): Unit = ()
-    override def writeAs(unit: Unit) = java.lang.Boolean.FALSE
+    override def writeAs(unit: Unit) = Zero
   }
 
 }
