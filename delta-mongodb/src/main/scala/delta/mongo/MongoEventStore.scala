@@ -206,8 +206,9 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
       writeArray("events", writer) {
         txn.events.foreach { evt =>
           writeDocument(writer) {
-            writer.writeString("name", codec.name(evt))
-            writer.writeInt32("v", codec.version(evt).unsigned)
+            val (name, version) = codec signature evt
+            writer.writeString("name", name)
+            writer.writeInt32("v", version.unsigned)
             writer.writeName("data"); docCodec.encode(writer, codec.encode(evt), ctx)
           }
         }

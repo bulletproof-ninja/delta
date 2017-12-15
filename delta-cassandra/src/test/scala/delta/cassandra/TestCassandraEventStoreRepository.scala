@@ -18,8 +18,9 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
       with EventCodec[AggrEvent, String]
       with AggrEventHandler {
     type Return = String
-    def name(cls: EventClass) = cls.getSimpleName
-    def version(cls: EventClass) = scuff.serialVersionUID(cls).toByte
+
+    def nameOf(cls: EventClass) = cls.getSimpleName
+    def versionOf(cls: EventClass) = scuff.serialVersionUID(cls).toByte
 
     protected def evtTag = classTag[AggrEvent]
     protected def fmtTag = classTag[String]

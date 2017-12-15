@@ -177,8 +177,9 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     val typeVers = new ArrayList[JByte](8)
     val data = new ArrayList[SF](8)
     events.foreach { evt =>
-      types add codec.name(evt)
-      typeVers add codec.version(evt)
+      val (name, version) = codec signature evt
+      types add name
+      typeVers add version
       data add codec.encode(evt)
     }
     (types, typeVers, data)

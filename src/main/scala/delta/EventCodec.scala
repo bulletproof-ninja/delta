@@ -6,13 +6,23 @@ trait EventCodec[EVT, SF] {
 
   type EventClass = Class[_ <: EVT]
 
-  def name(evt: EVT): String = name(evt.getClass)
-  def version(evt: EVT): Byte = version(evt.getClass)
+  final def name(evt: EVT): String = signature(evt.getClass)._1
+  final def version(evt: EVT): Byte = signature(evt.getClass)._2
+  final def signature(evt: EVT): (String, Byte) = signature(evt.getClass)
+  final def signature(cls: EventClass): (String, Byte) = signatures.get(cls)
+  final def name(cls: EventClass): String = signature(cls)._1
+  final def version(cls: EventClass): Byte = signature(cls)._2
+  private[this] val signatures = new ClassValue[(String, Byte)] {
+    def computeValue(cls: Class[_]) = {
+      val evtCls = cls.asInstanceOf[EventClass]
+      nameOf(evtCls) -> versionOf(evtCls)
+    }
+  }
 
   /** Unique name of event. */
-  def name(cls: EventClass): String
+  protected def nameOf(cls: EventClass): String
   /** Event version number. Must be strictly > 0. */
-  def version(cls: EventClass): Byte
+  protected def versionOf(cls: EventClass): Byte
 
   /** Encode event data. */
   def encode(evt: EVT): SF
@@ -29,8 +39,7 @@ trait EventCodec[EVT, SF] {
 trait NoVersioning[EVT, SF] {
   codec: EventCodec[EVT, SF] =>
 
-  final def version(evt: EventClass) = NoVersioning.NoVersion
-  override final def version(evt: EVT) = NoVersioning.NoVersion
+  final def versionOf(evt: EventClass) = NoVersioning.NoVersion
 
   override final def decode(name: String, version: Byte, data: SF): EVT = {
     if (version != NoVersioning.NoVersion) {
@@ -50,8 +59,8 @@ class EventCodecAdapter[EVT, A, B](
     implicit evtCodec: EventCodec[EVT, B])
     extends EventCodec[EVT, A] {
 
-  def name(cls: EventClass) = evtCodec name cls
-  def version(cls: EventClass) = evtCodec version cls
+  def nameOf(cls: EventClass) = evtCodec name cls
+  def versionOf(cls: EventClass) = evtCodec version cls
 
   def encode(evt: EVT): A = fmtCodec encode evtCodec.encode(evt)
   def decode(name: String, version: Byte, data: A): EVT = evtCodec.decode(name, version, fmtCodec decode data)

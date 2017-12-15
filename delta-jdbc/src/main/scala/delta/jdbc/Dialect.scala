@@ -166,9 +166,10 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       ps.setInt(2, rev)
       events.iterator.zipWithIndex.foreach {
         case (evt, idx) =>
+          val (name, version) = codec signature evt
           ps.setByte(3, idx.toByte)
-          ps.setString(4, codec name evt)
-          ps.setByte(5, codec version evt)
+          ps.setString(4, name)
+          ps.setByte(5, version)
           ps.setValue(6, codec encode evt)
           if (isBatch) ps.addBatch()
       }

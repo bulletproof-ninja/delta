@@ -14,18 +14,14 @@ package sampler {
   case class Id[T](int: Int = Random.nextInt)
 
   trait AbstractEventCodec[SF]
-      extends EventCodec[DomainEvent, SF] {
+    extends EventCodec[DomainEvent, SF] {
 
-    private[this] val evtName = new ClassValue[String] {
-      def computeValue(cls: Class[_]) = {
-        val fullName = cls.getName
-        val sepIdx = fullName.lastIndexOf('.', fullName.lastIndexOf('.') - 1)
-        fullName.substring(sepIdx + 1)
-      }
+    def nameOf(cls: EventClass): String = {
+      val fullName = cls.getName
+      val sepIdx = fullName.lastIndexOf('.', fullName.lastIndexOf('.') - 1)
+      fullName.substring(sepIdx + 1)
     }
-
-    def name(cls: EventClass): String = evtName.get(cls)
-    def version(cls: EventClass): Byte = serialVersionUID(cls).toByte
+    def versionOf(cls: EventClass): Byte = serialVersionUID(cls).toByte
 
   }
 

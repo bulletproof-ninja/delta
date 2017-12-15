@@ -349,7 +349,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
 
     import rapture.json._, jsonBackends.jackson._
 
-    def name(cls: EventClass): String = cls.getSimpleName
+    def nameOf(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
       case AggrCreated(status) => json""" { "status": $status } """.toBareString
@@ -390,7 +390,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     import rapture.json._, jsonBackends.jackson._
 
-    def name(cls: EventClass): String = cls.getSimpleName
+    def nameOf(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
