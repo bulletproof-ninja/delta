@@ -10,7 +10,6 @@ import delta.ddd.EntityRepository
 import delta._
 import delta.testing._
 
-@Ignore
 class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStoreRepositoryTest {
 
   implicit object AggrEventCodec
