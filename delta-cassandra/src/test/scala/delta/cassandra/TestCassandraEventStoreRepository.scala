@@ -45,7 +45,7 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     }
   }
 
-  val Keyspace = s"${getClass.getPackage.getName}"
+  val Keyspace = s"${getClass.getPackage.getName}".replace(".", "_")
   val Table = getClass.getSimpleName
 
   object TableDescriptor extends TableDescriptor {
