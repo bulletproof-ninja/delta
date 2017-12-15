@@ -370,8 +370,8 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
   private val RecordFirstRevision = {
     val ps = session.prepare(s"""
       INSERT INTO $TableName
-      (stream_id, tick, event_name, event_versions, event_data, metadata, channel, revision)
-      VALUES(?,?,?,?,?,?,?,0) IF NOT EXISTS""").setConsistencyLevel(ConsistencyLevel.SERIAL)
+      (stream_id, tick, event_names, event_versions, event_data, metadata, channel, revision)
+      VALUES(?,?,?,?,?,?,?,0) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, channel: CH, tick: Long, events: List[EVT], metadata: Map[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
@@ -385,8 +385,8 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
   private val RecordLaterRevision = {
     val ps = session.prepare(s"""
       INSERT INTO $TableName
-      (stream_id, tick, event_name, event_versions, event_data, metadata, revision)
-      VALUES(?,?,?,?,?,?,?) IF NOT EXISTS""").setConsistencyLevel(ConsistencyLevel.SERIAL)
+      (stream_id, tick, event_names, event_versions, event_data, metadata, revision)
+      VALUES(?,?,?,?,?,?,?) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, revision: Int, tick: Long, events: List[EVT], metadata: Map[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
