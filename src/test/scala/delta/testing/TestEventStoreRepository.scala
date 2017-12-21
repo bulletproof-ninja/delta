@@ -390,24 +390,29 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     import rapture.json._, jsonBackends.jackson._
 
-    def nameOf(cls: EventClass): String = cls.getSimpleName
+    override def isMethodNameEventName = true
+    def nameOf(cls: EventClass): String = {
+      val lastDot = cls.getName.lastIndexOf('.')
+      val nextDot = cls.getName.lastIndexOf('.', lastDot - 1)
+      cls.getName.substring(nextDot + 1)
+    }
 
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
     def on(evt: AggrCreated): Return = json""" { "status": ${evt.status} } """.toBareString
-    def decodeAggrCreated(json: String): AggrCreated = {
+    def `testing.AggrCreated`(json: String): AggrCreated = {
       val ast = Json.parse(json)
       AggrCreated(status = ast.status.as[String])
     }
 
     def on(evt: NewNumberWasAdded): Return = json""" { "num": ${evt.n} } """.toBareString
-    def decodeNewNumberWasAdded(json: String): NewNumberWasAdded = {
+    def `testing.NewNumberWasAdded`(json: String): NewNumberWasAdded = {
       val ast = Json.parse(json)
       NewNumberWasAdded(n = ast.num.as[Int])
     }
 
     def on(evt: StatusChanged): Return = json""" { "status": ${evt.newStatus} } """.toBareString
-    def decodeStatusChanged(json: String): StatusChanged = {
+    def `testing.StatusChanged`(json: String): StatusChanged = {
       val ast = Json.parse(json)
       StatusChanged(newStatus = ast.status.as[String])
     }

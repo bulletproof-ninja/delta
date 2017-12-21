@@ -6,6 +6,7 @@ import delta.EventCodec
 import scala.compat.Platform
 import delta.NoVersioning
 import java.util.{ HashMap => JMap }
+import scala.reflect.NameTransformer
 
 /**
   * Will look for event decode methods, which must match
@@ -30,7 +31,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
     */
   protected def isMethodNameEventName: Boolean = false
   private def eventName(method: Method): String =
-    if (isMethodNameEventName) method.getName
+    if (isMethodNameEventName) NameTransformer decode method.getName
     else codec.name(method.getReturnType.asInstanceOf[Class[EVT]])
 
   private def decoder(evtName: String, data: SF, version: Byte = NoVersioning.NoVersion): EVT = {
