@@ -5,7 +5,7 @@
 
 # Delta [![Build Status](https://semaphoreci.com/api/v1/bulletproof-ninja/delta/branches/master/badge.svg)](https://semaphoreci.com/bulletproof-ninja/delta)
 
-![Delta](https://imgur.com/gjBAIKw)
+![Delta](https://i.imgur.com/gjBAIKw.png)
 
 DDD-centric event-sourcing library for Scala.
 
