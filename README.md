@@ -3,7 +3,7 @@
 [ ![Download](https://api.bintray.com/packages/bulletproof-ninja/maven/Delta/images/download.svg) ](https://bintray.com/bulletproof-ninja/maven/Delta/_latestVersion#files)
 [![Join Chat at https://gitter.im/bulletproof-ninja/delta](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/bulletproof-ninja/delta)
 
-# Delta [![Build Status](https://semaphoreci.com/api/v1/nilskp/delta/branches/master/badge.svg)](https://semaphoreci.com/nilskp/delta)
+# Delta [![Build Status](https://semaphoreci.com/api/v1/bulletproof-ninja/delta/branches/master/badge.svg)](https://semaphoreci.com/bulletproof-ninja/delta)
 
 ![Delta](https://imgur.com/gjBAIKw)
 
