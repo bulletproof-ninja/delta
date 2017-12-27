@@ -270,18 +270,11 @@ AND t.tick = (
 
   private def conditionalWrite(key: ID)(write: (Connection, Option[Snapshot]) => Boolean): Future[Option[Snapshot]] =
     futureUpdate { conn =>
-      val configuredIsolation = conn.getTransactionIsolation
-      conn setTransactionIsolation Connection.TRANSACTION_SERIALIZABLE
-      try {
-        val existing: Option[Snapshot] = getAll(conn, List(key)).get(key)
-        if (write(conn, existing)) None
-        else {
-          conn.rollback()
-          existing
-        }
-      } finally {
-        Try(conn.commit)
-        conn setTransactionIsolation configuredIsolation
+      val existing: Option[Snapshot] = getAll(conn, List(key)).get(key)
+      if (write(conn, existing)) None
+      else {
+        conn.rollback()
+        existing
       }
     }
 
