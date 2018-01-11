@@ -49,10 +49,17 @@ trait MonotonicProcessor[ID, EVT, S]
   }
   private def forceInactive(stream: ID, unapplied: List[TXN]): Unit = {
     assert(unapplied.nonEmpty)
-    val active @ Active(newUnapplied) = streamStatus(stream)
-    val allUnapplied = unapplied ++ newUnapplied
-    if (!streamStatus.replace(stream, active, Inactive(allUnapplied))) {
-      forceInactive(stream, allUnapplied)
+    streamStatus(stream) match {
+      case status @ Active(newUnapplied) =>
+        val allUnapplied = (unapplied ++ newUnapplied).distinct
+        if (!streamStatus.replace(stream, status, Inactive(allUnapplied))) {
+          forceInactive(stream, allUnapplied)
+        }
+      case status @ Inactive(newUnapplied) =>
+        val allUnapplied = (unapplied ++ newUnapplied).distinct
+        if (!streamStatus.replace(stream, status, Inactive(allUnapplied))) {
+          forceInactive(stream, allUnapplied)
+        }
     }
   }
   /** Set inactive. An empty list indicates success. */
