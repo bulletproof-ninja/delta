@@ -27,8 +27,11 @@ trait MonotonicProcessor[ID, EVT, S]
   protected def executionContext(id: ID): ExecutionContext
 
   sealed private abstract class StreamStatus
-  private final case class Inactive(unapplied: List[TXN]) extends StreamStatus
+  /** Currently being processed. */
   private final case class Active(unapplied: List[TXN]) extends StreamStatus
+  /** Not currently being processed. */
+  private final case class Inactive(unapplied: List[TXN]) extends StreamStatus
+
   private final val ActiveNil = Active(Nil)
   /** Set active. A non-empty list indicates success. */
   private def setActive(txn: TXN): List[TXN] = {
