@@ -50,8 +50,6 @@ allprojects {
         compileOnly "org.scala-lang:scala-reflect:$vScalaFull"
         testCompile "org.scala-lang:scala-reflect:$vScalaFull"
         testCompile "junit:junit:4.+"
-        testCompile "org.mockito:mockito-all:1.10.+"
-        testCompile "com.propensive:rapture-json-jackson_$vScala:2.0.0-M8"
     }
 
 	tasks.withType(Jar) {
