@@ -139,7 +139,7 @@ project(':delta-mongodb') {
 }
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.7.5"
+        compile "com.hazelcast:hazelcast:3.9.3"
     }
 }
 project(':delta-redis') {
