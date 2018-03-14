@@ -3,5 +3,4 @@ include 'delta-cassandra',
         'delta-mongodb', 
         'delta-hazelcast', 
         'delta-redis',
-        'delta-rethinkdb',
         'delta-java'
