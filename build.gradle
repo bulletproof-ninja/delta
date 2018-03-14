@@ -133,8 +133,8 @@ project(':delta-jdbc') {
 }
 project(':delta-mongodb') {
     dependencies {
-        compile "org.mongodb:mongodb-driver-async:3.4.3"
-        compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.1.0"
+        compile "org.mongodb:mongodb-driver-async:3.6.2"
+        compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.2.0"
     }
 }
 project(':delta-hazelcast') {
