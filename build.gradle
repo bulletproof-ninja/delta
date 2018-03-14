@@ -8,7 +8,7 @@ ext {
         '2.12': '2.12.4'
     ]
 
-    vScala = System.properties.scalaVersion ?: '2.11'
+    vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
     vScuff = '1.8.0'
     vScalaTest = '3.0.4'
