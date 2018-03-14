@@ -10,7 +10,7 @@ ext {
 
     vScala = System.properties.scalaVersion ?: '2.11'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '1.5.5'
+    vScuff = '1.8.0'
     vScalaTest = '3.0.4'
 }
 
