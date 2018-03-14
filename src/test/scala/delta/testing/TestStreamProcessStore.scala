@@ -3,8 +3,7 @@ package delta.testing
 import org.junit._, Assert._
 import delta.Snapshot
 import scala.collection.concurrent.TrieMap
-import delta.util.StreamProcessStore
-import delta.util.ConcurrentMapStore
+import delta.util._
 import scala.concurrent.Future
 
 case class TestKey(long: Long, int: Int)
@@ -13,7 +12,8 @@ class TestStreamProcessStore {
 
   implicit val ec = RandomDelayExecutionContext
 
-  def newStore: StreamProcessStore[Long, String] = new ConcurrentMapStore(new TrieMap, _ => Future successful None)
+  def newStore: StreamProcessStore[Long, String] =
+    new ConcurrentMapStore[Long, String](new TrieMap)(_ => Future successful None)
 
   @Test
   def foo() {

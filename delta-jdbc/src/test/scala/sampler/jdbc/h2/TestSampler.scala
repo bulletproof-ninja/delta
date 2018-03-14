@@ -12,10 +12,11 @@ import sampler.aggr.DomainEvent
 import sampler.jdbc.AggrRootColumn
 import delta.jdbc._
 import delta.jdbc.h2._
-import delta.util.LocalPublishing
+import delta.util.LocalPublisher
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
+import delta.Publishing
 
 object TestSampler {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
@@ -36,9 +37,9 @@ final class TestSampler extends sampler.TestSampler {
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore(sql, RandomDelayExecutionContext)
-      with LocalPublishing[Int, DomainEvent, Aggr.Value]
+      with Publishing[Int, DomainEvent, Aggr.Value]
       with DataSourceConnection {
-      protected def publishCtx = RandomDelayExecutionContext
+      val publisher = new LocalPublisher[Int, DomainEvent, Aggr.Value](RandomDelayExecutionContext)
       protected def dataSource = ds
     }.ensureSchema()
   }

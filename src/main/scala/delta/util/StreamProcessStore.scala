@@ -43,6 +43,11 @@ trait StreamProcessStore[K, S] extends SnapshotStore[K, S] {
     read(key).flatMap(upsertRecursive(key, _, updateThunk))
   }
 
+  /**
+   * Snapshot update.
+   * @param snapshot The snapshot, content, revision, and tick
+   * @param contentUpdated `true` if snapshot content was updated, `false` if only revision and/or tick
+   */
   final case class Update(snapshot: Snapshot, contentUpdated: Boolean)
 
   /** Update and return updated snapshot, if any. */

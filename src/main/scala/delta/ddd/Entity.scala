@@ -1,43 +1,50 @@
 package delta.ddd
 
+import delta.EventReducer
+
 /**
   * Type-class for entity.
   */
-trait Entity {
+abstract class Entity[T, S >: Null, EVT](reducer: EventReducer[S, EVT]) {
 
-  type Type
   type Id
-  type Mutator <: StateMutator
 
-  private[ddd] def getMutator(e: Type): Mutator = {
-    val mutator = done(e)
-    checkInvariants(mutator.state)
-    mutator
+  type Entity = T
+  type State = delta.ddd.State[S, EVT]
+  type Event = EVT
+
+  def newState(initState: S = null): State = new State(reducer, initState)
+
+  private[ddd] def getState(e: Entity): State = {
+    val s = state(e)
+    validate(s.curr)
+    s
   }
-  
-  /**
-    * Instantiate new mutator, with existing state or from scratch.
-    * @param state Optional state
-    */
-  def newMutator: Mutator
-  
+
+  private[ddd] def initEntity(initState: S, mergeEvents: List[EVT]): Entity =
+    init(newState(initState), mergeEvents)
+
   /**
     * Initialize entity instance.
     * @param state The internal state
-    * @param mergeEvents Any potential events to merge
+    * @param mergeEVTs Any potential events to merge
     * @return The Entity instance
     */
-  def init(mutator: Mutator, mergeEvents: List[Mutator#Event]): Type
+  protected def init(state: State, mergeEvents: List[Event]): Entity
 
   /**
-    * Get the mutator used for the entity instance.
+    * Get state used by the entity instance.
     * @param instance The instance to get mutator from
     */
-  protected def done(instance: Type): Mutator
+  protected def state(entity: Entity): State
 
   /**
-    * Convenience method for ensuring invariants
-    * are not violated. Defaults to no-op.
+    * Validate invariants. Convenience method
+    * for unifying invariant validation to
+    * a single place. Ideally, checks should happen
+    * at every state transition, but this is not
+    * always convenient.
     */
-  protected def checkInvariants(state: Mutator#State): Unit = ()
+  protected def validate(state: S): Unit
+
 }

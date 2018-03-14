@@ -16,8 +16,8 @@ import scala.reflect.NameTransformer
   * for `NoVersioning` events, the method must take a single
   * argument, `SF`.
   */
-abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
-  codec: EventCodec[EVT, SF] =>
+abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag]
+  extends EventCodec[EVT, SF] {
 
   /**
     * Is method name == event name?
@@ -32,7 +32,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
   protected def isMethodNameEventName: Boolean = false
   private def eventName(method: Method): String =
     if (isMethodNameEventName) NameTransformer decode method.getName
-    else codec.name(method.getReturnType.asInstanceOf[Class[EVT]])
+    else this.name(method.getReturnType.asInstanceOf[Class[EVT]])
 
   private def decoder(evtName: String, data: SF, version: Byte = NoVersioning.NoVersion): EVT = {
     val isVersioned = version != NoVersioning.NoVersion
@@ -59,12 +59,12 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] {
       EvtClass != argTypes(0) &&
       FmtClass.isAssignableFrom(m.getReturnType)) {
       val evtType = argTypes(0).asInstanceOf[Class[EVT]]
-      Some(codec.name(evtType) -> evtType)
+      Some(this.name(evtType) -> evtType)
     } else None
   }.toMap
 
   private[this] lazy val decoderMethods: JMap[String, Method] = {
-    val noVersion = codec.isInstanceOf[NoVersioning[_, _]]
+    val noVersion = this.isInstanceOf[NoVersioning[_, _]]
     val argCount = if (noVersion) 1 else 2
     val ByteClass = classOf[Byte]
     val EvtClass = classTag[EVT].runtimeClass

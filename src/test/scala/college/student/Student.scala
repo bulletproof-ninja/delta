@@ -1,20 +1,16 @@
 package college.student
 
+import college._
 import delta.ddd._
-import college.StudentId
-import delta.Fold
+import delta.EventReducer
 
-object Student extends Entity {
-
+object Student extends Entity[Student, StudentState, StudentEvent](StudentAssembler) {
   type Id = StudentId
-  type Type = Student
-  type Mutator = Student
 
-  def newMutator = new Student
+  def init(state: State, mergeEvents: List[StudentEvent]) = new Student(state)
 
-  def init(student: Student, mergeEvents: List[StudentEvent]) = student
-
-  def done(student: Student) = student
+  def state(student: Student) = student.state
+  def validate(state: StudentState) = require(state != null)
 
   def apply(cmd: RegisterStudent): Student = {
     val student = new Student
@@ -23,32 +19,29 @@ object Student extends Entity {
   }
 }
 
-class Student private () extends StateMutator {
-
-  type Event = StudentEvent
-  type State = college.student.State
-
-  protected val fold = new Fold[State, StudentEvent] {
-    def init(evt: StudentEvent) = evt match {
-      case StudentRegistered(name) => new State(name)
-    }
-    def next(student: State, evt: StudentEvent) = evt match {
-      case StudentChangedName(newName) => student.copy(name = newName)
-    }
-
+object StudentAssembler extends EventReducer[StudentState, StudentEvent] {
+  def init(evt: StudentEvent) = evt match {
+    case StudentRegistered(name) => new StudentState(name)
+  }
+  def next(student: StudentState, evt: StudentEvent) = evt match {
+    case StudentChangedName(newName) => student.copy(name = newName)
   }
 
-  private def student = state
+}
 
-  private def apply(cmd: RegisterStudent) {
+class Student private[student] (val state: Student.State = Student.newState()) {
+
+  private def student = state.curr
+
+  private[student] def apply(cmd: RegisterStudent) {
     require(student == null)
-    apply(StudentRegistered(cmd.name))
+    state(StudentRegistered(cmd.name))
   }
   def apply(cmd: ChangeStudentName) {
     val newName = cmd.newName.trim
     if (newName.length == 0) sys.error("No name supplied")
     if (newName != student.name) {
-      apply(StudentChangedName(newName))
+      state(StudentChangedName(newName))
     }
   }
 

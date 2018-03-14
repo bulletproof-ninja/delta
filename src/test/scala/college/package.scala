@@ -7,7 +7,9 @@ import delta._
 import scuff.JavaSerializer
 
 package college {
-  case class IntId[T](int: Int)
+  case class IntId[T](int: Int) {
+    override val toString = s"$int"
+  }
 
   trait CollegeEvent
 

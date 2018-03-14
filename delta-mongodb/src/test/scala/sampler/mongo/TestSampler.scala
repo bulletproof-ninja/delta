@@ -7,8 +7,9 @@ import com.mongodb.MongoNamespace
 
 import delta.mongo.MongoEventStore
 import delta.testing.RandomDelayExecutionContext
-import delta.util.LocalPublishing
 import sampler.aggr.DomainEvent
+import delta.Publishing
+import delta.util.LocalPublisher
 
 class TestSampler extends sampler.TestSampler {
 
@@ -21,8 +22,8 @@ class TestSampler extends sampler.TestSampler {
       implicit def aggrCodec = AggrRootRegistry.codec
       implicit def evtCdc = BsonDomainEventCodec
     new MongoEventStore[Int, DomainEvent, sampler.Aggr.Value](
-      txnCollection) with LocalPublishing[Int, DomainEvent, sampler.Aggr.Value] {
-      def publishCtx = RandomDelayExecutionContext
+      txnCollection) with Publishing[Int, DomainEvent, sampler.Aggr.Value] {
+      val publisher = new LocalPublisher[Int, DomainEvent, sampler.Aggr.Value](RandomDelayExecutionContext)
     }
   }
 

@@ -1,6 +1,7 @@
 package delta.util
 
-import scala.collection.Map
+import scala.collection.{Map, JavaConverters}
+import JavaConverters._
 import scala.concurrent.Future
 import scala.util.Try
 import scala.util.control.NonFatal
@@ -14,44 +15,57 @@ import scuff.concurrent.Threads
   * save both memory and load time), provide a fallback lookup mechanism for keys
   * not found.
   * @param cmap The concurrent map implementation
-  * @param fallback Optional persistent store fallback, if snapshots are persisted
+  * @param lookupFallback Persistent store fallback
   */
-class ConcurrentMapStore[K, V](
-    cmap: collection.concurrent.Map[K, Option[delta.Snapshot[V]]],
-    fallback: K => Future[Option[delta.Snapshot[V]]])
+final class ConcurrentMapStore[K, V](
+    cmap: collection.concurrent.Map[K, delta.Snapshot[V]])(
+    readFallback: K => Future[Option[delta.Snapshot[V]]])
   extends StreamProcessStore[K, V] {
 
+  def this(
+      cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
+      readFallback: K => Future[Option[delta.Snapshot[V]]]) =
+        this(cmap.asScala)(readFallback)
+
+  private[this] val unknownKeys = new collection.concurrent.TrieMap[K, Unit]
+
   @annotation.tailrec
-  private def trySave(key: K, someSnapshot: Some[Snapshot]): Unit = {
-    cmap.putIfAbsent(key, someSnapshot) match {
+  private def trySave(key: K, snapshot: Snapshot): Option[Snapshot] = {
+    cmap.putIfAbsent(key, snapshot) match {
       case None => // Success
-      case Some(None) =>
-        if (!cmap.replace(key, None, someSnapshot)) {
-          trySave(key, someSnapshot)
-        }
-      case Some(someExisting @ Some(existing)) =>
-        val Some(snapshot) = someSnapshot
+        unknownKeys.remove(key)
+        None
+      case Some(existing) =>
         if (snapshot.revision > existing.revision || (snapshot.revision == existing.revision && snapshot.tick >= existing.tick)) { // replace with later revision
-          if (!cmap.replace(key, someExisting, Some(snapshot))) {
-            trySave(key, someSnapshot)
-          }
+          if (!cmap.replace(key, existing, snapshot)) {
+            trySave(key, snapshot)
+          } else None
         } else {
-          throw Exceptions.writeOlder(key, existing, snapshot)
+          Some(existing)
         }
     }
   }
   def write(key: K, snapshot: Snapshot) = try {
-    trySave(key, Some(snapshot))
-    StreamProcessStore.UnitFuture
+    trySave(key, snapshot) match {
+      case None =>
+        StreamProcessStore.UnitFuture
+      case Some(existing) =>
+        Future failed Exceptions.writeOlder(key, existing, snapshot)
+    }
   } catch {
     case NonFatal(th) => Future failed th
   }
 
   def read(key: K): Future[Option[Snapshot]] = cmap.get(key) match {
-    case Some(found) => Future successful found
+    case found @ Some(_) => Future successful found
     case None =>
-      fallback(key).map { fallbackResult =>
-        cmap.putIfAbsent(key, fallbackResult) getOrElse fallbackResult
+      if (unknownKeys contains key) StreamProcessStore.NoneFuture
+      else readFallback(key).map {
+        case fallbackSnapshot @ Some(snapshot) =>
+          cmap.putIfAbsent(key, snapshot) orElse fallbackSnapshot
+        case None =>
+          unknownKeys.update(key, ())
+          None
       }(Threads.PiggyBack)
   }
 
@@ -76,10 +90,8 @@ class ConcurrentMapStore[K, V](
     StreamProcessStore.UnitFuture
   }
   def refresh(key: K, revision: Int, tick: Long): Future[Unit] = {
-    cmap.get(key).foreach {
-      case Some(snapshot) =>
-        write(key, snapshot.copy(revision = revision, tick = tick))
-      case _ => sys.error(s"Cannot refresh non-existent key: $key")
+    cmap.get(key).foreach { snapshot =>
+      trySave(key, snapshot.copy(revision = revision, tick = tick))
     }
     StreamProcessStore.UnitFuture
   }
@@ -91,18 +103,12 @@ class ConcurrentMapStore[K, V](
   }
 
   def writeIfAbsent(key: K, snapshot: Snapshot): Future[Option[Snapshot]] = {
-    cmap.putIfAbsent(key, Some(snapshot)) match {
-      case None => StreamProcessStore.NoneFuture
-      case Some(None) =>
-        if (cmap.replace(key, None, Some(snapshot))) StreamProcessStore.NoneFuture
-        else writeIfAbsent(key, snapshot)
-      case Some(existing) => Future successful existing
-    }
+    Future successful cmap.putIfAbsent(key, snapshot)
   }
   def writeReplacement(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]] = {
-    if (cmap.replace(key, Some(oldSnapshot), Some(newSnapshot))) StreamProcessStore.NoneFuture
+    if (cmap.replace(key, oldSnapshot, newSnapshot)) StreamProcessStore.NoneFuture
     else cmap.get(key) match {
-      case Some(existing: Some[_]) => Future successful existing
+      case existing @ Some(_) => Future successful existing
       case _ => Future fromTry Try(sys.error(s"Cannot refresh non-existent key: $key"))
     }
   }

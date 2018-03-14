@@ -1,4 +1,4 @@
 package college.student
 
-case class State(
+case class StudentState(
   name: String)

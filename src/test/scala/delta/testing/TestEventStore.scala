@@ -5,9 +5,9 @@ import org.junit.Test
 import org.junit.Assert._
 import scuff.io.{ ByteInputStream, ByteOutputStream }
 import scuff.JavaSerializer
-import delta.util.LocalPublishing
 import delta._
 import delta.NoVersioning
+import delta.util.LocalPublisher
 
 sealed trait Event
 object Event {
@@ -31,8 +31,8 @@ class TestEventStore {
   }
 
   private[this] val es = new util.TransientEventStore[Symbol, Event, String, Array[Byte]](
-      RandomDelayExecutionContext) with LocalPublishing[Symbol, Event, String] {
-    def publishCtx = RandomDelayExecutionContext
+      RandomDelayExecutionContext) with Publishing[Symbol, Event, String] {
+      val publisher = new LocalPublisher[Symbol, Event, String](RandomDelayExecutionContext)
   }
 
   @Test

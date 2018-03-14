@@ -2,6 +2,6 @@ package college.semester
 
 import college.StudentId
 
-case class State(
+case class SemesterState(
   name: String,
   enrolled: Set[StudentId] = Set.empty)

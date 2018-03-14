@@ -11,7 +11,7 @@ import scala.util.control.NoStackTrace
   */
 trait EventStore[ID, EVT, CH]
     extends EventSource[ID, EVT, CH] {
-
+  
   protected def Transaction(
     tick: Long,
     channel: CH,

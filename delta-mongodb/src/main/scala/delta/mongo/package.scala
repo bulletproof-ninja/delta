@@ -4,7 +4,7 @@ import java.util.concurrent.ArrayBlockingQueue
 
 import scala.concurrent.{ Future, Promise, TimeoutException }
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
-import scala.reflect.{ ClassTag, classTag }
+import scala.reflect.{ ClassTag }
 import scala.util.{ Failure, Success, Try }
 
 import org.bson.{ BsonReader, BsonWriter, UuidRepresentation }
@@ -45,19 +45,7 @@ package object mongo {
       reader.readUndefined()
     }
   }
-  implicit def JavaEnumCodec[E <: java.lang.Enum[E]: ClassTag] = new Codec[E] {
-    val getEncoderClass = classTag[E].runtimeClass.asInstanceOf[Class[E]]
-    private[this] val byName =
-      getEncoderClass.getEnumConstants.foldLeft(Map.empty[String, E]) {
-        case (map, enum: E) => map.updated(enum.name, enum)
-      }
-    def encode(writer: BsonWriter, value: E, encoderContext: EncoderContext) {
-      stringCodec.encode(writer, value.name, encoderContext)
-    }
-    def decode(reader: BsonReader, decoderContext: DecoderContext): E = {
-      byName apply stringCodec.decode(reader, decoderContext)
-    }
-  }
+  implicit def JavaEnumCodec[E <: java.lang.Enum[E]: ClassTag] = new JavaEnumCodec[E]
   def ScalaEnumCodec[E <: Enumeration](enum: E): Codec[E#Value] = new Codec[E#Value] {
     val getEncoderClass = enum.values.head.getClass.asInstanceOf[Class[E#Value]]
     private[this] val byName = enum.values.foldLeft(Map.empty[String, E#Value]) {

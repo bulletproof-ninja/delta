@@ -1,34 +1,46 @@
 package delta.redis
 
-import concurrent._, duration._
-
-import redis.clients.jedis.{ BinaryJedis, BinaryJedisPubSub, JedisShardInfo }
-
-import java.util.concurrent.locks.ReentrantReadWriteLock
-import delta.Publishing
-import scuff.concurrent._
-import scala.util.control.NonFatal
+import redis.clients.jedis._
+import scala.concurrent._, duration._
+import delta.Publisher
 import scuff._
+import scuff.concurrent._
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import scala.util.control.NonFatal
 
-/**
-  * Redis pub/sub channel.
-  */
-trait RedisPublishing[ID, EVT, CH]
-    extends Publishing[ID, EVT, CH] {
+final class RedisPublisher[ID, EVT, CH](
+    info: JedisShardInfo,
+    channelEncoder: CH => Array[Byte],
+    allChannels: Set[CH],
+    protected val publishCtx: ExecutionContext,
+    protected val publishCodec: Codec[delta.Transaction[ID, EVT, CH], Array[Byte]] = new scuff.JavaSerializer[delta.Transaction[ID, EVT, CH]])
+  extends Publisher[ID, EVT, CH] {
 
-  protected type PublishTXN = Array[Byte]
-  protected def info: JedisShardInfo
-  protected def allChannels: Set[CH]
-  protected def channelEncoder(ch: CH): Array[Byte]
+  def this(
+      info: JedisShardInfo,
+      allChannels: Array[CH],
+      channelEncoder: CH => Array[Byte],
+      publishCtx: ExecutionContext) =
+    this(info, channelEncoder, allChannels.toSet, publishCtx)
+  def this(
+      info: JedisShardInfo,
+      allChannels: Array[CH],
+      channelEncoder: CH => Array[Byte],
+      publishCtx: ExecutionContext,
+      publishCodec: Codec[delta.Transaction[ID, EVT, CH], Array[Byte]]) =
+    this(info, channelEncoder, allChannels.toSet, publishCtx, publishCodec)
+
+  protected type PublishFormat = Array[Byte]
 
   private val (sharedLock, exclusiveLock, activeSubscribers) = {
     val rwLock = new ReentrantReadWriteLock
     val exclusive = rwLock.writeLock
     (rwLock.readLock, exclusive, exclusive.newCondition)
   }
-  private class FilteredSubscriber(selector: MonotonicSelector, sub: TXN => _) {
+
+  private class FilteredSubscriber(include: TXN => Boolean, sub: TXN => Any) {
     def tell(txn: TXN) =
-      if (selector.include(txn)) {
+      if (include(txn)) {
         publishCtx execute new Runnable {
           def run = sub(txn)
         }
@@ -51,16 +63,14 @@ trait RedisPublishing[ID, EVT, CH]
     pool
   }
 
-  protected def publish(channel: CH, txn: PublishTXN): Unit = jedisPool.use { jedis =>
-    blocking {
+  def publish(stream: ID, channel: CH, txn: Array[Byte]): Unit = blocking {
+    jedisPool.use { jedis =>
       jedis.publish(channelEncoder(channel), txn)
     }
   }
 
-  def subscribe(
-    selector: MonotonicSelector)(
-      callback: TXN => Any): Subscription = {
-    val filteredSub = new FilteredSubscriber(selector, callback)
+  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[CH]): Subscription = {
+    val filteredSub = new FilteredSubscriber(include, callback)
     exclusiveLock {
       if (subscribers.isEmpty) {
         activeSubscribers.signal()

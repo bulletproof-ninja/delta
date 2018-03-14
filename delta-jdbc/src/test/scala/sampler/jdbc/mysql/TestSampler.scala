@@ -11,9 +11,10 @@ import sampler.jdbc._
 import delta.jdbc._
 import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
-import delta.util.LocalPublishing
+import delta.util.LocalPublisher
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
+import delta.Publishing
 
 object TestSampler {
   val db = "delta_testing_sampler"
@@ -39,8 +40,8 @@ final class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     val sql = new MySQLDialect[Int, DomainEvent, Aggr.Value, JSON]
-    new JdbcEventStore(sql, RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] with DataSourceConnection {
-      protected def publishCtx = RandomDelayExecutionContext
+    new JdbcEventStore(sql, RandomDelayExecutionContext) with Publishing[Int, DomainEvent, Aggr.Value] with DataSourceConnection {
+      val publisher = new LocalPublisher[Int, DomainEvent, Aggr.Value](RandomDelayExecutionContext)
       protected def dataSource = TestSampler.ds
     }.ensureSchema()
   }

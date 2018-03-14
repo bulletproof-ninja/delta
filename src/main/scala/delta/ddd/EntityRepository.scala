@@ -13,7 +13,7 @@ import delta.SnapshotStore
   * @tparam CH Channel type
   * @tparam S Repository state type
   * @tparam ID Repository id type. Must be the same as, or translatable to, the event store id type
-  * @tparam E The entity type
+  * @tparam ET The entity type
   * @param channel The channel
   * @param entity Entity type class
   * @param eventStore The event store implementation
@@ -27,47 +27,46 @@ import delta.SnapshotStore
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param ticker Ticker implementation
   */
-class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, E](
+class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, ET](
     channel: CH,
-    entity: Entity { type Type = E; type Id = ID; type Mutator <: StateMutator { type State = S; type Event = EVT } })(
+    entity: Entity[ET, S, EVT] { type Id = ID })(
     eventStore: EventStore[ESID, _ >: EVT, CH],
     snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
     assumeCurrentSnapshots: Boolean = false)(
     implicit exeCtx: ExecutionContext, ticker: Ticker)
-  extends Repository[ID, E] with MutableEntity {
+  extends Repository[ID, ET] with MutableEntity {
 
-  private val repo = new EventStoreRepository(channel, entity.newMutator, snapshots, assumeCurrentSnapshots)(eventStore)
+  private val repo = new EventStoreRepository(channel, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
 
   def exists(id: ID): Future[Option[Int]] = repo.exists(id)
 
-  def load(id: ID): Future[(E, Int)] = {
+  def load(id: ID): Future[(ET, Int)] = {
     repo.load(id).map {
       case ((state, _), revision) =>
-        val mutator = entity.newMutator.init(state)
-        entity.init(mutator, Nil) -> revision
+        entity.initEntity(state, Nil) -> revision
     }(exeCtx)
   }
 
   protected def update[R](
       expectedRevision: Revision, id: ID,
-      metadata: Map[String, String], updateThunk: (E, Int) => Future[R]): Future[(R, Int)] = {
+      metadata: Map[String, String], updateThunk: (ET, Int) => Future[R]): Future[(R, Int)] = {
     @volatile var returnValue = null.asInstanceOf[R]
     val futureRev = repo.update(id, expectedRevision, metadata) {
       case ((state, mergeEvents), revision) =>
-        val instance = entity.init(entity.newMutator.init(state), mergeEvents)
+        val instance = entity.initEntity(state, mergeEvents)
         updateThunk(instance, revision).map { ret =>
           returnValue = ret
-          val mutator = entity.getMutator(instance)
-          mutator.state -> mutator.appliedEvents
+          val state = entity.getState(instance)
+          state.curr -> state.appliedEvents
         }
     }
     futureRev.map(returnValue -> _)
   }
 
-  def insert(id: ID, instance: E, metadata: Map[String, String]): Future[Int] = {
+  def insert(id: ID, instance: ET, metadata: Map[String, String]): Future[Int] = {
     try {
-      val mutator = entity.getMutator(instance)
-      repo.insert(id, mutator.state -> mutator.appliedEvents, metadata)
+      val state = entity.getState(instance)
+      repo.insert(id, state.curr -> state.appliedEvents, metadata)
     } catch {
       case NonFatal(e) => Future failed e
     }

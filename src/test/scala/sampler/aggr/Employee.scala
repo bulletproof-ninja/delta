@@ -19,6 +19,8 @@ case class PromoteEmployee(
 
 object Employee {
 
+  type State = delta.ddd.State[EmpState, EmpEvent]
+
   def apply(cmd: RegisterEmployee): Employee = {
     val name = cmd.name.trim
     require(name.length() > 0)
@@ -26,25 +28,23 @@ object Employee {
     val title = cmd.title.trim
     require(title.length > 0)
     val emp = new Employee
-    emp.mutator(EmployeeRegistered(name, cmd.soch, cmd.dob, cmd.annualSalary, title))
+    emp.state(EmployeeRegistered(name, cmd.soch, cmd.dob, cmd.annualSalary, title))
     emp
   }
 
-  object Def extends Entity {
+  object Def extends Entity[Employee, EmpState, EmpEvent](EmpAssembler) {
     type Id = EmpId
-    type Type = Employee
-    type Mutator = emp.Mutator
-    def newMutator = new emp.Mutator
-    def init(state: Mutator, mergeEvents: List[EmpEvent]) = new Employee(state, mergeEvents)
-    def done(employee: Employee) = employee.mutator
+    def init(state: State, mergeEvents: List[EmpEvent]) = new Employee(state, mergeEvents)
+    def state(employee: Employee) = employee.state
+    def validate(state: EmpState) = require(state != null)
   }
 
 }
 
 class Employee private[aggr] (
-    private[aggr] val mutator: emp.Mutator = new emp.Mutator,
+    private[aggr] val state: Employee.State = Employee.Def.newState(),
     mergeEvents: Seq[EmpEvent] = Nil) {
-  @inline private def emp = mutator.state
+  @inline private def emp = state.curr
 
   def apply(cmd: UpdateSalary): this.type =  {
     checkAndUpdateSalary(cmd.newSalary)
@@ -54,7 +54,7 @@ class Employee private[aggr] (
   private def checkAndUpdateSalary(newSalary: Int) {
     require(newSalary > 0)
     if (newSalary != emp.salary) {
-      mutator(EmployeeSalaryChange(newSalary))
+      state(EmployeeSalaryChange(newSalary))
     }
 
     assert(newSalary == emp.salary)
@@ -63,7 +63,7 @@ class Employee private[aggr] (
     val title = cmd.newTitle.trim
     require(title.length > 0)
     checkAndUpdateSalary(cmd.newSalary)
-    mutator(EmployeeTitleChange(title))
+    state(EmployeeTitleChange(title))
 
     assert(cmd.newSalary == emp.salary)
     assert(cmd.newTitle == emp.title)

@@ -63,8 +63,8 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, Unit, String](
-      session, TableDescriptor) with LocalPublishing[String, AggrEvent, Unit] {
-      def publishCtx = ec
+      session, TableDescriptor) with Publishing[String, AggrEvent, Unit] {
+      val publisher = new LocalPublisher[String, AggrEvent, Unit](RandomDelayExecutionContext)
     }
     repo = new EntityRepository((), TheOneAggr)(es)
   }

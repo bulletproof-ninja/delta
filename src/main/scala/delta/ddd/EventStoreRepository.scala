@@ -4,7 +4,8 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
 import delta.{ EventStore, SnapshotStore, Ticker }
-import scuff.concurrent.{ StreamConsumer, StreamPromise }
+import scuff.StreamConsumer
+import scuff.concurrent.StreamPromise
 
 /**
   * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
@@ -28,7 +29,7 @@ import scuff.concurrent.{ StreamConsumer, StreamPromise }
   */
 class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     channel: CH,
-    newMutator: => StateMutator { type Event = EVT; type State = S },
+    newState: S => State[S, EVT],
     snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
     assumeCurrentSnapshots: Boolean = false)(
     es: EventStore[ESID, _ >: EVT, CH])(
@@ -36,7 +37,6 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
   extends Repository[RID, (S, List[EVT])] with ImmutableEntity[(S, List[EVT])] {
 
   private type Snapshot = delta.Snapshot[S]
-  private type Mutator = StateMutator { type Event = EVT; type State = S }
 
   private[this] val eventStore = es.asInstanceOf[EventStore[ESID, EVT, CH]]
 
@@ -51,13 +51,13 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
       snapshot: Option[Snapshot],
       expectedRevision: Option[Int],
       replayer: StreamConsumer[TXN, Any] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
-    case class Builder(applyEventsAfter: Int, mutator: Mutator, concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
-    val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newMutator.init(snapshot.map(_.content)))
+    case class Builder(applyEventsAfter: Int, state: State[S, EVT], concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
+    val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newState(snapshot.map(_.content).orNull))
     val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
     val futureBuilt = StreamPromise.fold(initBuilder, replayer) {
       case (b, txn) =>
         if (txn.revision > b.applyEventsAfter) {
-          txn.events.foreach(b.mutator.mutate)
+          txn.events.foreach(b.state.mutate)
         }
         val newUpdates: List[EVT] =
           if (txn.revision > lastSeenRevision) b.concurrentUpdates ::: txn.events
@@ -68,7 +68,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
       case Builder(_, _, _, null) =>
         snapshot.map(_ -> Nil)
       case Builder(_, mutator, concurrentUpdates, lastTxn) =>
-        Some(new Snapshot(mutator.state, lastTxn.revision, lastTxn.tick) -> concurrentUpdates)
+        Some(new Snapshot(mutator.curr, lastTxn.revision, lastTxn.tick) -> concurrentUpdates)
     }
   }
 
@@ -143,9 +143,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
               val now = ticker.nextTick(snapshot.tick)
               recordUpdate(id, state, snapshot.revision + 1, newEvents, metadata, now).recoverWith {
                 case eventStore.DuplicateRevisionException(conflict) =>
-                  val mutator = newMutator.init(snapshot.content)
-                  conflict.events.foreach(mutator.mutate)
-                  val latestSnapshot = Future successful Some(new Snapshot(mutator.state, conflict.revision, conflict.tick))
+                  val state = newState(snapshot.content)
+                  conflict.events.foreach(state.mutate)
+                  val latestSnapshot = Future successful Some(new Snapshot(state.curr, conflict.revision, conflict.tick))
                   onUpdateCollision(id, conflict.revision, conflict.channel)
                   loadAndUpdate(id, expectedRevision, metadata, latestSnapshot, true, updateThunk)
               }

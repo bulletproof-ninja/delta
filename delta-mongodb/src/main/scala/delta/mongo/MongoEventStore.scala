@@ -14,8 +14,8 @@ import com.mongodb.async.SingleResultCallback
 import com.mongodb.async.client.{ MongoClient, MongoCollection }
 import com.mongodb.connection.ClusterType
 
-import scuff.ScuffByte
-import scuff.concurrent.{ StreamConsumer, Threads }
+import scuff._
+import scuff.concurrent.Threads
 import delta.EventCodec
 
 object MongoEventStore {
@@ -110,18 +110,18 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     }(Threads.PiggyBack) // map revision on the same thread
   }
 
-  def replayStream(stream: ID)(callback: StreamConsumer[TXN, Any]): Unit = {
+  def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit = {
     queryWith(new Document("_id.stream", stream), callback, OrderByRevision)
   }
 
-  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit = {
+  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit = {
     val filter = new Document("_id.stream", stream)
     if (fromRevision > 0) {
       filter.append("_id.rev", new Document("$gte", fromRevision))
     }
     queryWith(filter, callback, OrderByRevision)
   }
-  def replayStreamRange(stream: ID, revisionRange: collection.immutable.Range)(callback: StreamConsumer[TXN, Any]): Unit = {
+  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: collection.immutable.Range)(callback: StreamReplayConsumer[E, U]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val filter = new Document("_id.stream", stream)
     val from = revisionRange.head
@@ -154,7 +154,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     }(Threads.PiggyBack)
   }
 
-  protected def queryWith(filter: Document, callback: StreamConsumer[TXN, Any], ordering: Document = null): Unit = {
+  protected def queryWith[U](filter: Document, callback: StreamConsumer[TXN, U], ordering: Document = null): Unit = {
     val onTxn = new Block[TXN] {
       def apply(txn: TXN) = callback.onNext(txn)
     }
@@ -333,11 +333,11 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     docFilter
   }
 
-  def query(streamFilter: Selector)(callback: StreamConsumer[TXN, Any]): Unit = {
+  def query[U](streamFilter: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
     queryWith(toDoc(streamFilter), callback)
   }
 
-  def querySince(sinceTick: Long, streamFilter: Selector)(callback: StreamConsumer[TXN, Any]): Unit = {
+  def querySince[U](sinceTick: Long, streamFilter: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
     val docFilter = new Document("tick", new Document("$gte", sinceTick))
     queryWith(toDoc(streamFilter, docFilter), callback)
   }

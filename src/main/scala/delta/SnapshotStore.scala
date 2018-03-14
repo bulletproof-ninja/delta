@@ -2,8 +2,8 @@ package delta
 
 import scala.concurrent.Future
 
-trait SnapshotStore[K, S] {
-  type Snapshot = delta.Snapshot[S]
+trait SnapshotStore[K, T] {
+  type Snapshot = delta.Snapshot[T]
   def read(key: K): Future[Option[Snapshot]]
   def write(key: K, snapshot: Snapshot): Future[Unit]
 }

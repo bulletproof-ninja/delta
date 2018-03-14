@@ -10,6 +10,7 @@ import delta.ddd._
 import delta.testing._
 import scuff.concurrent.Threads
 import delta.EventCodec
+import delta.Publishing
 
 object TestMongoEventStore {
   import com.mongodb.async.client._
@@ -67,8 +68,8 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   def setup() {
     val result = deleteAll()
     assertTrue(result.wasAcknowledged)
-    es = new MongoEventStore[String, AggrEvent, Unit](coll) with LocalPublishing[String, AggrEvent, Unit] {
-      def publishCtx = Threads.DefaultScheduler
+    es = new MongoEventStore[String, AggrEvent, Unit](coll) with Publishing[String, AggrEvent, Unit] {
+      val publisher = new LocalPublisher[String, AggrEvent, Unit](RandomDelayExecutionContext)
     }
     repo = new EntityRepository((), TheOneAggr)(es)
   }

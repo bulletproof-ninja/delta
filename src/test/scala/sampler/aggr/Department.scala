@@ -19,6 +19,7 @@ trait Department {
 }
 
 object Department {
+  type State = delta.ddd.State[DeptState, DeptEvent]
 
   def insert(repo: Repository[DeptId, Department])(
     id: DeptId, cmd: CreateDepartment)(
@@ -26,36 +27,34 @@ object Department {
     val name = cmd.name.trim()
     require(name.length() > 0)
     val dept = new Impl
-    dept.mutator(DeptCreated(name))
+    dept.state(DeptCreated(name))
     val metadata = thunk(dept)
     repo.insert(id, dept, metadata)
   }
 
-  object Def extends Entity {
+  object Def extends Entity[Department, DeptState, DeptEvent](DeptAssembler) {
     type Id = DeptId
-    type Type = Department
-    type Mutator = dept.Mutator
-    def newMutator = new Mutator
-    def init(state: Mutator, mergeEvents: List[DeptEvent]) = new Impl(state, mergeEvents)
-    def done(dept: Department) = dept match {
-      case dept: Impl => dept.mutator
+    def init(state: State, mergeEvents: List[DeptEvent]) = new Impl(state, mergeEvents)
+    def state(dept: Department) = dept match {
+      case dept: Impl => dept.state
     }
+    def validate(state: DeptState) = require(state != null)
   }
 
-  private[aggr] class Impl(val mutator: dept.Mutator = new dept.Mutator, mergeEvents: Seq[DeptEvent] = Nil)
+  private[aggr] class Impl(val state: State = Def.newState(), mergeEvents: Seq[DeptEvent] = Nil)
       extends Department {
     @inline
-    private def state = mutator.state
+    private def dept = state.curr
 
     def apply(cmd: AddEmployee) = {
-      if (!state.employees(cmd.id)) {
-        mutator(EmployeeAdded(cmd.id))
+      if (!dept.employees(cmd.id)) {
+        state(EmployeeAdded(cmd.id))
       }
       this
     }
     def apply(cmd: RemoveEmployee) = {
-      if (state.employees(cmd.id)) {
-        mutator(EmployeeRemoved(cmd.id))
+      if (dept.employees(cmd.id)) {
+        state(EmployeeRemoved(cmd.id))
       }
       this
     }

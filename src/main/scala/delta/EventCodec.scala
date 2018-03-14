@@ -63,6 +63,7 @@ class EventCodecAdapter[EVT, A, B](
   def versionOf(cls: EventClass) = evtCodec version cls
 
   def encode(evt: EVT): A = fmtCodec encode evtCodec.encode(evt)
-  def decode(name: String, version: Byte, data: A): EVT = evtCodec.decode(name, version, fmtCodec decode data)
+  def decode(name: String, version: Byte, data: A): EVT =
+    evtCodec.decode(name, version, fmtCodec decode data)
 
 }

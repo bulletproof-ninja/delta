@@ -4,7 +4,7 @@ import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
 
 import delta.ddd.{ DuplicateIdException, Repository, Revision, UnknownIdException }
-import scuff.concurrent.{ ScuffScalaFuture, Threads }
+import scuff.concurrent.{ Threads }
 import delta.ddd.ImmutableEntity
 
 /**
@@ -49,6 +49,6 @@ class ConcurrentMapRepository[K, V <: AnyRef](
   def update[_](
       expectedRevision: Revision, id: K,
       metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] =
-    Future(tryUpdate(id, expectedRevision, metadata, updateThunk)).flatten
+    Future(tryUpdate(id, expectedRevision, metadata, updateThunk)).flatMap(identity)
 
 }

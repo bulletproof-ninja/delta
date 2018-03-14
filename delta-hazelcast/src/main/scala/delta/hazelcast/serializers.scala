@@ -3,11 +3,12 @@ package delta.hazelcast.serializers
 import java.io.{ ObjectInputStream, ObjectOutputStream }
 import com.hazelcast.nio.{ ObjectDataInput, ObjectDataOutput }
 import com.hazelcast.nio.serialization.StreamSerializer
-import delta.Fold
+import delta.EventReducer
 import delta.Snapshot
 import delta.hazelcast.IgnoredDuplicate
 import delta.hazelcast.MissingRevisions
 import delta.hazelcast.Updated
+import scala.reflect.ClassTag
 
 trait TransactionSerializer
     extends StreamSerializer[delta.Transaction[Any, Any, Any]] {
@@ -51,18 +52,20 @@ trait SnapshotSerializer
   }
 }
 
-trait TransactionProcessorSerializer
-    extends StreamSerializer[delta.hazelcast.TransactionProcessor[Any, Any, Any]] {
+trait DistributedProcessorSerializer
+    extends StreamSerializer[delta.hazelcast.DistributedProcessor[Any, Any, Any]] {
 
-  def write(out: ObjectDataOutput, ep: delta.hazelcast.TransactionProcessor[Any, Any, Any]): Unit = {
+  def write(out: ObjectDataOutput, ep: delta.hazelcast.DistributedProcessor[Any, Any, Any]): Unit = {
     out writeObject ep.txn
-    out writeObject ep.fold
+    out writeObject ep.reducer
+    out writeObject ep.evtTag
   }
 
   def read(inp: ObjectDataInput) = {
     val txn = inp.readObject[delta.Transaction[Any, Any, Any]]
-    val fold = inp.readObject[Fold[Any, Any]]
-    new delta.hazelcast.TransactionProcessor(txn, fold)
+    val reducer = inp.readObject[EventReducer[Any, Any]]
+    val evtTag = inp.readObject[ClassTag[Any]]
+    new delta.hazelcast.DistributedProcessor(txn, reducer)(evtTag)
   }
 }
 

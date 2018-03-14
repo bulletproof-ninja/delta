@@ -20,7 +20,7 @@ object LamportTicker {
         val subscription = es.subscribe() { txn =>
           clock.sync(txn.tick)
         }
-        new LamportTicker(clock, subscription.cancel)
+        new LamportTicker(clock, subscription.cancel _)
       }
     new Memoizer[EventSource[_, _, _], LamportTicker](factory)
   }

@@ -3,13 +3,15 @@ package delta.redis
 import _root_.redis.clients.jedis.Protocol
 import java.nio.charset.Charset
 
-object RedisEncoder {
-  private[this] val charset = Charset.forName(Protocol.CHARSET)
-  @inline
-  def encode(str: String) = str.getBytes(charset)
-  @inline
-  def encode(bytes: Array[Byte], offset: Int = 0, length: Int = -1) = {
+object RedisEncoder extends RedisEncoder
+
+class RedisEncoder {
+  private[this] val _charset = Charset.forName(Protocol.CHARSET)
+  final def encode(str: String): Array[Byte] = str.getBytes(_charset)
+  final def decode(bytes: Array[Byte]): String = decode(bytes, 0, -1)
+  final def decode(bytes: Array[Byte], offset: Int): String = decode(bytes, offset, -1)
+  final def decode(bytes: Array[Byte], offset: Int, length: Int): String = {
     val len = if (length == -1) bytes.length - offset else length
-    new String(bytes, offset, len, charset)
+    new String(bytes, offset, len, _charset)
   }
 }

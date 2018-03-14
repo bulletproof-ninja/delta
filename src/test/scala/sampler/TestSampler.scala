@@ -5,11 +5,13 @@ import scala.util.{ Failure, Success, Try }
 import org.junit.Assert._
 import org.junit.Test
 
-import delta.{ EventStore, LamportTicker }
+import delta.{ EventStore, LamportTicker, Publishing }
 import delta.ddd.{ DuplicateIdException, EntityRepository, Revision }
 import delta.testing.RandomDelayExecutionContext
-import delta.util.{ LocalPublishing, TransientEventStore }
+import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
+import delta.util.LocalPublisher
+import delta.Publisher
 
 class TestSampler {
 
@@ -17,8 +19,8 @@ class TestSampler {
 
   lazy val es: EventStore[Int, DomainEvent, Aggr.Value] =
     new TransientEventStore[Int, DomainEvent, Aggr.Value, JSON](
-      RandomDelayExecutionContext) with LocalPublishing[Int, DomainEvent, Aggr.Value] {
-      def publishCtx = RandomDelayExecutionContext
+      RandomDelayExecutionContext) with Publishing[Int, DomainEvent, Aggr.Value] {
+      val publisher = new LocalPublisher[Int, DomainEvent, Aggr.Value](RandomDelayExecutionContext)
     }
 
   implicit def ec = RandomDelayExecutionContext

@@ -11,10 +11,11 @@ import college.CollegeEvent
 import delta.EventStore
 import delta.jdbc._
 import delta.jdbc.h2.H2Dialect
-import delta.util.LocalPublishing
+import delta.util.LocalPublisher
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
+import delta.Publishing
 
 object TestCollege {
   implicit object StringColumn extends VarCharColumn
@@ -37,8 +38,8 @@ class TestCollege extends college.TestCollege {
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore[Int, CollegeEvent, String, Array[Byte]](
-      sql, RandomDelayExecutionContext) with LocalPublishing[Int, CollegeEvent, String] with DataSourceConnection {
-      protected def publishCtx = RandomDelayExecutionContext
+      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent, String] with DataSourceConnection {
+      val publisher = new LocalPublisher[Int, CollegeEvent, String](RandomDelayExecutionContext)
       protected def dataSource = ds
     }.ensureSchema()
   }

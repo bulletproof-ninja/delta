@@ -10,20 +10,13 @@ import scala.concurrent.duration.{ Duration, DurationInt }
 import scala.util.{ Failure, Success, Try }
 import org.junit._
 import org.junit.Assert._
-import rapture.json.jsonStringContext
 import scuff._
 import delta.ddd.{ Repository, UnknownIdException }
 import scuff.reflect.Surgeon
+import delta._
 import delta.ddd._
 import delta.util._
-import delta.util.LocalPublishing
-import delta.EventCodec
-import delta.EventStore
-import delta.NoVersioning
-import delta.SysClockTicker
 import scala.{ SerialVersionUID => version }
-import delta.Fold
-import delta.Snapshot
 
 trait AggrEventHandler {
   type Return
@@ -39,38 +32,24 @@ case class ChangeStatus(newStatus: String)
 
 case class AggrState(status: String, numbers: Set[Int])
 
-final class AggrStateMutator
-  extends StateMutator {
+object AggrStateAssembler extends EventReducer[AggrState, AggrEvent] {
+  def init(evt: AggrEvent) = new EvtHandler().dispatch(evt)
+  def next(s: AggrState, evt: AggrEvent) = new EvtHandler(s).dispatch(evt)
+}
 
-  type Event = AggrEvent
-  type State = AggrState
+private class EvtHandler(state: AggrState = null) extends AggrEventHandler {
+  type Return = AggrState
 
-  val fold = new Fold[State, Event] {
-    def init(evt: Event) = new EvtHandler().dispatch(evt)
-    def next(s: State, evt: Event) = new EvtHandler(s).dispatch(evt)
+  def on(evt: AggrCreated) = {
+    require(state == null)
+    new AggrState(evt.status, Set.empty)
   }
-
-  def theAppliedEvents = {
-    val surgeon = new Surgeon(this)
-    surgeon.getAll[List[AggrEvent]].head._2.reverse
+  def on(evt: NewNumberWasAdded) = {
+    val numbers = state.numbers + evt.n
+    state.copy(numbers = numbers)
   }
-
-  //  def process(evt: AggrEvent) = dispatch(evt)
-
-  private class EvtHandler(state: AggrState = null) extends AggrEventHandler {
-    type Return = AggrState
-
-    def on(evt: AggrCreated) = {
-      require(state == null)
-      new AggrState(evt.status, Set.empty)
-    }
-    def on(evt: NewNumberWasAdded) = {
-      val numbers = state.numbers + evt.n
-      state.copy(numbers = numbers)
-    }
-    def on(evt: StatusChanged) = {
-      state.copy(status = evt.newStatus)
-    }
+  def on(evt: StatusChanged) = {
+    state.copy(status = evt.newStatus)
   }
 }
 
@@ -133,9 +112,10 @@ abstract class AbstractEventStoreRepositoryTest {
     newFoo apply AddNewNumber(-1)
     repo.insert(id, newFoo, metadata).onComplete {
       case Failure(_) =>
-        repo.exists(id).onSuccess {
-          case None => done.success("Fail on negative number")
-          case Some(rev) => fail(s"Should not exist: $rev")
+        repo.exists(id).onComplete {
+          case Failure(t) => done.failure(t)
+          case Success(None) => done.success("Fail on negative number")
+          case Success(Some(rev)) => fail(s"Should not exist: $rev")
         }
       case Success(_) => fail("Should not accept negative numbers")
     }
@@ -145,8 +125,9 @@ abstract class AbstractEventStoreRepositoryTest {
   def saveNewThenUpdate() = doAsync { done =>
     val id = "Foo"
     val newFoo = TheOneAggr.create()
-    repo.insert(id, newFoo, metadata).onSuccess {
-      case _ =>
+    repo.insert(id, newFoo, metadata).onComplete {
+      case Failure(t) => done.failure(t)
+      case Success(_) =>
         repo.update("Foo", Revision(0), metadata) {
           case (foo, rev) =>
             assertEquals(0, rev)
@@ -184,8 +165,9 @@ abstract class AbstractEventStoreRepositoryTest {
                       case Failure(t) => done.failure(t)
                       case Success((_, rev)) =>
                         assertEquals(2, rev)
-                        repo.load("Foo").onSuccess {
-                          case (foo, rev) =>
+                        repo.load("Foo").onComplete {
+                          case Failure(t) => done.failure(t)
+                          case Success((foo, rev)) =>
                             assertEquals(2, rev)
                             assertEquals("NotNew", foo.aggr.status)
                             done.success(Unit)
@@ -237,11 +219,13 @@ abstract class AbstractEventStoreRepositoryTest {
   def `idempotent insert`() = doAsync { done =>
     val id = "Baz"
     val baz = TheOneAggr.create()
-    repo.insert(id, baz).onSuccess {
-      case rev0 =>
+    repo.insert(id, baz).onComplete {
+      case Failure(t) => done.failure(t)
+      case Success(rev0) =>
         assertEquals(0, rev0)
-        repo.insert(id, baz).onSuccess {
-          case rev0 =>
+        repo.insert(id, baz).onComplete {
+          case Failure(t) => done.failure(t)
+          case Success(rev0) =>
             assertEquals(0, rev0)
             done.success(Unit)
         }
@@ -306,36 +290,36 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 }
 
-class Aggr(val stateMutator: AggrStateMutator, val mergeEvents: Seq[AggrEvent]) {
-  def appliedEvents = stateMutator.theAppliedEvents
-  private[delta] def aggr = stateMutator.state
+class Aggr(val state: TheOneAggr.State, val mergeEvents: Seq[AggrEvent]) {
+  def appliedEvents: List[AggrEvent] = {
+    val surgeon = new Surgeon(state)
+    surgeon.getAll[List[AggrEvent]].head._2.reverse
+  }
+  private[delta] def aggr = state.curr
   def apply(cmd: AddNewNumber) {
     if (!aggr.numbers.contains(cmd.n)) {
-      stateMutator(NewNumberWasAdded(cmd.n))
+      state(NewNumberWasAdded(cmd.n))
     }
   }
   def apply(cmd: ChangeStatus) {
     if (aggr.status != cmd.newStatus) {
-      stateMutator(StatusChanged(cmd.newStatus))
+      state(StatusChanged(cmd.newStatus))
     }
   }
   def numbers = aggr.numbers
 }
 
-object TheOneAggr extends Entity {
+object TheOneAggr extends Entity[Aggr, AggrState, AggrEvent](AggrStateAssembler) {
 
   type Id = String
-  type Type = Aggr
-  type Mutator = AggrStateMutator
 
-  def newMutator = new AggrStateMutator
-  def init(m: Mutator, mergeEvents: List[Mutator#Event]): Type = new Aggr(m, mergeEvents)
-  def done(entity: Type) = entity.stateMutator
-  override def checkInvariants(state: Mutator#State): Unit = {
+  def init(state: State, mergeEvents: List[AggrEvent]): Aggr = new Aggr(state, mergeEvents)
+  def state(entity: Aggr) = entity.state
+  override def validate(state: AggrState): Unit = {
     require(state.numbers.filter(_ < 0).isEmpty, "Cannot contain negative numbers")
   }
   def create(): Aggr = {
-    val mutator = new AggrStateMutator
+    val mutator = TheOneAggr.newState()
     mutator(new AggrCreated("New"))
     new Aggr(mutator, Nil)
   }
@@ -347,31 +331,27 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
     extends EventCodec[AggrEvent, String]
     with NoVersioning[AggrEvent, String] {
 
-    import rapture.json._, jsonBackends.jackson._
-
     def nameOf(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
-      case AggrCreated(status) => json""" { "status": $status } """.toBareString
-      case NewNumberWasAdded(num) => json""" { "num": $num } """.toBareString
-      case StatusChanged(newStatus) => json""" { "status": $newStatus } """.toBareString
+      case AggrCreated(status) => s""" { "status": "$status" } """
+      case NewNumberWasAdded(num) => s""" { "num": $num } """
+      case StatusChanged(newStatus) => s""" { "status": "$newStatus" } """
     }
-    def decode(name: String, json: String): AggrEvent = {
-      val ast = Json.parse(json)
+    def decode(name: String, json: String): AggrEvent =
       name match {
-        case "AggrCreated" => AggrCreated(status = ast.status.as[String])
-        case "NewNumberWasAdded" => NewNumberWasAdded(n = ast.num.as[Int])
-        case "StatusChanged" => StatusChanged(newStatus = ast.status.as[String])
+        case "AggrCreated" => AggrCreated(status = json.field("status"))
+        case "NewNumberWasAdded" => NewNumberWasAdded(n = json.field("num").toInt)
+        case "StatusChanged" => StatusChanged(newStatus = json.field("status"))
       }
-    }
   }
 
   @Before
   def setup() {
 
-    es = new TransientEventStore[String, AggrEvent, Unit, String](
-      RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
-      def publishCtx = ec
+    es = new TransientEventStore[String, AggrEvent, Unit, String](RandomDelayExecutionContext)
+    with Publishing[String, AggrEvent, Unit] {
+      val publisher = new LocalPublisher[String, AggrEvent, Unit](ec)
     }
     repo = new EntityRepository((), TheOneAggr)(es)
   }
@@ -388,8 +368,6 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     type Return = String
 
-    import rapture.json._, jsonBackends.jackson._
-
     override def isMethodNameEventName = true
     def nameOf(cls: EventClass): String = {
       val lastDot = cls.getName.lastIndexOf('.')
@@ -399,35 +377,31 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
-    def on(evt: AggrCreated): Return = json""" { "status": ${evt.status} } """.toBareString
-    def `testing.AggrCreated`(json: String): AggrCreated = {
-      val ast = Json.parse(json)
-      AggrCreated(status = ast.status.as[String])
-    }
+    def on(evt: AggrCreated): Return = s""" { "status": "${evt.status}" } """
+    def `testing.AggrCreated`(json: String): AggrCreated =
+      new AggrCreated(status = json.field("status"))
 
-    def on(evt: NewNumberWasAdded): Return = json""" { "num": ${evt.n} } """.toBareString
-    def `testing.NewNumberWasAdded`(json: String): NewNumberWasAdded = {
-      val ast = Json.parse(json)
-      NewNumberWasAdded(n = ast.num.as[Int])
-    }
+    def on(evt: NewNumberWasAdded): Return = s""" { "num": ${evt.n} } """
+    def `testing.NewNumberWasAdded`(json: String): NewNumberWasAdded =
+      new NewNumberWasAdded(n = json.field("num").toInt)
 
-    def on(evt: StatusChanged): Return = json""" { "status": ${evt.newStatus} } """.toBareString
-    def `testing.StatusChanged`(json: String): StatusChanged = {
-      val ast = Json.parse(json)
-      StatusChanged(newStatus = ast.status.as[String])
-    }
+    def on(evt: StatusChanged): Return = s""" { "status": "${evt.newStatus}" } """
+    def `testing.StatusChanged`(json: String): StatusChanged = new StatusChanged(newStatus = json.field("status"))
   }
+
+  case class Metrics(id: String, duration: Long, timestamp: Long)
+  var metrics: List[Metrics] = _
 
   @Before
   def setup() {
+    metrics = Nil
       def ?[T](implicit t: T) = implicitly[T]
-    es = new TransientEventStore[String, AggrEvent, Unit, String](
-      RandomDelayExecutionContext) with LocalPublishing[String, AggrEvent, Unit] {
-      def publishCtx = RandomDelayExecutionContext
+    es = new TransientEventStore[String, AggrEvent, Unit, String](RandomDelayExecutionContext)
+    with Publishing[String, AggrEvent, Unit] {
+      val publisher = new LocalPublisher[String, AggrEvent, Unit](RandomDelayExecutionContext)
     }
-    val snapshotMap = new collection.concurrent.TrieMap[String, Option[Snapshot[AggrState]]]
-    val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap, _ => Future successful None)
+    val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
+    val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap)(_ => Future successful None)
     repo = new EntityRepository((), TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
   }
-
 }

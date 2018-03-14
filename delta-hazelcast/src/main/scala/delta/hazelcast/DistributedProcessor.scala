@@ -7,7 +7,7 @@ import scala.collection.immutable.TreeMap
 
 import com.hazelcast.map.AbstractEntryProcessor
 
-import delta.{ Fold, Snapshot, Transaction }
+import delta.{ EventReducer, Snapshot, Transaction }
 import com.hazelcast.core.IMap
 import scala.concurrent.Future
 import com.hazelcast.core.ExecutionCallback
@@ -24,11 +24,11 @@ case object IgnoredDuplicate extends EntryUpdateResult
 case class MissingRevisions(range: Range) extends EntryUpdateResult
 case class Updated[D](snapshot: Snapshot[D]) extends EntryUpdateResult
 
-object TransactionProcessor {
+object DistributedProcessor {
   /**
     * Process transaction, ensuring proper sequencing.
     */
-  def apply[K, D >: Null, EVT: ClassTag](imap: IMap[K, EntryState[D, EVT]], fold: Fold[D, EVT])(
+  def apply[K, D >: Null, EVT: ClassTag](imap: IMap[K, EntryState[D, EVT]], reducer: EventReducer[D, EVT])(
     txn: Transaction[K, _ >: EVT, _]): Future[EntryUpdateResult] = {
     val verifiedTxn: Transaction[K, EVT, _] = {
       txn.events.collect { case evt: EVT => evt } match {
@@ -36,7 +36,7 @@ object TransactionProcessor {
         case events => txn.copy(events = events)
       }
     }
-    val processor = new TransactionProcessor[K, D, EVT](verifiedTxn, fold)
+    val processor = new DistributedProcessor[K, D, EVT](verifiedTxn, reducer)
     val promise = Promise[EntryUpdateResult]()
     val callback = new ExecutionCallback[EntryUpdateResult] {
       def onResponse(response: EntryUpdateResult) = promise success response
@@ -47,9 +47,13 @@ object TransactionProcessor {
   }
 }
 
-final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
+/** 
+ *  Distributed [[delta.Transaction]] entry processor, ensuring 
+ *  monotonic stream revision ordering.
+ */
+final class DistributedProcessor[K, D >: Null, EVT] private[hazelcast] (
   val txn: Transaction[K, EVT, _],
-  val fold: Fold[D, EVT])
+  val reducer: EventReducer[D, EVT])(implicit val evtTag: ClassTag[EVT])
     extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
 
   type S = EntryState[D, EVT]
@@ -63,7 +67,7 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
 
       case null => // First transaction seen
         if (txn.revision == 0) { // First transaction, as expected
-          val model = new Snapshot(fold.process(None, txn.events), txn.revision, txn.tick)
+          val model = new Snapshot(EventReducer.process(reducer)(None, txn.events), txn.revision, txn.tick)
           entry setValue new S(model, true)
           Updated(model)
         } else { // Not first, so missing some
@@ -73,7 +77,7 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
 
       case EntryState(null, _, unapplied) => // Un-applied transactions exists, no model yet
         if (txn.revision == 0) { // This transaction is first, so apply
-          val model = new Snapshot(fold.process(None, txn.events), txn.revision, txn.tick)
+          val model = new Snapshot(EventReducer.process(reducer)(None, txn.events), txn.revision, txn.tick)
           entry setValue new S(model, true, unapplied.tail)
           processTransaction(entry, unapplied.head._2)
         } else { // Still not first transaction
@@ -85,7 +89,7 @@ final class TransactionProcessor[K, D >: Null, EVT] private[hazelcast] (
       case EntryState(model, _, unapplied) =>
         val expectedRev = model.revision + 1
         if (txn.revision == expectedRev) { // Expected revision, apply
-          val updModel = new Snapshot(fold.process(Some(model.content), txn.events), txn.revision, txn.tick)
+          val updModel = new Snapshot(EventReducer.process(reducer)(Some(model.content), txn.events), txn.revision, txn.tick)
           unapplied.headOption match {
             case None =>
               val dataUpdated = model.content != updModel.content

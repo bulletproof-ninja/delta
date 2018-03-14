@@ -5,8 +5,9 @@ import java.sql.{ Connection, ResultSet, SQLException }
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
-import scuff.concurrent.{ StreamConsumer, Threads }
 import delta.{ EventCodec, EventStore }
+import scuff.StreamConsumer
+import scuff.concurrent.Threads
 import scuff.jdbc.ConnectionProvider
 
 private object JdbcEventStore {
@@ -102,7 +103,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     else None
   }
 
-  private def FutureWith(cb: StreamConsumer[TXN, Any])(thunk: => Unit): Unit = Future {
+  private def FutureWith[U](cb: StreamConsumer[TXN, U])(thunk: => Unit): Unit = Future {
     Try(thunk) match {
       case Success(_) => cb.onDone()
       case Failure(th) => cb onError th
@@ -154,7 +155,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
     }
   }
 
-  def replayStream(stream: ID)(callback: StreamConsumer[TXN, Any]): Unit =
+  def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit =
     FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamFull(stream) {
@@ -165,7 +166,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
         }
       }
     }
-  def replayStreamRange(stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, Any]): Unit =
+  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: Range)(callback: StreamReplayConsumer[E, U]): Unit =
     FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamRange(stream, revisionRange) {
@@ -176,7 +177,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
         }
       }
     }
-  def replayStreamFrom(stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, Any]): Unit =
+  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit =
     if (fromRevision == 0) replayStream(stream)(callback)
     else FutureWith(callback) {
       forQuery { implicit conn =>
@@ -189,7 +190,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
       }
     }
 
-  def query(selector: Selector)(callback: StreamConsumer[TXN, Any]): Unit =
+  def query[U](selector: Selector)(callback: StreamConsumer[TXN, U]): Unit =
     FutureWith(callback) {
       forQuery { implicit conn =>
         val select = selector match {
@@ -207,7 +208,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
         }
       }
     }
-  def querySince(sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, Any]): Unit =
+  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, U]): Unit =
     FutureWith(callback) {
       forQuery { implicit conn =>
         val (singleStream, onNext, select) = selector match {
