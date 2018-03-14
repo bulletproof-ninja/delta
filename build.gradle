@@ -138,12 +138,6 @@ project(':delta-jdbc') {
         testCompile "mysql:mysql-connector-java:5.1.40"
     }
 }
-project(':delta-mongodb') {
-    dependencies {
-        compile "org.mongodb:mongodb-driver-async:3.6.2"
-        compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.2.0"
-    }
-}
 project(':delta-hazelcast') {
     dependencies {
         compile "com.hazelcast:hazelcast:3.9.3"
@@ -154,10 +148,23 @@ project(':delta-redis') {
         compile "redis.clients:jedis:2.9.0"
     }
 }
-project(':delta-java') {
-    sourceCompatibility = 1.8
-    targetCompatibility = 1.8
-    dependencies {
-        testCompile project(":delta-jdbc")
+
+// TODO: Include when 'mongo-scala-bson' is available for 2.13
+if (vScala != '2.13') {
+    project(':delta-mongodb') {
+        dependencies {
+            compile "org.mongodb:mongodb-driver-async:3.6.3"
+            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.2.1"
+        }
+    }
+}
+
+if (vScala != '2.11') {
+    project(':delta-java') {
+        sourceCompatibility = 1.8
+        targetCompatibility = 1.8
+        dependencies {
+            testCompile project(":delta-jdbc")
+        }
     }
 }

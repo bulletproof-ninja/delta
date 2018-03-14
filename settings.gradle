@@ -1,6 +1,23 @@
-include 'delta-cassandra', 
-        'delta-jdbc', 
-        'delta-mongodb', 
-        'delta-hazelcast', 
-        'delta-redis',
-        'delta-java'
+switch (System.properties.scalaVersion) {
+        case '2.11':
+                include 'delta-cassandra',
+                        'delta-jdbc',
+                        'delta-mongodb',
+                        'delta-hazelcast',
+                        'delta-redis'
+                break
+        case '2.13':
+                include 'delta-cassandra',
+                        'delta-jdbc',
+                        'delta-hazelcast',
+                        'delta-redis',
+                        'delta-java'
+                break
+        default:
+                include 'delta-cassandra',
+                        'delta-jdbc',
+                        'delta-mongodb',
+                        'delta-hazelcast',
+                        'delta-redis',
+                        'delta-java'
+}
