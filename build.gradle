@@ -154,3 +154,10 @@ project(':delta-redis') {
         compile "redis.clients:jedis:2.9.0"
     }
 }
+project(':delta-java') {
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+    dependencies {
+        testCompile project(":delta-jdbc")
+    }
+}
