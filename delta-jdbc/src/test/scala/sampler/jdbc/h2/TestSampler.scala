@@ -33,13 +33,13 @@ final class TestSampler extends sampler.TestSampler {
   import TestSampler._
 
   override lazy val es = {
-    val sql = new H2Dialect[Int, DomainEvent, Aggr.Value, JSON](None)
+    val sql = new H2Dialect[Int, DomainEvent, JSON](None)
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore(sql, RandomDelayExecutionContext)
-      with Publishing[Int, DomainEvent, Aggr.Value]
+      with Publishing[Int, DomainEvent]
       with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, DomainEvent, Aggr.Value](RandomDelayExecutionContext)
+      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
       protected def dataSource = ds
     }.ensureSchema()
   }

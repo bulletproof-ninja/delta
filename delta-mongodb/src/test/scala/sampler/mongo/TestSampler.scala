@@ -18,12 +18,11 @@ class TestSampler extends sampler.TestSampler {
     import com.mongodb.async.client._
     val client = MongoClients.create()
     val ns = new MongoNamespace("unit-testing", "event-store")
-    val txnCollection = MongoEventStore.getCollection(ns, client, AggrRootRegistry)
-      implicit def aggrCodec = AggrRootRegistry.codec
+    val txnCollection = MongoEventStore.getCollection(ns, client)
+//      implicit def aggrCodec = AggrRootRegistry.codec
       implicit def evtCdc = BsonDomainEventCodec
-    new MongoEventStore[Int, DomainEvent, sampler.Aggr.Value](
-      txnCollection) with Publishing[Int, DomainEvent, sampler.Aggr.Value] {
-      val publisher = new LocalPublisher[Int, DomainEvent, sampler.Aggr.Value](RandomDelayExecutionContext)
+    new MongoEventStore[Int, DomainEvent](txnCollection) with Publishing[Int, DomainEvent] {
+      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
     }
   }
 

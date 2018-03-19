@@ -33,13 +33,13 @@ class TestCollege extends college.TestCollege {
 
   import TestCollege._
 
-  override lazy val eventStore: EventStore[Int, CollegeEvent, String] = {
-    val sql = new H2Dialect[Int, CollegeEvent, String, Array[Byte]](None)
+  override lazy val eventStore: EventStore[Int, CollegeEvent] = {
+    val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
     val ds = new JdbcDataSource
     ds.setURL(s"jdbc:h2:./${h2Name}")
-    new JdbcEventStore[Int, CollegeEvent, String, Array[Byte]](
-      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent, String] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, CollegeEvent, String](RandomDelayExecutionContext)
+    new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
+      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
+      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
       protected def dataSource = ds
     }.ensureSchema()
   }

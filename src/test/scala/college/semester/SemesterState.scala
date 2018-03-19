@@ -1,7 +1,7 @@
 package college.semester
 
-import college.StudentId
+import college.student.Student
 
 case class SemesterState(
   name: String,
-  enrolled: Set[StudentId] = Set.empty)
+  enrolled: Set[Student.Id] = Set.empty)

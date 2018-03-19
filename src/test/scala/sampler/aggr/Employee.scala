@@ -32,9 +32,10 @@ object Employee {
     emp
   }
 
-  object Def extends Entity[Employee, EmpState, EmpEvent](EmpAssembler) {
+  object Def extends Entity("Employee", EmpAssembler) {
     type Id = EmpId
-    def init(state: State, mergeEvents: List[EmpEvent]) = new Employee(state, mergeEvents)
+    type Type = Employee
+    def init(state: State, mergeEvents: List[EmpEvent]) = new Employee(state)
     def state(employee: Employee) = employee.state
     def validate(state: EmpState) = require(state != null)
   }
@@ -42,8 +43,7 @@ object Employee {
 }
 
 class Employee private[aggr] (
-    private[aggr] val state: Employee.State = Employee.Def.newState(),
-    mergeEvents: Seq[EmpEvent] = Nil) {
+    private[aggr] val state: Employee.State = Employee.Def.newState()) {
   @inline private def emp = state.curr
 
   def apply(cmd: UpdateSalary): this.type =  {

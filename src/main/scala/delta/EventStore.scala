@@ -9,12 +9,12 @@ import scala.util.control.NoStackTrace
   * @tparam EVT Event type
   * @tparam CH Channel type
   */
-trait EventStore[ID, EVT, CH]
-    extends EventSource[ID, EVT, CH] {
-  
+trait EventStore[ID, EVT]
+    extends EventSource[ID, EVT] {
+
   protected def Transaction(
     tick: Long,
-    channel: CH,
+    channel: String,
     stream: ID,
     revision: Int,
     metadata: Map[String, String],
@@ -36,7 +36,7 @@ trait EventStore[ID, EVT, CH]
     * @return Transaction, or if failed a possible
     * [[DuplicateRevisionException]] if the revision already exists.
     */
-  def commit(channel: CH, stream: ID, revision: Int, tick: Long,
+  def commit(channel: String, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN]
 
 }

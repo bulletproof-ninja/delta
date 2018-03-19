@@ -7,8 +7,8 @@ import delta.jdbc._
 /**
   * MySQL dialect. Doesn't support schema.
   */
-class MySQLDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
-  extends delta.jdbc.Dialect[ID, EVT, CH, SF](schema.optional) {
+class MySQLDialect[ID: ColumnType, EVT, SF: ColumnType](schema: String = null)
+  extends delta.jdbc.Dialect[ID, EVT, SF](schema.optional) {
 
   import MySQLDialect._
 

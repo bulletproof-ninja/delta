@@ -18,9 +18,6 @@ package object college {
 
   implicit def intId(id: IntId[_]): Int = id.int
 
-  type SemesterId = IntId[Semester]
-  type StudentId = IntId[Student]
-
   implicit object CollegeEventCodec
       extends EventCodec[CollegeEvent, Array[Byte]]
       with NoVersioning[CollegeEvent, Array[Byte]] {

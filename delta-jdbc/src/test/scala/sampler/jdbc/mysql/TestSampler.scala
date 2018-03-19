@@ -39,9 +39,9 @@ final class TestSampler extends sampler.TestSampler {
   implicit object JsonColumn extends VarCharColumn(Short.MaxValue)
 
   override lazy val es = {
-    val sql = new MySQLDialect[Int, DomainEvent, Aggr.Value, JSON]
-    new JdbcEventStore(sql, RandomDelayExecutionContext) with Publishing[Int, DomainEvent, Aggr.Value] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, DomainEvent, Aggr.Value](RandomDelayExecutionContext)
+    val sql = new MySQLDialect[Int, DomainEvent, JSON]
+    new JdbcEventStore(sql, RandomDelayExecutionContext) with Publishing[Int, DomainEvent] with DataSourceConnection {
+      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
       protected def dataSource = TestSampler.ds
     }.ensureSchema()
   }

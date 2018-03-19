@@ -17,17 +17,17 @@ class TestSampler {
 
   def metadata = Map("timestamp" -> new scuff.Timestamp().toString)
 
-  lazy val es: EventStore[Int, DomainEvent, Aggr.Value] =
-    new TransientEventStore[Int, DomainEvent, Aggr.Value, JSON](
-      RandomDelayExecutionContext) with Publishing[Int, DomainEvent, Aggr.Value] {
-      val publisher = new LocalPublisher[Int, DomainEvent, Aggr.Value](RandomDelayExecutionContext)
+  lazy val es: EventStore[Int, DomainEvent] =
+    new TransientEventStore[Int, DomainEvent, JSON](
+      RandomDelayExecutionContext) with Publishing[Int, DomainEvent] {
+      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
     }
 
   implicit def ec = RandomDelayExecutionContext
   implicit lazy val ticker = LamportTicker(es)
 
-  lazy val EmployeeRepo = new EntityRepository(Aggr.Empl, Employee.Def)(es)
-  lazy val DepartmentRepo = new EntityRepository(Aggr.Dept, Department.Def)(es)
+  lazy val EmployeeRepo = new EntityRepository(Employee.Def)(es)
+  lazy val DepartmentRepo = new EntityRepository(Department.Def)(es)
 
   @Test
   def inserting() {

@@ -54,9 +54,9 @@ class TestCollege extends college.TestCollege {
 
   implicit def EvtCodec = new EventCodecAdapter(BinaryDocCodec)
 
-  override lazy val eventStore: EventStore[Int, CollegeEvent, String] = {
-    new MongoEventStore[Int, CollegeEvent, String](coll) with Publishing[Int, CollegeEvent, String] {
-      val publisher = new LocalPublisher[Int, CollegeEvent, String](RandomDelayExecutionContext)
+  override lazy val eventStore: EventStore[Int, CollegeEvent] = {
+    new MongoEventStore[Int, CollegeEvent](coll) with Publishing[Int, CollegeEvent] {
+      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
     }
   }
 

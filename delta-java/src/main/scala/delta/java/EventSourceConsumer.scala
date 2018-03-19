@@ -8,8 +8,8 @@ import scala.reflect.ClassTag
 /**
   * [[delta.util.EventSourceProcessor]], adapted for Java.
   */
-abstract class EventSourceConsumer[ID, EVT, CH](maxTickProcessed: Option[Long])(implicit evtTag: ClassTag[EVT])
-  extends delta.util.EventSourceConsumer[ID, EVT, CH](maxTickProcessed) {
+abstract class EventSourceConsumer[ID, EVT](maxTickProcessed: Option[Long])(implicit evtTag: ClassTag[EVT])
+  extends delta.util.EventSourceConsumer[ID, EVT](maxTickProcessed) {
 
   def this(maxTickProcessed: Optional[java.lang.Long], evtType: Class[_ <: EVT]) =
     this(maxTickProcessed: Option[Long])(ClassTag(evtType))

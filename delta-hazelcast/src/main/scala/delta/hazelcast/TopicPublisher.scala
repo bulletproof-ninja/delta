@@ -14,33 +14,33 @@ import com.hazelcast.core.HazelcastInstance
 import scala.concurrent.ExecutionContext
 
 object TopicPublisher {
-  def apply[ID, EVT, CH](
+  def apply[ID, EVT](
       hz: HazelcastInstance,
-      allChannels: Set[CH],
-      publishCtx: ExecutionContext): TopicPublisher[ID, EVT, CH, Transaction[ID, EVT, CH]] =
+      allChannels: Set[String],
+      publishCtx: ExecutionContext): TopicPublisher[ID, EVT, Transaction[ID, EVT]] =
     apply(hz, allChannels, publishCtx, Codec.noop, _.toString)
 
-  def apply[ID, EVT, CH](
+  def apply[ID, EVT](
       hz: HazelcastInstance,
-      allChannels: Set[CH],
+      allChannels: Set[String],
       publishCtx: ExecutionContext,
-      topicName: CH => String): TopicPublisher[ID, EVT, CH, Transaction[ID, EVT, CH]] =
+      topicName: String => String): TopicPublisher[ID, EVT, Transaction[ID, EVT]] =
     apply(hz, allChannels, publishCtx, Codec.noop, topicName)
 
-  def apply[ID, EVT, CH, PF](
+  def apply[ID, EVT, PF](
       hz: HazelcastInstance,
-      allChannels: Set[CH],
+      allChannels: Set[String],
       publishCtx: ExecutionContext,
-      publishCodec: Codec[delta.Transaction[ID, EVT, CH], PF]): TopicPublisher[ID, EVT, CH, PF] =
+      publishCodec: Codec[delta.Transaction[ID, EVT], PF]): TopicPublisher[ID, EVT, PF] =
         apply(hz, allChannels, publishCtx, publishCodec, _.toString)
 
-  def apply[ID, EVT, CH, PF](
+  def apply[ID, EVT, PF](
       hz: HazelcastInstance,
-      allChannels: Set[CH],
+      allChannels: Set[String],
       publishCtx: ExecutionContext,
-      publishCodec: Codec[delta.Transaction[ID, EVT, CH], PF],
-      topicName: CH => String): TopicPublisher[ID, EVT, CH, PF] = {
-    val topics: Map[CH, ITopic[PF]] = allChannels.foldLeft(Map.empty[CH, ITopic[PF]]) {
+      publishCodec: Codec[delta.Transaction[ID, EVT], PF],
+      topicName: String => String): TopicPublisher[ID, EVT, PF] = {
+    val topics: Map[String, ITopic[PF]] = allChannels.foldLeft(Map.empty[String, ITopic[PF]]) {
       case (topics, ch) => topics.updated(ch, hz.getTopic(topicName(ch)))
     }
     new TopicPublisher(topics, publishCtx, publishCodec)
@@ -52,17 +52,17 @@ object TopicPublisher {
   * Hazelcast `ITopic`.
   *
   */
-class TopicPublisher[ID, EVT, CH, PF](
-    topics: Map[CH, ITopic[PF]],
+class TopicPublisher[ID, EVT, PF](
+    channelTopics: Map[String, ITopic[PF]],
     protected val publishCtx: ExecutionContext,
-    protected val publishCodec: Codec[delta.Transaction[ID, EVT, CH], PF])
-  extends Publisher[ID, EVT, CH] {
+    protected val publishCodec: Codec[delta.Transaction[ID, EVT], PF])
+  extends Publisher[ID, EVT] {
 
   type PublishFormat = PF
 
-  protected def publish(stream: ID, channel: CH, txn: PublishFormat): Unit =
+  protected def publish(stream: ID, channel: String, txn: PublishFormat): Unit =
     blocking {
-      topics(channel).publish(txn)
+      channelTopics(channel).publish(txn)
     }
 
   private class Subscriber(include: TXN => Boolean, callback: TXN => _)
@@ -73,10 +73,10 @@ class TopicPublisher[ID, EVT, CH, PF](
     }
   }
 
-  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[CH]): Subscription = {
-    val channels = if (channelSubset.isEmpty) topics.keys else channelSubset
+  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[String]): Subscription = {
+    val channels = if (channelSubset.isEmpty) channelTopics.keys else channelSubset
     val topicRegistrations = channels.toList.map { ch =>
-      val topic = topics(ch)
+      val topic = channelTopics(ch)
       val regId = topic addMessageListener new Subscriber(include, callback)
       topic -> regId
     }

@@ -30,9 +30,9 @@ class TestEventStore {
       JavaSerializer.decode(data).asInstanceOf[Event]
   }
 
-  private[this] val es = new util.TransientEventStore[Symbol, Event, String, Array[Byte]](
-      RandomDelayExecutionContext) with Publishing[Symbol, Event, String] {
-      val publisher = new LocalPublisher[Symbol, Event, String](RandomDelayExecutionContext)
+  private[this] val es = new util.TransientEventStore[Symbol, Event, Array[Byte]](
+      RandomDelayExecutionContext) with Publishing[Symbol, Event] {
+      val publisher = new LocalPublisher[Symbol, Event](RandomDelayExecutionContext)
   }
 
   @Test

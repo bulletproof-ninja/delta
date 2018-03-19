@@ -28,17 +28,17 @@ import scuff.concurrent.StreamPromise
   * @param ticker Ticker implementation
   */
 class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
-    channel: CH,
+    channel: String,
     newState: S => State[S, EVT],
     snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
     assumeCurrentSnapshots: Boolean = false)(
-    es: EventStore[ESID, _ >: EVT, CH])(
+    es: EventStore[ESID, _ >: EVT])(
     implicit exeCtx: ExecutionContext, ticker: Ticker)
   extends Repository[RID, (S, List[EVT])] with ImmutableEntity[(S, List[EVT])] {
 
   private type Snapshot = delta.Snapshot[S]
 
-  private[this] val eventStore = es.asInstanceOf[EventStore[ESID, EVT, CH]]
+  private[this] val eventStore = es.asInstanceOf[EventStore[ESID, EVT]]
 
   private type Events = List[EVT]
   private type RepoType = (S, Events)
@@ -126,7 +126,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     * specific aggregate.
     * Can be used for monitoring and reporting.
     */
-  protected def onUpdateCollision(id: RID, revision: Int, ar: CH): Unit = ()
+  protected def onUpdateCollision(id: RID, revision: Int, channel: String): Unit = ()
 
   private def loadAndUpdate(
       id: RID, expectedRevision: Option[Int], metadata: Map[String, String],

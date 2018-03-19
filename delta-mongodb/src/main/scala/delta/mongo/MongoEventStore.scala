@@ -57,16 +57,16 @@ object MongoEventStore {
   *     tick: 1426320727122, // Clock tick.
   *     channel: "FooBar", // App specific type
   *     events: [{
-  *      name: "MyEvent",
+  *      name: "MyEvent", // Event name
   *      v: 1, // Event version
-  *      data: {} // App specific
+  *      data: {} // App specific data
   *     }]
   *   }
   * }}}
   */
-abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
+abstract class MongoEventStore[ID: Codec, EVT](
   dbColl: MongoCollection[Document])(implicit codec: EventCodec[EVT, Document])
-    extends delta.EventStore[ID, EVT, CH] {
+    extends delta.EventStore[ID, EVT] {
 
   protected val store = {
     val txnCodec = new TransactionCodec(
@@ -74,7 +74,6 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     val registry = CodecRegistries.fromRegistries(
       CodecRegistries.fromCodecs(
         implicitly[Codec[ID]],
-        implicitly[Codec[CH]],
         txnCodec),
       dbColl.getCodecRegistry)
 
@@ -138,7 +137,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
   }
 
   def commit(
-    channel: CH, stream: ID, revision: Int, tick: Long,
+    channel: String, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     val txn = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
@@ -175,7 +174,6 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
       tag.runtimeClass.asInstanceOf[Class[T]]
     def getEncoderClass = classOf[TXN]
     private[this] val idCodec = implicitly[Codec[ID]]
-    private[this] val chCodec = implicitly[Codec[CH]]
 
     private def writeDocument(writer: BsonWriter, name: String = null)(thunk: => Unit) {
       if (name != null) writer.writeStartDocument(name) else writer.writeStartDocument()
@@ -194,7 +192,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
         writer.writeInt32("rev", txn.revision)
       }
       writer.writeInt64("tick", txn.tick)
-      writer.writeName("channel"); chCodec.encode(writer, txn.channel, ctx)
+      writer.writeString("channel", txn.channel)
       if (txn.metadata.nonEmpty) {
         writeDocument(writer, "metadata") {
           txn.metadata.foreach {
@@ -241,7 +239,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
     }
 
     @annotation.tailrec
-    private def readEvents(channel: CH, reader: BsonReader, events: List[EVT] = Nil)(implicit ctx: DecoderContext): List[EVT] = {
+    private def readEvents(channel: String, reader: BsonReader, events: List[EVT] = Nil)(implicit ctx: DecoderContext): List[EVT] = {
       if (reader.readBsonType() == BsonType.END_OF_DOCUMENT) {
         events.reverse
       } else {
@@ -263,10 +261,7 @@ abstract class MongoEventStore[ID: Codec, EVT, CH: Codec](
         idCodec.decode(reader, ctx) -> reader.readInt32("rev")
       }
       val tick = reader.readInt64("tick")
-      val channel = {
-        reader.readName("channel")
-        chCodec.decode(reader, ctx)
-      }
+      val channel = reader.readString("channel")
       val (metadata, events) = reader.readName match {
         case "metadata" =>
           val metadata = readDocument(reader)(readMetadata(reader))

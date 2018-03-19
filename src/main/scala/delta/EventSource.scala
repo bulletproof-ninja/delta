@@ -9,14 +9,14 @@ import scala.annotation.varargs
 /**
   * Event source.
   */
-trait EventSource[ID, EVT, CH] {
+trait EventSource[ID, EVT] {
 
-  type TXN = Transaction[ID, EVT, CH]
+  type TXN = Transaction[ID, EVT]
 
   def currRevision(stream: ID): Future[Option[Int]]
   def maxTick(): Future[Option[Long]]
 
-  protected[delta] type StreamReplayConsumer[E >: EVT, U] = StreamConsumer[Transaction[ID, E, CH], U]
+  protected[delta] type StreamReplayConsumer[E >: EVT, U] = StreamConsumer[Transaction[ID, E], U]
 
   /** Replay complete stream. */
   def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit
@@ -48,30 +48,30 @@ trait EventSource[ID, EVT, CH] {
   /** Complete, unbroken stream, selector. */
   sealed abstract class CompleteSelector extends Selector {
     /** Subset of channels, if any. */
-    def channelSubset: Set[CH]
+    def channelSubset: Set[String]
   }
 
   /** All streams, all channels, unbroken. */
   case object Everything extends CompleteSelector {
-    def channelSubset: Set[CH] = Set.empty
+    def channelSubset: Set[String] = Set.empty
     def include(txn: TXN) = true
     def toComplete: CompleteSelector = this
   }
   @varargs
-  def ChannelSelector(one: CH, others: CH*) =
+  def ChannelSelector(one: String, others: String*) =
     new ChannelSelector((one +: others).toSet)
   /** All streams in the provided channels, unbroken. */
-  case class ChannelSelector private[EventSource] (channels: Set[CH]) extends CompleteSelector {
-    //    def this(one: CH, others: CH*) = this((one +: others).toSet)
+  case class ChannelSelector private[EventSource] (channels: Set[String]) extends CompleteSelector {
+    //    def this(one: String, others: String*) = this((one +: others).toSet)
     require(channels.nonEmpty)
-    def channelSubset: Set[CH] = channels
+    def channelSubset: Set[String] = channels
     def include(txn: TXN) = channels.contains(txn.channel)
     def toComplete: CompleteSelector = this
   }
   @varargs
-  def EventSelector(chEvt: (CH, Set[CEVT]), more: (CH, Set[CEVT])*) =
+  def EventSelector(chEvt: (String, Set[CEVT]), more: (String, Set[CEVT])*) =
     new EventSelector(Map((chEvt :: more.toList): _*))
-  def EventSelector(byChannel: java.util.Map[CH, java.util.Set[CEVT]]) = {
+  def EventSelector(byChannel: java.util.Map[String, java.util.Set[CEVT]]) = {
     import collection.JavaConverters._
     new EventSelector(byChannel.asScala.toMap.mapValues(_.asScala.toSet))
   }
@@ -84,11 +84,11 @@ trait EventSource[ID, EVT, CH] {
     * revision number is still current, since this is no
     * longer guaranteed.
     */
-  case class EventSelector private[EventSource] (byChannel: Map[CH, Set[CEVT]])
+  case class EventSelector private[EventSource] (byChannel: Map[String, Set[CEVT]])
     extends Selector {
     require(byChannel.nonEmpty)
     require(byChannel.forall(_._2.nonEmpty), s"No events: ${byChannel.filter(_._2.isEmpty).map(_._1).mkString(", ")}")
-    def channelSubset: Set[CH] = byChannel.keySet
+    def channelSubset: Set[String] = byChannel.keySet
     def include(txn: TXN) = byChannel.get(txn.channel).exists { set =>
       txn.events.exists { evt =>
         set.exists { cls =>
@@ -99,9 +99,9 @@ trait EventSource[ID, EVT, CH] {
     def toComplete: CompleteSelector = ChannelSelector(byChannel.keySet)
   }
 
-  def StreamSelector(stream: ID, channel: CH) = new StreamSelector(stream, channel)
-  case class StreamSelector private[EventSource] (stream: ID, channel: CH) extends CompleteSelector {
-    def channelSubset: Set[CH] = Set(channel)
+  def StreamSelector(stream: ID, channel: String) = new StreamSelector(stream, channel)
+  case class StreamSelector private[EventSource] (stream: ID, channel: String) extends CompleteSelector {
+    def channelSubset: Set[String] = Set(channel)
     def include(txn: TXN) = txn.stream == stream && txn.channel == channel
     def toComplete: CompleteSelector = this
   }
@@ -109,12 +109,12 @@ trait EventSource[ID, EVT, CH] {
   object Selector {
     def Everything = EventSource.this.Everything
     @varargs
-    def apply(ch: CH, one: CEVT, others: CEVT*) =
+    def apply(ch: String, one: CEVT, others: CEVT*) =
       new EventSelector(Map(ch -> (one +: others).toSet))
     @varargs
-    def apply(one: CH, others: CH*) =
+    def apply(one: String, others: String*) =
       ChannelSelector(one, others: _*)
-    def apply(stream: ID, channel: CH) =
+    def apply(stream: ID, channel: String) =
       new StreamSelector(stream, channel)
   }
 

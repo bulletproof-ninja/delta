@@ -9,7 +9,7 @@ import scuff.concurrent.AsyncStreamConsumer
 import scala.concurrent.duration.FiniteDuration
 
 private object MonotonicProcessor {
-  private type TXN = Transaction[_, _, _]
+  private type TXN = Transaction[_, _]
   val RevOrdering = new Ordering[TXN] {
     def compare(x: TXN, y: TXN): Int = {
       assert(x.stream == y.stream)
@@ -21,9 +21,9 @@ private object MonotonicProcessor {
 abstract class MonotonicProcessor[ID, EVT, S >: Null](
     protected val processStore: StreamProcessStore[ID, S])(
     implicit protected val evtTag: ClassTag[EVT])
-  extends (Transaction[ID, _ >: EVT, _] => Future[Unit]) {
+  extends (Transaction[ID, _ >: EVT] => Future[Unit]) {
 
-  protected[util] type TXN = Transaction[ID, _ >: EVT, _]
+  protected[util] type TXN = Transaction[ID, _ >: EVT]
   type Snapshot = delta.Snapshot[S]
   type Update = processStore.Update
 
@@ -165,7 +165,7 @@ abstract class MonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null, BR](
     protected val completionTimeout: FiniteDuration,
     processStore: StreamProcessStore[ID, S])
   extends MonotonicProcessor[ID, EVT, S](processStore)
-  with AsyncStreamConsumer[Transaction[ID, _ >: EVT, _], BR] {
+  with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
   override def onDone(): Future[BR] = {
     super.onDone().map { res =>

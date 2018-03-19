@@ -10,11 +10,11 @@ import delta.{ EventCodec, EventStore }
 /**
   * Non-persistent implementation, probably only useful for testing.
   */
-abstract class TransientEventStore[ID, EVT, CH, SF](
+abstract class TransientEventStore[ID, EVT, SF](
   execCtx: ExecutionContext)(implicit codec: EventCodec[EVT, SF])
-    extends EventStore[ID, EVT, CH] {
+    extends EventStore[ID, EVT] {
 
-  private def Txn(id: ID, rev: Int, ch: CH, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
+  private def Txn(id: ID, rev: Int, ch: String, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
     val eventsSF = events.map { evt =>
       (codec.name(evt), codec.version(evt), codec.encode(evt))
     }
@@ -23,7 +23,7 @@ abstract class TransientEventStore[ID, EVT, CH, SF](
   private class Txn(
       id: ID,
       val rev: Int,
-      ch: CH,
+      ch: String,
       val tick: Long,
       metadata: Map[String, String],
       eventsSF: List[(String, Byte, SF)]) {
@@ -52,7 +52,7 @@ abstract class TransientEventStore[ID, EVT, CH, SF](
   def currRevision(stream: ID): Future[Option[Int]] = Future(findCurrentRevision(stream))
 
   def commit(
-    channel: CH, stream: ID, revision: Int, tick: Long,
+    channel: String, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = Future {
     val transactions = txnMap.getOrElse(stream, Vector[Txn]())
     val expectedRev = transactions.size

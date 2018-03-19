@@ -62,11 +62,11 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   def setup() {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
-    es = new CassandraEventStore[String, AggrEvent, Unit, String](
-      session, TableDescriptor) with Publishing[String, AggrEvent, Unit] {
-      val publisher = new LocalPublisher[String, AggrEvent, Unit](RandomDelayExecutionContext)
+    es = new CassandraEventStore[String, AggrEvent, String](
+      session, TableDescriptor) with Publishing[String, AggrEvent] {
+      val publisher = new LocalPublisher[String, AggrEvent](RandomDelayExecutionContext)
     }
-    repo = new EntityRepository((), TheOneAggr)(es)
+    repo = new EntityRepository(TheOneAggr)(es)
   }
   private def deleteAll(session: Session): Unit = {
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))
@@ -74,5 +74,10 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   @After
   def teardown() {
     deleteAll(session)
+  }
+
+  @Test
+  def mock() {
+    Assert.assertTrue(true)
   }
 }

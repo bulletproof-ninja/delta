@@ -77,7 +77,7 @@ abstract class AbstractEventStoreRepositoryTest {
     def decode(map: Map[String, String]): Timestamp = Timestamp.parseISO(map(name)).get
   }
 
-  @volatile var es: EventStore[String, AggrEvent, Unit] = _
+  @volatile var es: EventStore[String, AggrEvent] = _
   @volatile var repo: Repository[String, Aggr] with MutableEntity = _
 
   private def doAsync(f: Promise[Any] => Unit) {
@@ -309,9 +309,10 @@ class Aggr(val state: TheOneAggr.State, val mergeEvents: Seq[AggrEvent]) {
   def numbers = aggr.numbers
 }
 
-object TheOneAggr extends Entity[Aggr, AggrState, AggrEvent](AggrStateAssembler) {
+object TheOneAggr extends Entity("", AggrStateAssembler) {
 
   type Id = String
+  type Type = Aggr
 
   def init(state: State, mergeEvents: List[AggrEvent]): Aggr = new Aggr(state, mergeEvents)
   def state(entity: Aggr) = entity.state
@@ -349,11 +350,11 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
   @Before
   def setup() {
 
-    es = new TransientEventStore[String, AggrEvent, Unit, String](RandomDelayExecutionContext)
-    with Publishing[String, AggrEvent, Unit] {
-      val publisher = new LocalPublisher[String, AggrEvent, Unit](ec)
+    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)
+    with Publishing[String, AggrEvent] {
+      val publisher = new LocalPublisher[String, AggrEvent](ec)
     }
-    repo = new EntityRepository((), TheOneAggr)(es)
+    repo = new EntityRepository(TheOneAggr)(es)
   }
 
 }
@@ -396,12 +397,12 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   def setup() {
     metrics = Nil
       def ?[T](implicit t: T) = implicitly[T]
-    es = new TransientEventStore[String, AggrEvent, Unit, String](RandomDelayExecutionContext)
-    with Publishing[String, AggrEvent, Unit] {
-      val publisher = new LocalPublisher[String, AggrEvent, Unit](RandomDelayExecutionContext)
+    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)
+    with Publishing[String, AggrEvent] {
+      val publisher = new LocalPublisher[String, AggrEvent](RandomDelayExecutionContext)
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
     val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap)(_ => Future successful None)
-    repo = new EntityRepository((), TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
+    repo = new EntityRepository(TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
   }
 }

@@ -32,8 +32,9 @@ object Department {
     repo.insert(id, dept, metadata)
   }
 
-  object Def extends Entity[Department, DeptState, DeptEvent](DeptAssembler) {
+  object Def extends Entity("Department", DeptAssembler) {
     type Id = DeptId
+    type Type = Department
     def init(state: State, mergeEvents: List[DeptEvent]) = new Impl(state, mergeEvents)
     def state(dept: Department) = dept match {
       case dept: Impl => dept.state

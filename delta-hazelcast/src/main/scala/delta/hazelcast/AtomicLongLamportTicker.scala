@@ -11,7 +11,7 @@ import delta.EventSource
 import delta.LamportTicker
 
 object AtomicLongLamportTicker {
-  def apply(al: IAtomicLong, es: EventSource[_, _, _]): LamportTicker = {
+  def apply(al: IAtomicLong, es: EventSource[_, _]): LamportTicker = {
     val cas = new AtomicCAS(al)
     val lc = new LamportClock(cas)
     es.maxTick().await(111.seconds).foreach(lc.sync)

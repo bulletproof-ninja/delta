@@ -68,10 +68,10 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   def setup() {
     val result = deleteAll()
     assertTrue(result.wasAcknowledged)
-    es = new MongoEventStore[String, AggrEvent, Unit](coll) with Publishing[String, AggrEvent, Unit] {
-      val publisher = new LocalPublisher[String, AggrEvent, Unit](RandomDelayExecutionContext)
+    es = new MongoEventStore[String, AggrEvent](coll) with Publishing[String, AggrEvent] {
+      val publisher = new LocalPublisher[String, AggrEvent](RandomDelayExecutionContext)
     }
-    repo = new EntityRepository((), TheOneAggr)(es)
+    repo = new EntityRepository(TheOneAggr)(es)
   }
   private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>

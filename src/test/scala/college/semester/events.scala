@@ -1,10 +1,10 @@
 package college.semester
 
 import college.CollegeEvent
-import college.StudentId
+import college.student.Student
 
 sealed trait SemesterEvent extends CollegeEvent
 
 case class ClassCreated(className: String) extends SemesterEvent
-case class StudentEnrolled(student: StudentId) extends SemesterEvent
-case class StudentCancelled(studentId: StudentId) extends SemesterEvent
+case class StudentEnrolled(student: Student.Id) extends SemesterEvent
+case class StudentCancelled(studentId: Student.Id) extends SemesterEvent

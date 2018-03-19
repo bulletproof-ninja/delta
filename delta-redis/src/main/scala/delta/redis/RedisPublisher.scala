@@ -8,27 +8,28 @@ import scuff.concurrent._
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.util.control.NonFatal
 
-final class RedisPublisher[ID, EVT, CH](
+final class RedisPublisher[ID, EVT](
     info: JedisShardInfo,
-    channelEncoder: CH => Array[Byte],
-    allChannels: Set[CH],
+    channelEncoder: String => Array[Byte],
+    allChannels: Set[String],
     protected val publishCtx: ExecutionContext,
-    protected val publishCodec: Codec[delta.Transaction[ID, EVT, CH], Array[Byte]] = new scuff.JavaSerializer[delta.Transaction[ID, EVT, CH]])
-  extends Publisher[ID, EVT, CH] {
+    protected val publishCodec: Codec[delta.Transaction[ID, EVT], Array[Byte]] = JavaSerializer[delta.Transaction[ID, EVT]])
+  extends Publisher[ID, EVT] {
 
   def this(
       info: JedisShardInfo,
-      allChannels: Array[CH],
-      channelEncoder: CH => Array[Byte],
-      publishCtx: ExecutionContext) =
-    this(info, channelEncoder, allChannels.toSet, publishCtx)
+      allChannels: Array[String],
+      channelEncoder: String => Array[Byte],
+      publishCtx: ExecutionContext,
+      publishCodec: Codec[delta.Transaction[ID, EVT], Array[Byte]]) =
+    this(info, channelEncoder, allChannels.toSet, publishCtx, publishCodec)
+
   def this(
       info: JedisShardInfo,
-      allChannels: Array[CH],
-      channelEncoder: CH => Array[Byte],
-      publishCtx: ExecutionContext,
-      publishCodec: Codec[delta.Transaction[ID, EVT, CH], Array[Byte]]) =
-    this(info, channelEncoder, allChannels.toSet, publishCtx, publishCodec)
+      allChannels: Array[String],
+      channelEncoder: String => Array[Byte],
+      publishCtx: ExecutionContext) =
+    this(info, channelEncoder, allChannels.toSet, publishCtx)
 
   protected type PublishFormat = Array[Byte]
 
@@ -63,13 +64,13 @@ final class RedisPublisher[ID, EVT, CH](
     pool
   }
 
-  def publish(stream: ID, channel: CH, txn: Array[Byte]): Unit = blocking {
+  def publish(stream: ID, channel: String, txn: Array[Byte]): Unit = blocking {
     jedisPool.use { jedis =>
       jedis.publish(channelEncoder(channel), txn)
     }
   }
 
-  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[CH]): Subscription = {
+  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[String]): Subscription = {
     val filteredSub = new FilteredSubscriber(include, callback)
     exclusiveLock {
       if (subscribers.isEmpty) {

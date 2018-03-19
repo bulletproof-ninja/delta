@@ -8,10 +8,10 @@ import delta.Publishing
 import delta.Publisher
 
 class SomeEventStore(ec: ExecutionContext, hz: HazelcastInstance)
-  extends TransientEventStore[Int, MyEvent, Unit, Array[Byte]](ec)
-  with Publishing[Int, MyEvent, Unit] {
+  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec)
+  with Publishing[Int, MyEvent] {
 
-  protected val publisher: Publisher[Int, MyEvent, Unit] =
-    TopicPublisher(hz, Set(()), ec, ch => s"SomeEventStore:topic($ch)")
+  protected val publisher: Publisher[Int, MyEvent] =
+    TopicPublisher(hz, Set(""), ec, ch => s"SomeEventStore:topic")
 
 }

@@ -4,8 +4,9 @@ import college._
 import delta.ddd._
 import delta.EventReducer
 
-object Student extends Entity[Student, StudentState, StudentEvent](StudentAssembler) {
-  type Id = StudentId
+object Student extends Entity("student", StudentAssembler) {
+  type Id = IntId[Student]
+  type Type = Student
 
   def init(state: State, mergeEvents: List[StudentEvent]) = new Student(state)
 

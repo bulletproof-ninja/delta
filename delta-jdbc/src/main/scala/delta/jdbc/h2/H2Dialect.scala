@@ -4,8 +4,8 @@ import scuff._
 import delta.jdbc.Dialect
 import delta.jdbc.ColumnType
 
-class H2Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: Option[String])
-    extends Dialect[ID, EVT, CH, SF](schema) {
+class H2Dialect[ID: ColumnType, EVT, SF: ColumnType](schema: Option[String])
+    extends Dialect[ID, EVT, SF](schema) {
 
   def this(schema: String) = this(schema.optional)
 

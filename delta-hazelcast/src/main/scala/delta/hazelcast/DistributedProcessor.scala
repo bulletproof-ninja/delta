@@ -17,7 +17,7 @@ import scala.reflect.{ ClassTag, classTag }
 case class EntryState[D, EVT](
   snapshot: Snapshot[D],
   contentUpdated: Boolean = false,
-  unapplied: TreeMap[Int, Transaction[_, EVT, _]] = TreeMap.empty[Int, Transaction[_, EVT, _]])
+  unapplied: TreeMap[Int, Transaction[_, EVT]] = TreeMap.empty[Int, Transaction[_, EVT]])
 
 sealed abstract class EntryUpdateResult
 case object IgnoredDuplicate extends EntryUpdateResult
@@ -29,8 +29,8 @@ object DistributedProcessor {
     * Process transaction, ensuring proper sequencing.
     */
   def apply[K, D >: Null, EVT: ClassTag](imap: IMap[K, EntryState[D, EVT]], reducer: EventReducer[D, EVT])(
-    txn: Transaction[K, _ >: EVT, _]): Future[EntryUpdateResult] = {
-    val verifiedTxn: Transaction[K, EVT, _] = {
+    txn: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
+    val verifiedTxn: Transaction[K, EVT] = {
       txn.events.collect { case evt: EVT => evt } match {
         case Nil => sys.error(s"${txn.channel} transaction ${txn.stream}(rev:${txn.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
         case events => txn.copy(events = events)
@@ -47,17 +47,17 @@ object DistributedProcessor {
   }
 }
 
-/** 
- *  Distributed [[delta.Transaction]] entry processor, ensuring 
+/**
+ *  Distributed monotonic [[delta.Transaction]] entry processor, ensuring
  *  monotonic stream revision ordering.
  */
 final class DistributedProcessor[K, D >: Null, EVT] private[hazelcast] (
-  val txn: Transaction[K, EVT, _],
+  val txn: Transaction[K, EVT],
   val reducer: EventReducer[D, EVT])(implicit val evtTag: ClassTag[EVT])
     extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
 
   type S = EntryState[D, EVT]
-  type TXN = Transaction[_, EVT, _]
+  type TXN = Transaction[_, EVT]
 
   def process(entry: Entry[K, S]): Object = processTransaction(entry, this.txn)
 

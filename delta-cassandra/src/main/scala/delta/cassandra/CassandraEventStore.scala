@@ -18,7 +18,7 @@ import delta.{ EventCodec, EventStore }
 
 private[cassandra] object CassandraEventStore {
 
-  private def ensureTable[ID: ColumnType, CH: ColumnType, SF: ColumnType](
+  private def ensureTable[ID: ColumnType, SF: ColumnType](
     session: Session, keyspace: String, table: String, replication: Map[String, Any]) {
     val replicationStr = replication.map {
       case (key, str: CharSequence) => s"'$key':'$str'"
@@ -32,7 +32,7 @@ private[cassandra] object CassandraEventStore {
         stream_id ${cqlName[ID]},
         revision INT,
         tick BIGINT,
-        channel ${cqlName[CH]} STATIC,
+        channel TEXT STATIC,
         event_names LIST<TEXT>,
         event_versions LIST<TINYINT>,
         event_data LIST<${cqlName[SF]}>,
@@ -82,14 +82,14 @@ trait TableDescriptor {
   * @param session The Cassandra session (connection pool)
   * @param td The table descriptor
   */
-abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](
+abstract class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   session: Session,
   td: TableDescriptor)(implicit exeCtx: ExecutionContext, codec: EventCodec[EVT, SF])
-    extends EventStore[ID, EVT, CH] {
+    extends EventStore[ID, EVT] {
 
   import CassandraEventStore._
 
-  ensureTable[ID, CH, SF](session, td.keyspace, td.table, td.replication)
+  ensureTable[ID, SF](session, td.keyspace, td.table, td.replication)
 
   private def ct[T: ColumnType] = implicitly[ColumnType[T]]
 
@@ -98,7 +98,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
   protected def toTransaction(knownStream: Option[ID], row: Row, columns: Columns): TXN = {
     val stream = knownStream getOrElse ct[ID].readFrom(row, columns.stream_id)
     val tick = row.getLong(columns.tick)
-    val channel = ct[CH].readFrom(row, columns.channel)
+    val channel = row.getString(columns.channel)
     val revision = row.getInt(columns.revision)
     val metadata = {
       val map = row.getMap(columns.metadata, classOf[String], classOf[String])
@@ -220,7 +220,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       FROM $TableName
       WHERE tick >= ?
       ALLOW FILTERING""").setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (sinceTick: Long) => ps.bind(Long.box(sinceTick))
+    (sinceTick: Long) => ps.bind(Long box sinceTick)
   }
 
   private def where(name: String, count: Int): String = {
@@ -231,7 +231,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     }
   }
 
-  private val ReplayByChannels: Set[CH] => BoundStatement = {
+  private val ReplayByChannels: Set[String] => BoundStatement = {
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
       session.prepare(s"""
@@ -241,13 +241,13 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
         ALLOW FILTERING
         """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     })
-    (channels: Set[CH]) => {
+    (channels: Set[String]) => {
       val ps = getStatement(channels.size)
-      val args = channels.toSeq.map(ct[CH].writeAs)
+      val args = channels.toSeq
       ps.bind(args: _*)
     }
   }
-  private val ReplayByChannelsSince: (Set[CH], Long) => BoundStatement = {
+  private val ReplayByChannelsSince: (Set[String], Long) => BoundStatement = {
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
       session.prepare(s"""
@@ -258,13 +258,13 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
         ALLOW FILTERING
         """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     })
-    (channels: Set[CH], sinceTick: Long) => {
+    (channels: Set[String], sinceTick: Long) => {
       val ps = getStatement(channels.size)
-      val args = channels.toSeq.map(ct[CH].writeAs) :+ Long.box(sinceTick)
+      val args = channels.toSeq :+ Long.box(sinceTick)
       ps.bind(args: _*)
     }
   }
-  private def ReplayByEvent: (CH, Class[_ <: EVT]) => BoundStatement = {
+  private def ReplayByEvent: (String, Class[_ <: EVT]) => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $txnColumns
       FROM $TableName
@@ -272,13 +272,12 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       AND event_names CONTAINS ?
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (ch: CH, evtType: Class[_ <: EVT]) => {
-      val channel = ct[CH].writeAs(ch)
-      val evtName = codec.name(evtType)
+    (channel: String, evtType: Class[_ <: EVT]) => {
+      val evtName = codec name evtType
       ps.bind(channel, evtName)
     }
   }
-  private def ReplayByEventSince: (CH, Class[_ <: EVT], Long) => BoundStatement = {
+  private def ReplayByEventSince: (String, Class[_ <: EVT], Long) => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $txnColumns
       FROM $TableName
@@ -287,10 +286,8 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       AND tick >= ?
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (ch: CH, evtType: Class[_ <: EVT], sinceTick: Long) => {
-      val channel = ct[CH].writeAs(ch)
-      val evtName = codec.name(evtType)
-      ps.bind(channel, evtName, Long box sinceTick)
+    (channel: String, evtType: Class[_ <: EVT], sinceTick: Long) => {
+      ps.bind(channel, codec name evtType, Long box sinceTick)
     }
   }
 
@@ -374,14 +371,14 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, channel, revision)
       VALUES(?,?,?,?,?,?,?,0) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, channel: CH, tick: Long, events: List[EVT], metadata: Map[String, String]) => {
+    (id: ID, channel: String, tick: Long, events: List[EVT], metadata: Map[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
         ct[ID].writeAs(id),
         Long box tick,
         jTypes, jVers, jData,
         metadata.asJava,
-        ct[CH].writeAs(channel))
+        channel)
     }
   }
   private val RecordLaterRevision = {
@@ -400,7 +397,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
     }
   }
   protected def insert(
-    channel: CH, stream: ID, revision: Int, tick: Long,
+    channel: String, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String])(
       handler: ResultSet => TXN): Future[TXN] = {
     if (revision == 0) {
@@ -415,7 +412,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
   }
 
   def commit(
-    channel: CH, stream: ID, revision: Int, tick: Long,
+    channel: String, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     insert(channel, stream, revision, tick, events, metadata) { rs =>
       if (rs.wasApplied) {
@@ -469,7 +466,7 @@ abstract class CassandraEventStore[ID: ColumnType, EVT, CH: ColumnType, SF: Colu
       }
       case EventSelector(byChannel) => Right {
         val replayByEvent = sinceTick match {
-          case Some(sinceTick) => ReplayByEventSince(_: CH, _: Class[_ <: EVT], sinceTick)
+          case Some(sinceTick) => ReplayByEventSince(_: String, _: Class[_ <: EVT], sinceTick)
           case None => ReplayByEvent
         }
         byChannel.toList.flatMap {

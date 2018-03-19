@@ -25,10 +25,10 @@ class TestCollege {
 
   implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
 
-  lazy val eventStore: EventStore[Int, CollegeEvent, String] =
-    new TransientEventStore[Int, CollegeEvent, String, Array[Byte]](
-      RandomDelayExecutionContext) with Publishing[Int, CollegeEvent, String] {
-      val publisher = new LocalPublisher[Int, CollegeEvent, String](RandomDelayExecutionContext)
+  lazy val eventStore: EventStore[Int, CollegeEvent] =
+    new TransientEventStore[Int, CollegeEvent, Array[Byte]](
+      RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] {
+      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
     }
 
   implicit def ec = RandomDelayExecutionContext
@@ -36,45 +36,45 @@ class TestCollege {
 
   type TXN = eventStore.TXN
 
-  protected var StudentRepository: EntityRepository[Int, StudentEvent, String, StudentState, StudentId, student.Student] = _
-  protected var SemesterRepository: EntityRepository[Int, SemesterEvent, String, SemesterState, SemesterId, semester.Semester] = _
+  protected var StudentRepository: EntityRepository[Int, StudentEvent, StudentState, Student.Id, student.Student] = _
+  protected var SemesterRepository: EntityRepository[Int, SemesterEvent, SemesterState, Semester.Id, semester.Semester] = _
 
   @Before
   def setup() {
-    StudentRepository = new EntityRepository("Student", Student)(eventStore)
-    SemesterRepository = new EntityRepository("Semester", Semester)(eventStore)
+    StudentRepository = new EntityRepository(Student)(eventStore)
+    SemesterRepository = new EntityRepository(Semester)(eventStore)
   }
 
   private def randomName(): String = (
     rand.nextInRange('A' to 'Z') +: (1 to rand.nextInRange(2 to 12)).map(_ => rand.nextInRange('a' to 'z'))).mkString
 
   // Count not exact, since we can potentially generate id clashes
-  private def addStudents(approx: Int): Seq[StudentId] = {
+  private def addStudents(approx: Int): Seq[Student.Id] = {
     val ids =
       for (_ <- 1 to approx) yield {
         val name = randomName()
-        val id = new StudentId(rand.nextInt)
+        val id = new Student.Id(rand.nextInt)
         val student = Student(RegisterStudent(name))
         StudentRepository.insert(id, student).map(_ => id)
       }
     Future.sequence(ids).await(60.seconds)
   }
   // Count not exact, since we can potentially generate id clashes
-  private def addSemesters(approx: Int): Seq[SemesterId] = {
+  private def addSemesters(approx: Int): Seq[Semester.Id] = {
     val ids =
       for (_ <- 1 to approx) yield {
         val name = randomName() + " " + (100 + rand.nextInRange(1 to 9))
-        val id = new SemesterId(rand.nextInt)
+        val id = new Semester.Id(rand.nextInt)
         val cls = Semester(CreateClass(name))
         SemesterRepository.insert(id, cls).map(_ => id)
       }
     Future.sequence(ids).await(120.seconds)
   }
 
-  private def populate(studentCount: Int, semesterCount: Int): (Seq[StudentId], Seq[SemesterId]) = {
+  private def populate(studentCount: Int, semesterCount: Int): (Seq[Student.Id], Seq[Semester.Id]) = {
     val studentIds = addStudents(studentCount)
     val semesterIds = addSemesters(semesterCount)
-      def randomSemester: SemesterId = {
+      def randomSemester: Semester.Id = {
         val idx = rand.nextInRange(0 until semesterIds.size)
         semesterIds(idx)
       }
@@ -122,17 +122,17 @@ class TestCollege {
       "Student" -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
       "Semester" -> Set(classOf[StudentEnrolled]))) _
 
-    val allStudents = new TrieMap[StudentId, (Set[SemesterId], String)].withDefaultValue(Set.empty -> Unknown)
-    val readModel = new TrieMap[SemesterId, Map[StudentId, String]].withDefaultValue(Map.empty)
+    val allStudents = new TrieMap[Student.Id, (Set[Semester.Id], String)].withDefaultValue(Set.empty -> Unknown)
+    val readModel = new TrieMap[Semester.Id, Map[Student.Id, String]].withDefaultValue(Map.empty)
     val done = StreamPromise.foreach(enrollmentQuery) { txn: TXN =>
-        def onSemester(semesterId: SemesterId)(evt: CollegeEvent) = evt match {
+        def onSemester(semesterId: Semester.Id)(evt: CollegeEvent) = evt match {
           case StudentEnrolled(studentId) =>
             val semesterStudents = readModel(semesterId)
             val (studentSemesters, studentName) = allStudents(studentId)
             allStudents.update(studentId, (studentSemesters + semesterId, studentName))
             readModel.update(semesterId, semesterStudents.updated(studentId, studentName))
         }
-        def studentNameChange(studentName: String, studentId: StudentId) {
+        def studentNameChange(studentName: String, studentId: Student.Id) {
           val (studentSemesters, _) = allStudents(studentId)
           allStudents.update(studentId, (studentSemesters, studentName))
           studentSemesters.foreach { semesterId =>
@@ -140,13 +140,13 @@ class TestCollege {
             readModel.update(semesterId, semesterStudents.updated(studentId, studentName))
           }
         }
-        def onStudent(studentId: StudentId)(evt: CollegeEvent) = evt match {
+        def onStudent(studentId: Student.Id)(evt: CollegeEvent) = evt match {
           case StudentRegistered(studentName) => studentNameChange(studentName, studentId)
           case StudentChangedName(newName) => studentNameChange(newName, studentId)
         }
       val evtHandler = txn.channel match {
-        case "Student" => onStudent(new StudentId(txn.stream)) _
-        case "Semester" => onSemester(new SemesterId(txn.stream)) _
+        case "Student" => onStudent(new Student.Id(txn.stream)) _
+        case "Semester" => onSemester(new Semester.Id(txn.stream)) _
       }
       txn.events.foreach(evtHandler)
     }
@@ -168,13 +168,13 @@ class TestCollege {
   @Test
   def `with join state`() {
 
-    case class Semester(id: SemesterId, rev: Int) {
-      def this(id: Int, rev: Int) = this(new SemesterId(id), rev)
+    case class SemesterRev(id: Semester.Id, rev: Int) {
+      def this(id: Int, rev: Int) = this(new Semester.Id(id), rev)
       override val toString = s"${id.int}:$rev"
     }
     sealed abstract class Model
-    case class StudentModel(enrolled: Set[Semester]) extends Model
-    case class SemesterModel(students: Set[StudentId] = Set.empty) extends Model
+    case class StudentModel(enrolled: Set[SemesterRev]) extends Model
+    case class SemesterModel(students: Set[Student.Id] = Set.empty) extends Model
 
     class ModelBuilder(memMap: TrieMap[Int, delta.Snapshot[Model]])
       extends MonotonicBatchProcessor[Int, SemesterEvent, Model, Unit](
@@ -185,7 +185,7 @@ class TestCollege {
       type JoinState = StudentModel
 
       protected def preprocess(semesterId: Int, semesterRev: Int, tick: Long, evt: SemesterEvent): Map[Int, Processor] = {
-        val semester = new Semester(semesterId, semesterRev)
+        val semester = new SemesterRev(semesterId, semesterRev)
         evt match {
           case StudentEnrolled(studentId) => Map {
             studentId.int -> Processor(studentEnrolled(semester) _)
@@ -220,13 +220,13 @@ class TestCollege {
         case (model, _) => model
       }
 
-      private def studentEnrolled(semester: Semester)(model: Option[StudentModel]): StudentModel =
+      private def studentEnrolled(semester: SemesterRev)(model: Option[StudentModel]): StudentModel =
         model match {
           case Some(model @ StudentModel(enrolled)) => model.copy(enrolled = enrolled + semester)
           case None => new StudentModel(Set(semester))
           case _ => sys.error("Should never happen")
         }
-      private def studentCancelled(semester: Semester)(model: Option[StudentModel]): StudentModel =
+      private def studentCancelled(semester: SemesterRev)(model: Option[StudentModel]): StudentModel =
         model match {
           case Some(model @ StudentModel(enrolled)) => model.copy(enrolled = enrolled - semester)
           case None => sys.error("Out of order processing")
@@ -240,7 +240,7 @@ class TestCollege {
 //      .map {
 //        case (id, revOpt) => id -> revOpt.getOrElse{fail(s"Student $id does not exist"); -1}
 //      }.toMap
-    val semesterRevs: Map[SemesterId, Int] = (Future sequence semesterIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
+    val semesterRevs: Map[Semester.Id, Int] = (Future sequence semesterIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
       .map {
         case (id, revOpt) => id -> revOpt.getOrElse{fail(s"Semester $id does not exist"); -1}
       }.toMap
@@ -251,7 +251,7 @@ class TestCollege {
     builder.future.await
     inMemoryMap.foreach {
       case (semesterId, Snapshot(SemesterModel(students), rev, _)) =>
-        assertEquals(s"Semester $semesterId revision $rev failed", semesterRevs.get(new SemesterId(semesterId)), Some(rev))
+        assertEquals(s"Semester $semesterId revision $rev failed", semesterRevs.get(new Semester.Id(semesterId)), Some(rev))
         val studentSemesters = students
           .map(id => inMemoryMap(id.int))
           .collect {

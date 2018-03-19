@@ -6,13 +6,13 @@ import scuff.Subscription
 /**
   * Enable pub/sub of transactions.
   */
-trait Publishing[ID, EVT, CH]
-  extends EventStore[ID, EVT, CH] {
+trait Publishing[ID, EVT]
+  extends EventStore[ID, EVT] {
 
-  protected def publisher: Publisher[ID, EVT, CH]
+  protected def publisher: Publisher[ID, EVT]
 
   abstract final override def commit(
-      channel: CH, stream: ID, revision: Int, tick: Long,
+      channel: String, stream: ID, revision: Int, tick: Long,
       events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     val txn = super.commit(channel, stream, revision, tick, events, metadata)
     publisher.publish(txn)

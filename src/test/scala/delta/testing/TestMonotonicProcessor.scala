@@ -58,29 +58,29 @@ class TestMonotonicProcessor {
       Transaction(
         stream = 42, revision = 0,
         events = List('H', 'e', 'l', 'l'),
-        tick = 100, channel = (), metadata = Map.empty),
+        tick = 100, channel = "", metadata = Map.empty),
       Transaction(
         stream = 42, revision = 1,
         events = List('o', ','),
-        tick = 105, channel = (), metadata = Map.empty),
+        tick = 105, channel = "", metadata = Map.empty),
       Transaction(
         stream = 42, revision = 2,
         events = List(' '),
-        tick = 220, channel = (), metadata = Map.empty),
+        tick = 220, channel = "", metadata = Map.empty),
       Transaction(
         stream = 42, revision = 0,
         events = List('H', 'e', 'l', 'l'),
-        tick = 100, channel = (), metadata = Map.empty),
+        tick = 100, channel = "", metadata = Map.empty),
       Transaction(
         stream = 42, revision = 3,
         events = List('W', 'o'),
-        tick = 300, channel = (), metadata = Map.empty),
+        tick = 300, channel = "", metadata = Map.empty),
       Transaction(
         stream = 42, revision = 4,
         events = List('r', 'l', 'd', '!'),
-        tick = 666, channel = (), metadata = Map.empty))
+        tick = 666, channel = "", metadata = Map.empty))
 
-      def processAndVerify(ec: ExecutionContext, txns: List[Transaction[Int, Char, Unit]], n: Int) {
+      def processAndVerify(ec: ExecutionContext, txns: List[Transaction[Int, Char]], n: Int) {
         Tracker.clear()
         val txnSequence = { txns.map(_.revision).mkString(",") }
         //        println(s"----------------- $n: $txnSequence using $ec ---------------")

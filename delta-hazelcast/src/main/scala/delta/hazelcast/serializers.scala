@@ -11,9 +11,9 @@ import delta.hazelcast.Updated
 import scala.reflect.ClassTag
 
 trait TransactionSerializer
-    extends StreamSerializer[delta.Transaction[Any, Any, Any]] {
+    extends StreamSerializer[delta.Transaction[Any, Any]] {
 
-  type TXN = delta.Transaction[Any, Any, Any]
+  type TXN = delta.Transaction[Any, Any]
 
   def write(out: ObjectDataOutput, txn: TXN): Unit = {
     val output = out match {
@@ -28,7 +28,7 @@ trait TransactionSerializer
       case inp: java.io.ObjectInput => inp
       case inp: java.io.InputStream => new ObjectInputStream(inp)
     }
-    delta.Transaction.readObject[Any, Any, Any](input) {
+    delta.Transaction.readObject[Any, Any](input) {
       case (tick, ch, id, rev, metadata, events) =>
         new TXN(tick, ch, id, rev, metadata, events)
     }
@@ -62,7 +62,7 @@ trait DistributedProcessorSerializer
   }
 
   def read(inp: ObjectDataInput) = {
-    val txn = inp.readObject[delta.Transaction[Any, Any, Any]]
+    val txn = inp.readObject[delta.Transaction[Any, Any]]
     val reducer = inp.readObject[EventReducer[Any, Any]]
     val evtTag = inp.readObject[ClassTag[Any]]
     new delta.hazelcast.DistributedProcessor(txn, reducer)(evtTag)

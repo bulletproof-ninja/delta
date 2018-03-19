@@ -13,9 +13,9 @@ import scuff.Subscription
   * @tparam EVT Event type
   * @tparam CH Channel type
   */
-abstract class Publisher[ID, EVT, CH] {
+abstract class Publisher[ID, EVT] {
 
-  type TXN = Transaction[ID, EVT, CH]
+  type TXN = Transaction[ID, EVT]
   /** Publish format. */
   protected type PublishFormat
   /** Publish format codec. */
@@ -35,10 +35,10 @@ abstract class Publisher[ID, EVT, CH] {
     * Publish transaction. This will happen on
     * the `publishCtx` execution context.
     */
-  protected def publish(stream: ID, channel: CH, txn: PublishFormat): Unit
+  protected def publish(stream: ID, channel: String, txn: PublishFormat): Unit
 
   /**
     * Subscribe to transactions.
     */
-  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[CH] = Set.empty): Subscription
+  def subscribe[U](include: TXN => Boolean, callback: TXN => U, channelSubset: Set[String] = Set.empty): Subscription
 }

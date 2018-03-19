@@ -25,13 +25,13 @@ import delta.Transaction
   * be considered a high-water mark, and so
   * can ticks from completed batch processing.
   */
-abstract class EventSourceConsumer[ID, EVT, CH](
+abstract class EventSourceConsumer[ID, EVT](
     maxTickProcessed: Option[Long]) {
 
   type BatchResult
 
-  type ES = EventSource[ID, _ >: EVT, CH]
-  type TXN = Transaction[ID, _ >: EVT, CH]
+  type ES = EventSource[ID, _ >: EVT]
+  type TXN = Transaction[ID, _ >: EVT]
 
   /** Transaction selector. */
   protected def selector(es: ES): es.Selector

@@ -27,16 +27,15 @@ import delta.SnapshotStore
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param ticker Ticker implementation
   */
-class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, ET](
-    channel: CH,
-    entity: Entity[ET, S, EVT] { type Id = ID })(
-    eventStore: EventStore[ESID, _ >: EVT, CH],
+class EntityRepository[ESID, EVT, S >: Null, ID <% ESID, ET](
+    entity: Entity[S, EVT] { type Id = ID; type Type = ET })(
+    eventStore: EventStore[ESID, _ >: EVT],
     snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
     assumeCurrentSnapshots: Boolean = false)(
     implicit exeCtx: ExecutionContext, ticker: Ticker)
   extends Repository[ID, ET] with MutableEntity {
 
-  private val repo = new EventStoreRepository(channel, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
+  private val repo = new EventStoreRepository(entity.name, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
 
   def exists(id: ID): Future[Option[Int]] = repo.exists(id)
 
@@ -53,10 +52,11 @@ class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, ET](
     @volatile var returnValue = null.asInstanceOf[R]
     val futureRev = repo.update(id, expectedRevision, metadata) {
       case ((state, mergeEvents), revision) =>
+//        val state = entity.newState(s)
         val instance = entity.initEntity(state, mergeEvents)
         updateThunk(instance, revision).map { ret =>
           returnValue = ret
-          val state = entity.getState(instance)
+          val state = entity.validatedState(instance)
           state.curr -> state.appliedEvents
         }
     }
@@ -65,7 +65,7 @@ class EntityRepository[ESID, EVT, CH, S >: Null, ID <% ESID, ET](
 
   def insert(id: ID, instance: ET, metadata: Map[String, String]): Future[Int] = {
     try {
-      val state = entity.getState(instance)
+      val state = entity.validatedState(instance)
       repo.insert(id, state.curr -> state.appliedEvents, metadata)
     } catch {
       case NonFatal(e) => Future failed e

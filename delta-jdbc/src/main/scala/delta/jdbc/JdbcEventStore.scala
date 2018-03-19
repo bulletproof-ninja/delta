@@ -18,11 +18,11 @@ private object JdbcEventStore {
   }
 }
 
-abstract class JdbcEventStore[ID, EVT, CH, SF](
-  dialect: Dialect[ID, EVT, CH, SF],
+abstract class JdbcEventStore[ID, EVT, SF](
+  dialect: Dialect[ID, EVT, SF],
   blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)(
     implicit codec: EventCodec[EVT, SF])
-    extends EventStore[ID, EVT, CH] {
+    extends EventStore[ID, EVT] {
   cp: ConnectionProvider =>
 
   def ensureSchema(): this.type = {
@@ -58,7 +58,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
   }
 
   def commit(
-    channel: CH, stream: ID, revision: Int, tick: Long,
+    channel: String, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN] = {
     require(revision >= 0, "Must be non-negative revision, was: " + revision)
     require(events.nonEmpty, "Must have at least one event")
@@ -113,7 +113,7 @@ abstract class JdbcEventStore[ID, EVT, CH, SF](
   @annotation.tailrec
   private def processTransactions(singleStream: Boolean, onNext: TXN => Unit)(
     stream: ID, revision: Int, rs: ResultSet, col: dialect.Columns): Unit = {
-    val channel = rs.getValue(col.channel)(dialect.chType)
+    val channel = rs.getString(col.channel)
     val tick = rs.getLong(col.tick)
     var lastEvtIdx: Byte = -1
     var metadata = Map.empty[String, String]

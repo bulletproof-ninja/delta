@@ -3,9 +3,11 @@ package college.semester
 import college._
 import delta.ddd._
 import delta.EventReducer
+import college.student.Student
 
-object Semester extends Entity[Semester, SemesterState, SemesterEvent](SemesterAssembler) {
-  type Id = SemesterId
+object Semester extends Entity("semester", SemesterAssembler) {
+  type Id = IntId[Semester]
+  type Type = Semester
 
   def apply(cmd: CreateClass): Semester = {
     val semester = new Semester
@@ -58,5 +60,5 @@ class Semester private (
 }
 
 case class CreateClass(className: String)
-case class EnrollStudent(student: StudentId)
-case class CancelStudent(student: StudentId)
+case class EnrollStudent(student: Student.Id)
+case class CancelStudent(student: Student.Id)

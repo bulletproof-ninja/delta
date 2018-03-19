@@ -6,8 +6,8 @@ import scuff._
 import delta.EventCodec
 import scala.util.Try
 
-class DefaultDialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType](schema: String = null)
-  extends Dialect[ID, EVT, CH, SF](schema.optional)
+class DefaultDialect[ID: ColumnType, EVT, SF: ColumnType](schema: String = null)
+  extends Dialect[ID, EVT, SF](schema.optional)
 
 private[jdbc] object Dialect {
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = {
@@ -16,11 +16,10 @@ private[jdbc] object Dialect {
   }
 }
 
-protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] protected[jdbc] (
+protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     final val schema: Option[String]) {
 
   private[jdbc] def idType = implicitly[ColumnType[ID]]
-  private[jdbc] def chType = implicitly[ColumnType[CH]]
   private[jdbc] def sfType = implicitly[ColumnType[SF]]
 
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
@@ -45,7 +44,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   protected def streamTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $streamTable (
       stream_id ${idType.typeName} NOT NULL,
-      channel ${chType.typeName} NOT NULL,
+      channel $channelType NOT NULL,
 
       PRIMARY KEY (stream_id)
     )
@@ -77,6 +76,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
   """
   def createTickIndex(conn: Connection): Unit = executeDDL(conn, tickIndexDDL)
 
+  protected def channelType = "VARCHAR(255)"
   protected def eventNameType = "VARCHAR(255)"
   protected def eventTableDDL: String = s"""
     CREATE TABLE IF NOT EXISTS $eventTable (
@@ -131,11 +131,11 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       (stream_id, channel)
       VALUES (?, ?)
   """
-  def insertStream(stream: ID, channel: CH)(
+  def insertStream(stream: ID, channel: String)(
       implicit conn: Connection) {
     prepareStatement(streamInsert) { ps =>
       ps.setValue(1, stream)
-      ps.setValue(2, channel)
+      ps.setString(2, channel)
       ps.executeUpdate()
     }
   }
@@ -280,7 +280,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
     ORDER BY e.stream_id, e.revision, e.event_idx
   """
 
-  def selectTransactionsByChannels(channels: Set[CH], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByChannels(channels: Set[String], sinceTick: Long = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -293,14 +293,14 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
-        ps.setValue(colIdx.next, channel)
+        ps.setString(colIdx.next, channel)
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxnColumnsIdx)
       }
     }
   }
-  def selectTransactionsByEvents(eventsByChannel: Map[CH, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByEvents(eventsByChannel: Map[String, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection, codec: EventCodec[EVT, SF]): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -315,7 +315,7 @@ protected class Dialect[ID: ColumnType, EVT, CH: ColumnType, SF: ColumnType] pro
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
-        ps.setValue(colIdx.next, channel)
+        ps.setString(colIdx.next, channel)
       }
       events foreach { evt =>
         ps.setString(colIdx.next, codec.name(evt))

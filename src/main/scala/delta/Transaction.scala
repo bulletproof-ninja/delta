@@ -1,9 +1,9 @@
 package delta
 
 @SerialVersionUID(1)
-final case class Transaction[+ID, +EVT, +CH](
+final case class Transaction[+ID, +EVT](
     tick: Long,
-    channel: CH,
+    channel: String,
     stream: ID,
     revision: Int,
     metadata: Map[String, String],
@@ -12,7 +12,7 @@ final case class Transaction[+ID, +EVT, +CH](
     Transaction.writeObject(this, out)
   }
   private def readObject(inp: java.io.ObjectInputStream) {
-    Transaction.readObject[ID, EVT, CH](inp) {
+    Transaction.readObject[ID, EVT](inp) {
       case (tick, ch, id, rev, metadata, events) =>
         val surgeon = new scuff.reflect.Surgeon(this)
         surgeon.set('tick, tick)
@@ -28,9 +28,9 @@ final case class Transaction[+ID, +EVT, +CH](
 }
 
 object Transaction {
-  def writeObject(txn: Transaction[_, _, _], out: java.io.ObjectOutput): Unit = {
+  def writeObject(txn: Transaction[_, _], out: java.io.ObjectOutput): Unit = {
     out.writeLong(txn.tick)
-    out.writeObject(txn.channel)
+    out.writeUTF(txn.channel)
     out.writeObject(txn.stream)
     out.writeInt(txn.revision)
     out.writeChar(txn.metadata.size)
@@ -50,11 +50,11 @@ object Transaction {
       case null => events
       case evt => readEvents(in, evt :: events)
     }
-  def readObject[ID, EVT, CH](
+  def readObject[ID, EVT](
     inp: java.io.ObjectInput)(
-      ctor: (Long, CH, ID, Int, Map[String, String], List[EVT]) => Transaction[ID, EVT, CH]): Transaction[ID, EVT, CH] = {
+      ctor: (Long, String, ID, Int, Map[String, String], List[EVT]) => Transaction[ID, EVT]): Transaction[ID, EVT] = {
     val tick = inp.readLong()
-    val ch = inp.readObject.asInstanceOf[CH]
+    val ch = inp.readUTF
     val id = inp.readObject.asInstanceOf[ID]
     val rev = inp.readInt()
     val mdSize: Int = inp.readChar()

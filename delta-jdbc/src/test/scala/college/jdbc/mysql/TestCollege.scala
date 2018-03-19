@@ -39,19 +39,18 @@ class TestCollege extends college.TestCollege {
   def dropDb(): Unit = {
     TestCollege.dropDb()
     eventStore match {
-      case es: JdbcEventStore[_, _, _, _] => es.ensureSchema()
+      case es: JdbcEventStore[_, _, _] => es.ensureSchema()
     }
   }
 
   import TestCollege._
 
-  override lazy val eventStore: EventStore[Int, CollegeEvent, String] = {
-    implicit object ChannelColumn extends VarCharColumn(255)
+  override lazy val eventStore: EventStore[Int, CollegeEvent] = {
     implicit def DataColumn = BlobColumn
-    val sql = new MySQLDialect[Int, CollegeEvent, String, Array[Byte]]
-    new JdbcEventStore[Int, CollegeEvent, String, Array[Byte]](
-      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent, String] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, CollegeEvent, String](RandomDelayExecutionContext)
+    val sql = new MySQLDialect[Int, CollegeEvent, Array[Byte]]
+    new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
+      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
+      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
       protected def dataSource = ds
     }.ensureSchema()
   }
