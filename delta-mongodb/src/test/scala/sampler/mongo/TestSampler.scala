@@ -1,8 +1,5 @@
 package sampler.mongo
 
-import org.junit.Assert.assertTrue
-import org.junit.Test
-
 import com.mongodb.MongoNamespace
 
 import delta.mongo.MongoEventStore
@@ -11,15 +8,15 @@ import sampler.aggr.DomainEvent
 import delta.Publishing
 import delta.util.LocalPublisher
 
+import org.junit._, Assert._
+
 class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     import delta.mongo._
-    import com.mongodb.async.client._
-    val client = MongoClients.create()
+    val settings = com.mongodb.MongoClientSettings.builder().build()
     val ns = new MongoNamespace("unit-testing", "event-store")
-    val txnCollection = MongoEventStore.getCollection(ns, client)
-//      implicit def aggrCodec = AggrRootRegistry.codec
+    val txnCollection = MongoEventStore.getCollection(ns, settings)
       implicit def evtCdc = BsonDomainEventCodec
     new MongoEventStore[Int, DomainEvent](txnCollection) with Publishing[Int, DomainEvent] {
       val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)

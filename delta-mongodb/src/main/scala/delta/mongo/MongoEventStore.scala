@@ -4,38 +4,47 @@ import scala.concurrent.Future
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
-import org.bson.Document
+import org.bson.{ Document, BsonValue }
 import org.bson.codecs.{ Codec, DecoderContext, EncoderContext }
 import org.bson.codecs.configuration.{ CodecRegistries, CodecRegistry }
 import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
 
 import com.mongodb._
 import com.mongodb.async.SingleResultCallback
-import com.mongodb.async.client.{ MongoClient, MongoCollection }
+import com.mongodb.async.client.MongoCollection
 import com.mongodb.connection.ClusterType
 
 import scuff._
 import scuff.concurrent.Threads
 import delta.EventCodec
+import delta.NoVersioning
+import scala.annotation.varargs
+import com.mongodb.async.client.{ MongoClient, MongoClients }
+import collection.JavaConverters._
 
 object MongoEventStore {
+  @varargs
   def getCollection(
-    ns: MongoNamespace, client: MongoClient,
+    ns: MongoNamespace, settings: MongoClientSettings,
     codecs: Codec[_]*): MongoCollection[Document] = {
-    if (codecs.isEmpty) getCollection(ns, client, DEFAULT_CODEC_REGISTRY)
-    else getCollection(ns, client, CodecRegistries.fromCodecs(codecs: _*))
+    val client = MongoClients.create(settings)
+    if (codecs.isEmpty) getCollection(ns, settings, client, settings.getCodecRegistry)
+    else getCollection(ns, settings, client, CodecRegistries.fromCodecs(codecs: _*))
   }
   def getCollection(
-    ns: MongoNamespace, client: MongoClient,
-    optRegistry: CodecRegistry): MongoCollection[Document] = {
-    val registry = optRegistry match {
-      case null => CodecRegistries.fromRegistries(DEFAULT_CODEC_REGISTRY, client.getSettings.getCodecRegistry)
-      case reg => CodecRegistries.fromRegistries(reg, DEFAULT_CODEC_REGISTRY, client.getSettings.getCodecRegistry)
-    }
-    val (rc, wc) = client.getSettings.getClusterSettings.getRequiredClusterType match {
+    ns: MongoNamespace, settings: MongoClientSettings, client: MongoClient,
+    codecs: Codec[_]*): MongoCollection[Document] = {
+    if (codecs.isEmpty) getCollection(ns, settings, client, settings.getCodecRegistry)
+    else getCollection(ns, settings, client, CodecRegistries.fromCodecs(codecs: _*))
+  }
+  def getCollection(
+    ns: MongoNamespace, settings: MongoClientSettings, client: MongoClient, optRegistry: CodecRegistry): MongoCollection[Document] = {
+    val (rc, wc) = settings.getClusterSettings.getRequiredClusterType match {
       case ClusterType.REPLICA_SET => ReadConcern.MAJORITY -> WriteConcern.MAJORITY
       case _ => ReadConcern.DEFAULT -> WriteConcern.JOURNALED
     }
+    val registries = Seq(optRegistry, settings.getCodecRegistry, DEFAULT_CODEC_REGISTRY).filter(_ != null)
+    val registry = CodecRegistries.fromRegistries(registries.asJava)
     client
       .getDatabase(ns.getDatabaseName)
       .getCollection(ns.getCollectionName)

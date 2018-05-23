@@ -10,11 +10,11 @@ import org.junit.AfterClass
 import delta.mongo._
 import delta.EventCodecAdapter
 import scuff.Codec
-import org.bson.Document
-import com.mongodb.MongoNamespace
-import org.bson.types.Binary
 import delta.util.LocalPublisher
 import delta.Publishing
+import org.bson.BsonValue
+import com.mongodb._
+import org.bson.BsonBinary
 
 object TestCollege {
   import com.mongodb.async.client._
@@ -25,9 +25,10 @@ object TestCollege {
 
   @BeforeClass
   def setupClass() {
-    client = MongoClients.create()
+    val settings = com.mongodb.MongoClientSettings.builder().build()
+    client = MongoClients.create(settings)
     val ns = new MongoNamespace("unit-testing", getClass.getName.replaceAll("[\\.\\$]+", "_"))
-    coll = MongoEventStore.getCollection(ns, client)
+    coll = MongoEventStore.getCollection(ns, settings, client)
 
   }
   @AfterClass
