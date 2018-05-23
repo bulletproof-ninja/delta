@@ -32,6 +32,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   protected def channelIndex = s"${streamTable.replace(".", "_")}_channel_idx"
   protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
   protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
+  protected def byteDataType = "TINYINT"
 
   protected def executeDDL(conn: Connection, ddl: String) {
     val stm = conn.createStatement()
@@ -82,9 +83,9 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     CREATE TABLE IF NOT EXISTS $eventTable (
       stream_id ${idType.typeName} NOT NULL,
       revision INT NOT NULL,
-      event_idx TINYINT NOT NULL,
+      event_idx $byteDataType NOT NULL,
       event_name $eventNameType NOT NULL,
-      event_version TINYINT NOT NULL,
+      event_version $byteDataType NOT NULL,
       event_data ${sfType.typeName} NOT NULL,
 
       PRIMARY KEY (stream_id, revision, event_idx),
