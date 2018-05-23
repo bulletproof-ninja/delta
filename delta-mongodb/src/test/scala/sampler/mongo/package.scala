@@ -1,7 +1,8 @@
 package sampler
 
-import org.bson.Document
 
+import org.bson.BsonValue
+import delta.mongo.BsonJsonCodec
 import sampler.aggr.DomainEvent
 
 package object mongo {
@@ -42,10 +43,10 @@ package object mongo {
   //  }
 
   object BsonDomainEventCodec
-    extends AbstractEventCodec[Document] {
     def encode(evt: DomainEvent) = Document.parse(JsonDomainEventCodec.encode(evt))
     def decode(name: String, version: Byte, data: Document) =
       JsonDomainEventCodec.decode(name, version, data.toJson)
+    extends AbstractEventCodec[BsonValue] {
   }
 
 }

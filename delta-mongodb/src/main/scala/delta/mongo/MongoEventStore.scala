@@ -65,12 +65,12 @@ object MongoEventStore {
   * }}}
   */
 abstract class MongoEventStore[ID: Codec, EVT](
-  dbColl: MongoCollection[Document])(implicit codec: EventCodec[EVT, Document])
+  dbColl: MongoCollection[Document])(implicit codec: EventCodec[EVT, BsonValue])
     extends delta.EventStore[ID, EVT] {
 
   protected val store = {
     val txnCodec = new TransactionCodec(
-      dbColl.getCodecRegistry.get(classOf[Document]).ensuring(_ != null, "No Document codec found!"))
+      dbColl.getCodecRegistry.get(classOf[BsonValue]).ensuring(_ != null, "No BsonValue codec found!"))
     val registry = CodecRegistries.fromRegistries(
       CodecRegistries.fromCodecs(
         implicitly[Codec[ID]],
@@ -166,7 +166,7 @@ abstract class MongoEventStore[ID: Codec, EVT](
     store.find(filter).sort(ordering).forEach(onTxn, onFinish)
   }
 
-  private class TransactionCodec(docCodec: Codec[Document])
+  private class TransactionCodec(bsonCodec: Codec[BsonValue])
       extends Codec[TXN] {
 
     import org.bson.{ BsonReader, BsonType, BsonWriter }
@@ -207,7 +207,7 @@ abstract class MongoEventStore[ID: Codec, EVT](
             val (name, version) = codec signature evt
             writer.writeString("name", name)
             writer.writeInt32("v", version.unsigned)
-            writer.writeName("data"); docCodec.encode(writer, codec.encode(evt), ctx)
+            writer.writeName("data"); bsonCodec.encode(writer, codec.encode(evt), ctx)
           }
         }
       }
@@ -247,8 +247,8 @@ abstract class MongoEventStore[ID: Codec, EVT](
           val name = reader.readString("name")
           val version = reader.readInt32("v").toByte
           reader.readName("data")
-          val data = docCodec.decode(reader, ctx)
           codec.decode(name, version, data)
+          val data = bsonCodec.decode(reader, ctx)
         }
         readEvents(channel, reader, evt :: events)
       }

@@ -11,6 +11,9 @@ import delta.testing._
 import scuff.concurrent.Threads
 import delta.EventCodec
 import delta.Publishing
+import org.bson.BsonValue
+import org.bson.BsonString
+import org.bson.BsonInt32
 
 object TestMongoEventStore {
   import com.mongodb.async.client._
@@ -38,29 +41,29 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   import delta.mongo._
 
   implicit object MongoDBAggrEventCtx
-      extends ReflectiveDecoder[AggrEvent, Document]
-      with EventCodec[AggrEvent, Document]
+      extends ReflectiveDecoder[AggrEvent, BsonValue]
+      with EventCodec[AggrEvent, BsonValue]
       with AggrEventHandler {
-    type Return = Document
+    type Return = BsonValue
 
     def versionOf(evt: EventClass) = scuff.serialVersionUID(evt).toByte
     def nameOf(evt: EventClass) = evt.getSimpleName
 
-    def encode(evt: AggrEvent): Document = evt.dispatch(this)
+    def encode(evt: AggrEvent): BsonValue = evt.dispatch(this)
 
-    def on(evt: AggrCreated) = new Document("status", evt.status)
-    def offAggrCreated(version: Byte, doc: Document): AggrCreated = version match {
-      case 1 => AggrCreated(doc.getString("status"))
+    def on(evt: AggrCreated) = new BsonString(evt.status)
+    def offAggrCreated(version: Byte, bson: BsonValue): AggrCreated = version match {
+      case 1 => AggrCreated(bson.asString.getValue)
     }
 
-    def on(evt: NewNumberWasAdded) = new Document("number", evt.n)
-    def offNewNumberWasAdded(version: Byte, doc: Document): NewNumberWasAdded = version match {
-      case 1 => NewNumberWasAdded(doc.getInteger("number"))
+    def on(evt: NewNumberWasAdded) = new BsonInt32(evt.n)
+    def offNewNumberWasAdded(version: Byte, bson: BsonValue): NewNumberWasAdded = version match {
+      case 1 => NewNumberWasAdded(bson.asNumber.asInt32.intValue)
     }
 
-    def on(evt: StatusChanged) = new Document("newStatus", evt.newStatus)
-    def offStatusChanged(version: Byte, doc: Document): StatusChanged = version match {
-      case 1 => StatusChanged(doc.getString("newStatus"))
+    def on(evt: StatusChanged) = new BsonString(evt.newStatus)
+    def offStatusChanged(version: Byte, bson: BsonValue): StatusChanged = version match {
+      case 1 => StatusChanged(bson.asString.getValue)
     }
   }
 

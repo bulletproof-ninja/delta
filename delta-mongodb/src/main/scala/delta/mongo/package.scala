@@ -12,8 +12,12 @@ import org.bson.codecs._
 
 import com.mongodb.async.SingleResultCallback
 import java.util.UUID
+import org.bson._
+import org.bson.types.Decimal128
 
 package object mongo {
+
+  import language.implicitConversions
 
   implicit def tuple2Codec[A: Codec, B: Codec] = new Codec[(A, B)] {
     def getEncoderClass = classOf[Tuple2[_, _]].asInstanceOf[Class[Tuple2[A, B]]]
@@ -57,6 +61,18 @@ package object mongo {
     def decode(reader: BsonReader, decoderContext: DecoderContext): E#Value = {
       byName apply stringCodec.decode(reader, decoderContext)
     }
+  }
+
+  implicit def toBson(int: Int): BsonValue = new BsonInt32(int)
+  implicit def toBson(long: Long): BsonValue = new BsonInt64(long)
+  implicit def toBson(bool: Boolean): BsonValue = if (bool) BsonBoolean.TRUE else BsonBoolean.FALSE
+  implicit def toBson(str: String): BsonValue = if (str == null) BsonNull.VALUE else new BsonString(str)
+  implicit def toBson(dbl: Double): BsonValue = new BsonDouble(dbl)
+  implicit def toBson(bd: BigDecimal): BsonValue = if (bd == null) BsonNull.VALUE else toBson(bd.underlying)
+  implicit def toBson(bd: java.math.BigDecimal): BsonValue = if (bd == null) BsonNull.VALUE else new BsonDecimal128(new Decimal128(bd))
+  implicit def toBson(seq: collection.Seq[BsonValue]): BsonValue = if (seq == null) BsonNull.VALUE else {
+    import collection.JavaConverters._
+    new BsonArray(seq.asJava)
   }
 
   def withFutureCallback[R](

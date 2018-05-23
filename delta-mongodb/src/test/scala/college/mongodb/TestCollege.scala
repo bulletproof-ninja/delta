@@ -45,11 +45,9 @@ class TestCollege extends college.TestCollege {
     withBlockingCallback[Void]()(coll.drop(_))
   }
 
-  val BinaryDocCodec = new Codec[Array[Byte], Document] {
-    def encode(bytes: Array[Byte]) = new Document("bytes", bytes)
-    def decode(doc: Document): Array[Byte] = doc.get("bytes") match {
-      case bin: Binary => bin.getData
-    }
+  val BinaryDocCodec = new Codec[Array[Byte], BsonValue] {
+    def encode(bytes: Array[Byte]) = new BsonBinary(bytes)
+    def decode(bson: BsonValue): Array[Byte] = bson.asBinary().getData
   }
 
   implicit def EvtCodec = new EventCodecAdapter(BinaryDocCodec)
