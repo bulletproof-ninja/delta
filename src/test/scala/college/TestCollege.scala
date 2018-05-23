@@ -180,11 +180,11 @@ class TestCollege {
       extends MonotonicBatchProcessor[Int, SemesterEvent, Model, Unit](
           10.seconds,
           new ConcurrentMapStore(memMap)(_ => Future successful None))
-      with JoinState[Int, SemesterEvent, Model] {
+      with JoinStateProcessor[Int, SemesterEvent, Model, StudentModel] {
 
-      type JoinState = StudentModel
+      protected def preprocess(semesterId: Int, semesterRev: Int, tick: Long, evt: SemesterEvent, md: Map[String, String]): Map[Int, Processor] = preprocess(semesterId, semesterRev, evt)
 
-      protected def preprocess(semesterId: Int, semesterRev: Int, tick: Long, evt: SemesterEvent): Map[Int, Processor] = {
+      private def preprocess(semesterId: Int, semesterRev: Int, evt: SemesterEvent): Map[Int, Processor] = {
         val semester = new SemesterRev(semesterId, semesterRev)
         evt match {
           case StudentEnrolled(studentId) => Map {

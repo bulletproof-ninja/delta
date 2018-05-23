@@ -4,6 +4,8 @@ import scuff.ScuffMap
 import scala.concurrent.Future
 import delta.Snapshot
 import scuff.concurrent.Threads
+import delta.Transaction
+import scala.reflect.ClassTag
 
 /**
   * Build additional, or exclusively, collateral
@@ -16,15 +18,9 @@ import scuff.concurrent.Threads
   * is unlikely), thus processing should be
   * forgiving in that regard.
   */
-trait JoinState[ID, EVT, S >: Null]
-  extends MonotonicProcessor[ID, EVT, S] {
-
-  protected type JoinState <: S
-
-  protected final def Processor(process: Option[JoinState] => JoinState, revision: Int = -1): Processor = new Processor(process, revision)
-  protected final class Processor(processState: Option[JoinState] => JoinState, val revision: Int) {
-    @inline def apply(state: Option[JoinState]) = processState(state)
-  }
+trait JoinStateProcessor[ID, EVT, S >: Null, JS >: Null <: S]
+  extends MonotonicProcessor[ID, EVT, S]
+  with JoinState[ID, EVT, JS] {
 
   protected final override def processAsync(txn: TXN, currState: Option[S]): Future[S] = {
     val futureUpdates: Map[ID, Future[Update]] =
@@ -32,7 +28,7 @@ trait JoinState[ID, EVT, S >: Null]
         case (id, processor) =>
           id -> this.processStore.upsert(id) { snapshot =>
             val tick = snapshot.map(_.tick max txn.tick) getOrElse txn.tick
-            val updated = processor(snapshot.map(_.content.asInstanceOf[JoinState]))
+            val updated = processor(snapshot.map(_.content.asInstanceOf[JS]))
             Future successful Some(Snapshot(updated, processor.revision, tick)) -> Unit
           }(executionContext(id)).map(_._1.get)(Threads.PiggyBack)
       }
@@ -45,6 +41,21 @@ trait JoinState[ID, EVT, S >: Null]
       super.processAsync(txn, currState)
     }
   }
+}
+
+object JoinState {
+  final class Processor[JS](processState: Option[JS] => JS, val revision: Int) {
+    def this(processState: Option[JS] => JS) = this(processState, -1)
+    @inline def apply(state: Option[JS]) = processState(state)
+  }
+
+}
+trait JoinState[ID, EVT, JS] {
+
+  protected type Processor = JoinState.Processor[JS]
+
+  protected final def Processor(process: Option[JS] => JS): Processor = new Processor(process)
+  protected final def Processor(process: Option[JS] => JS, revision: Int): Processor = new Processor(process, revision)
 
   /**
     *  Pre-process event by returning map of indirect ids, if any,
@@ -55,15 +66,15 @@ trait JoinState[ID, EVT, S >: Null]
     *  @param evt Event from stream
     *  @return Map of collateral id and state processor(s) derivable from event, if any.
     */
-  protected def preprocess(streamId: ID, streamRevision: Int, tick: Long, evt: EVT): Map[ID, Processor]
+  protected def preprocess(streamId: ID, streamRevision: Int, tick: Long, evt: EVT, metadata: Map[String, String]): Map[ID, Processor]
 
-  private def preprocess(txn: TXN): Map[ID, Processor] = {
+  def preprocess(txn: Transaction[ID, _ >: EVT])(implicit ev: ClassTag[EVT]): Map[ID, Processor] = {
     import scuff._
     txn.events.foldLeft(Map.empty[ID, Processor]) {
       case (fmap, evt: EVT) =>
-        val mapping = preprocess(txn.stream, txn.revision, txn.tick, evt)
+        val mapping = preprocess(txn.stream, txn.revision, txn.tick, evt, txn.metadata)
         if (mapping.contains(txn.stream)) throw new IllegalStateException(
-          s"Indirect preprocessing must not contain stream id itself: ${txn.stream}")
+          s"JoinState preprocessing cannot contain stream id itself: ${txn.stream}")
         fmap.merge(mapping) {
           case (first, second) => Processor(
             option => second(Some(first(option))),
