@@ -206,7 +206,9 @@ class MongoEventStore[ID: Codec, EVT](
           writeDocument(writer) {
             val (name, version) = codec signature evt
             writer.writeString("name", name)
-            writer.writeInt32("v", version.unsigned)
+            if (version != NoVersioning.NoVersion) {
+              writer.writeInt32("v", version.unsigned)
+            }
             writer.writeName("data"); bsonCodec.encode(writer, codec.encode(evt), ctx)
           }
         }
@@ -245,9 +247,14 @@ class MongoEventStore[ID: Codec, EVT](
       } else {
         val evt = readDocument(reader) {
           val name = reader.readString("name")
-          val version = reader.readInt32("v").toByte
-          reader.readName("data")
-          codec.decode(name, version, data)
+          val version = reader.readName() match {
+            case "v" =>
+              val version = reader.readInt32().toByte
+              reader.readName("data")
+              version
+            case "data" => NoVersioning.NoVersion
+            case unexpected => sys.error(s"Unexpected name: $unexpected")
+          }
           val data = bsonCodec.decode(reader, ctx)
           codec.decode(channel, name, version, data)
         }
