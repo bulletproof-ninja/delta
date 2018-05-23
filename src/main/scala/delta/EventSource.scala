@@ -36,7 +36,7 @@ trait EventSource[ID, EVT] {
   /** Subscribe to published transactions. */
   def subscribe[U](
       selector: CompleteSelector = Everything)(
-      callback: TXN => U): Subscription
+      callback: TXN => U): Subscription = sys.error("Publishing not enabled!")
 
   type CEVT = Class[_ <: EVT]
 

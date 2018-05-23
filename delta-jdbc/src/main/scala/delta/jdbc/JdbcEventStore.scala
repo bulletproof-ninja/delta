@@ -18,7 +18,7 @@ private object JdbcEventStore {
   }
 }
 
-abstract class JdbcEventStore[ID, EVT, SF](
+class JdbcEventStore[ID, EVT, SF](
   dialect: Dialect[ID, EVT, SF],
   blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)(
     implicit codec: EventCodec[EVT, SF])

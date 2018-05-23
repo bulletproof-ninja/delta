@@ -19,7 +19,7 @@ trait Publishing[ID, EVT]
     txn
   }
 
-  def subscribe[U](selector: CompleteSelector)(callback: TXN => U): Subscription =
+  override def subscribe[U](selector: CompleteSelector)(callback: TXN => U): Subscription =
     publisher.subscribe(selector.include, callback, selector.channelSubset)
 
 }

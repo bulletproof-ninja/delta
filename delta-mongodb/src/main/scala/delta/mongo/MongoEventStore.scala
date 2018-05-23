@@ -64,7 +64,7 @@ object MongoEventStore {
   *   }
   * }}}
   */
-abstract class MongoEventStore[ID: Codec, EVT](
+class MongoEventStore[ID: Codec, EVT](
   dbColl: MongoCollection[Document])(implicit codec: EventCodec[EVT, BsonValue])
     extends delta.EventStore[ID, EVT] {
 

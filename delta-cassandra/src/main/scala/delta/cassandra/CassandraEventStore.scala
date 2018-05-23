@@ -82,7 +82,7 @@ trait TableDescriptor {
   * @param session The Cassandra session (connection pool)
   * @param td The table descriptor
   */
-abstract class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
+class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   session: Session,
   td: TableDescriptor)(implicit exeCtx: ExecutionContext, codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT] {
