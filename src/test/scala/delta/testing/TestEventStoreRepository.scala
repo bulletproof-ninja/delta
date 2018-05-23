@@ -83,7 +83,7 @@ abstract class AbstractEventStoreRepositoryTest {
   private def doAsync(f: Promise[Any] => Unit) {
     val something = Promise[Any]
     f(something)
-    Await.result(something.future, 50000.seconds) match {
+    Await.result(something.future, 222.seconds) match {
       case th: Throwable => throw th
       case Failure(th) => throw th
       case _ =>
