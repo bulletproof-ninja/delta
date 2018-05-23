@@ -12,15 +12,15 @@ trait EventReducer[S, EVT] extends Serializable {
 }
 
 object EventReducer {
-  def process[S, EVT: ClassTag](
+  def process[S >: Null, EVT: ClassTag](
       reducer: EventReducer[S, EVT])(
       os: Option[S], events: List[_ >: EVT]): S = {
-    val filtered = events.collect {
-      case evt: EVT => evt
+
+    events.iterator.foldLeft(os.orNull) {
+      case (null, evt: EVT) => reducer.init(evt)
+      case (state, evt: EVT) => reducer.next(state, evt)
     }
-    val (state, evts) = os.map(_ -> filtered) getOrElse (reducer.init(filtered.head) -> filtered.tail)
-    if (evts.isEmpty) state
-    else evts.foldLeft(state)(reducer.next)
+
   }
 }
 
