@@ -133,7 +133,7 @@ class JdbcEventStore[ID, EVT, SF](
         val name = rs.getString(col.event_name)
         val version = rs.getByte(col.event_version)
         val data = dialect.sfType.readFrom(rs, col.event_data)
-        events = codec.decode(name, version, data) :: events
+        events = codec.decode(channel, name, version, data) :: events
       }
       lastEvtIdx = evtIdx
       val nextRow =

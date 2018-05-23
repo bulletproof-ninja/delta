@@ -249,6 +249,7 @@ class MongoEventStore[ID: Codec, EVT](
           reader.readName("data")
           codec.decode(name, version, data)
           val data = bsonCodec.decode(reader, ctx)
+          codec.decode(channel, name, version, data)
         }
         readEvents(channel, reader, evt :: events)
       }
@@ -311,7 +312,7 @@ class MongoEventStore[ID: Codec, EVT](
         val matchByChannel = byChannel.toSeq.map {
           case (ch, eventTypes) =>
             val matcher = new Document("channel", ch)
-            val evtNames = eventTypes.map(codec.name)
+            val evtNames = eventTypes.map(codec.getName)
             matcher.append("events.name", new Document("$in", toJList(evtNames)))
         }
         if (matchByChannel.size == 1) {

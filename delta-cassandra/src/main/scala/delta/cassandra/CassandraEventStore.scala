@@ -111,7 +111,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     val eventNames = row.getList(columns.event_names, classOf[String])
     val eventVersions = row.getList(columns.event_versions, classOf[JByte])
     val eventData = row.getList(columns.event_data, ct[SF].jvmType)
-    val events = fromJLists(eventNames, eventVersions, eventData)
+    val events = fromJLists(channel, eventNames, eventVersions, eventData)
     Transaction(tick, channel, stream, revision, metadata, events)
   }
 
@@ -161,13 +161,13 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
 
-  private def fromJLists(types: JList[String], vers: JList[JByte], data: JList[SF]): List[EVT] = {
+  private def fromJLists(channel: String, types: JList[String], vers: JList[JByte], data: JList[SF]): List[EVT] = {
     val size = types.size
     assert(vers.size == size && data.size == size)
     var idx = size - 1
     var list = List.empty[EVT]
     while (idx != -1) {
-      list = codec.decode(types.get(idx), vers.get(idx), data.get(idx)) :: list
+      list = codec.decode(channel, types.get(idx), vers.get(idx), data.get(idx)) :: list
       idx -= 1
     }
     list
@@ -273,7 +273,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     (channel: String, evtType: Class[_ <: EVT]) => {
-      val evtName = codec name evtType
+      val evtName = codec getName evtType
       ps.bind(channel, evtName)
     }
   }
@@ -287,7 +287,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     (channel: String, evtType: Class[_ <: EVT], sinceTick: Long) => {
-      ps.bind(channel, codec name evtType, Long box sinceTick)
+      ps.bind(channel, codec getName evtType, Long box sinceTick)
     }
   }
 

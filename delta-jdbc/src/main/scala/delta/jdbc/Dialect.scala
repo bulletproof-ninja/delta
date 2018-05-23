@@ -319,7 +319,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
         ps.setString(colIdx.next, channel)
       }
       events foreach { evt =>
-        ps.setString(colIdx.next, codec.name(evt))
+        ps.setString(colIdx.next, codec.getName(evt))
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxnColumnsIdx)

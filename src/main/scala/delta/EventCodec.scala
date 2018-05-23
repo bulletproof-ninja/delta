@@ -6,28 +6,40 @@ trait EventCodec[EVT, SF] {
 
   type EventClass = Class[_ <: EVT]
 
-  final def name(evt: EVT): String = signature(evt.getClass)._1
-  final def version(evt: EVT): Byte = signature(evt.getClass)._2
-  final def signature(evt: EVT): (String, Byte) = signature(evt.getClass)
-  final def signature(cls: EventClass): (String, Byte) = signatures.get(cls)
-  final def name(cls: EventClass): String = signature(cls)._1
-  final def version(cls: EventClass): Byte = signature(cls)._2
+  private[delta] final def getName(evt: EVT): String = signature(evt.getClass)._1
+  private[delta] final def getVersion(evt: EVT): Byte = signature(evt.getClass)._2
+  private[delta] final def signature(evt: EVT): (String, Byte) = signature(evt.getClass)
+  private[delta] final def signature(cls: EventClass): (String, Byte) = signatures.get(cls)
+  private[delta] final def getName(cls: EventClass): String = signature(cls)._1
+  private[delta] final def getVersion(cls: EventClass): Byte = signature(cls)._2
   private[this] val signatures = new ClassValue[(String, Byte)] {
     def computeValue(cls: Class[_]) = {
       val evtCls = cls.asInstanceOf[EventClass]
-      nameOf(evtCls) -> versionOf(evtCls)
+      name(evtCls) -> version(evtCls)
     }
   }
 
-  /** Unique name of event. */
-  protected def nameOf(cls: EventClass): String
-  /** Event version number. Must be strictly > 0. */
-  protected def versionOf(cls: EventClass): Byte
+  /** Return unique name of event. */
+  protected def name(cls: EventClass): String
+  /** Return event version number. Must be strictly > 0. */
+  protected def version(cls: EventClass): Byte
 
-  /** Encode event data. */
+  /**
+    * Encode event data.
+    * @param evt The event
+    * @return Serialized event
+    */
   def encode(evt: EVT): SF
-  /** Decode to event instance. */
-  def decode(name: String, version: Byte, data: SF): EVT
+  /**
+    * Decode to event data.
+    * @param chnanel Channel
+    * @param name Event name
+    * @param version Event version
+    * @param data Event serialization data
+    * @return The deserialized event
+    */
+  def decode(channel: String, name: String, version: Byte, data: SF): EVT
+
 }
 
 /**
@@ -39,19 +51,19 @@ trait EventCodec[EVT, SF] {
 trait NoVersioning[EVT, SF] {
   codec: EventCodec[EVT, SF] =>
 
-  final def versionOf(evt: EventClass) = NoVersioning.NoVersion
+  protected final def version(evt: EventClass) = NoVersioning.NoVersion
 
-  override final def decode(name: String, version: Byte, data: SF): EVT = {
+  override final def decode(channel: String, name: String, version: Byte, data: SF): EVT = {
     if (version != NoVersioning.NoVersion) {
       throw new IllegalStateException(s"""Event "$name" is not versioned, yet version $version was passed""")
     }
-    decode(name, data)
+    decode(channel, name, data)
   }
-  def decode(name: String, data: SF): EVT
+  def decode(channel: String, name: String, data: SF): EVT
 
 }
 private[delta] object NoVersioning {
-  final val NoVersion: Byte = 0
+  final val NoVersion: Byte = -1
 }
 
 class EventCodecAdapter[EVT, A, B](
@@ -59,11 +71,11 @@ class EventCodecAdapter[EVT, A, B](
     implicit evtCodec: EventCodec[EVT, B])
   extends EventCodec[EVT, A] {
 
-  def nameOf(cls: EventClass) = evtCodec name cls
-  def versionOf(cls: EventClass) = evtCodec version cls
+  protected def name(cls: EventClass) = evtCodec getName cls
+  protected def version(cls: EventClass) = evtCodec getVersion cls
 
   def encode(evt: EVT): A = fmtCodec encode evtCodec.encode(evt)
-  def decode(name: String, version: Byte, data: A): EVT =
-    evtCodec.decode(name, version, fmtCodec decode data)
+  def decode(channel: String, eventName: String, eventVersion: Byte, eventData: A): EVT =
+    evtCodec.decode(channel, eventName, eventVersion, fmtCodec decode eventData)
 
 }

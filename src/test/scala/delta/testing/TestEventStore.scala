@@ -22,11 +22,11 @@ class TestEventStore {
       extends EventCodec[Event, Array[Byte]]
       with NoVersioning[Event, Array[Byte]] {
 
-    def nameOf(cls: EventClass): String = cls.getName
+    def name(cls: EventClass): String = cls.getName
 
     def encode(evt: Event): Array[Byte] =
       JavaSerializer.encode(evt)
-    def decode(name: String, data: Array[Byte]): Event =
+    def decode(channel: String, name: String, data: Array[Byte]): Event =
       JavaSerializer.decode(data).asInstanceOf[Event]
   }
 

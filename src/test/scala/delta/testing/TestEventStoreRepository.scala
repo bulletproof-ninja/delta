@@ -332,14 +332,14 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
     extends EventCodec[AggrEvent, String]
     with NoVersioning[AggrEvent, String] {
 
-    def nameOf(cls: EventClass): String = cls.getSimpleName
+    def name(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
       case AggrCreated(status) => s""" { "status": "$status" } """
       case NewNumberWasAdded(num) => s""" { "num": $num } """
       case StatusChanged(newStatus) => s""" { "status": "$newStatus" } """
     }
-    def decode(name: String, json: String): AggrEvent =
+    def decode(channel: String, name: String, json: String): AggrEvent =
       name match {
         case "AggrCreated" => AggrCreated(status = json.field("status"))
         case "NewNumberWasAdded" => NewNumberWasAdded(n = json.field("num").toInt)
@@ -370,7 +370,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
     type Return = String
 
     override def isMethodNameEventName = true
-    def nameOf(cls: EventClass): String = {
+    def name(cls: EventClass): String = {
       val lastDot = cls.getName.lastIndexOf('.')
       val nextDot = cls.getName.lastIndexOf('.', lastDot - 1)
       cls.getName.substring(nextDot + 1)

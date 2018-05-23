@@ -14,25 +14,26 @@ abstract class TransientEventStore[ID, EVT, SF](
   execCtx: ExecutionContext)(implicit codec: EventCodec[EVT, SF])
     extends EventStore[ID, EVT] {
 
-  private def Txn(id: ID, rev: Int, ch: String, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
+  private def Txn(id: ID, rev: Int, channel: String, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
     val eventsSF = events.map { evt =>
-      (codec.name(evt), codec.version(evt), codec.encode(evt))
+      val (name, version) = codec.signature(evt)
+      (name, version, codec.encode(evt))
     }
-    new Txn(id, rev, ch, tick, metadata, eventsSF)
+    new Txn(id, rev, channel, tick, metadata, eventsSF)
   }
   private class Txn(
       id: ID,
       val rev: Int,
-      ch: String,
+      channel: String,
       val tick: Long,
       metadata: Map[String, String],
       eventsSF: List[(String, Byte, SF)]) {
     def toTransaction: TXN = {
       val events = eventsSF.map {
         case (name, version, data) =>
-          codec.decode(name, version, data)
+          codec.decode(channel, name, version, data)
       }
-      Transaction(tick, ch, id, rev, metadata, events)
+      Transaction(tick, channel, id, rev, metadata, events)
     }
   }
 

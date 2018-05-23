@@ -16,8 +16,11 @@ import scala.reflect.NameTransformer
   * for `NoVersioning` events, the method must take a single
   * argument, `SF`.
   */
-abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag]
+abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (channel: Option[String])
   extends EventCodec[EVT, SF] {
+
+  protected def this() = this(None)
+  protected def this(channel: String) = this(Option(channel))
 
   /**
     * Is method name == event name?
@@ -32,17 +35,17 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag]
   protected def isMethodNameEventName: Boolean = false
   private def eventName(method: Method): String =
     if (isMethodNameEventName) NameTransformer decode method.getName
-    else this.name(method.getReturnType.asInstanceOf[Class[EVT]])
+    else this.getName(method.getReturnType.asInstanceOf[Class[EVT]])
 
   private def decoder(evtName: String, data: SF, version: Byte = NoVersioning.NoVersion): EVT = {
     val isVersioned = version != NoVersioning.NoVersion
     decoderMethods.get(evtName) match {
       case null =>
         val versionArg = if (isVersioned) "version: Byte, " else ""
-        val methodName = if (isMethodNameEventName) evtName else "<decoderMethod>"
-        val returnType = encoderEvents.get(evtName).map(_.getSimpleName) getOrElse s"<_ <: ${classTag[EVT].runtimeClass.getSimpleName}>"
+        val methodName = if (isMethodNameEventName) evtName else "someMethodName"
+        val returnType = encoderEvents.get(evtName).map(_.getSimpleName) getOrElse s"_ <: ${classTag[EVT].runtimeClass.getSimpleName}"
         val signature = s"def $methodName(${versionArg}data: ${classTag[SF].runtimeClass.getName}): $returnType"
-        val message = s"""No decoding method found for event "$evtName". Must match the following signature, where EVT is a sub-type of ${classTag[EVT].runtimeClass.getName}: $signature"""
+        val message = s"""No decoding method found for event "$evtName". Must match the following signature: $signature"""
         throw new IllegalStateException(message)
       case method => {
         if (isVersioned) method.invoke(this, Byte box version, data)
@@ -59,7 +62,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag]
       EvtClass != argTypes(0) &&
       FmtClass.isAssignableFrom(m.getReturnType)) {
       val evtType = argTypes(0).asInstanceOf[Class[EVT]]
-      Some(this.name(evtType) -> evtType)
+      Some(this.getName(evtType) -> evtType)
     } else None
   }.toMap
 
@@ -98,7 +101,20 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag]
     decoderMethodsByName
   }
 
-  def decode(name: String, version: Byte, data: SF): EVT = decoder(name, data, version)
-  def decode(name: String, data: SF) = decoder(name, data)
+  private[this] val channelOrNull = channel.orNull
+  @inline
+  private def verifyChannel(channel: String, event: String): Unit = {
+    if (channelOrNull != null && channelOrNull != channel) {
+      throw new IllegalStateException(s"${classOf[ReflectiveDecoder[_, _]].getName} instance ${getClass.getName}, dedicated to events from ${channelOrNull}, is being asked to decode event '$event' from channel '$channel'")
+    }
+  }
+  def decode(channel: String, name: String, version: Byte, data: SF): EVT = {
+    verifyChannel(channel, name)
+    decoder(name, data, version)
+  }
+  def decode(channel: String, name: String, data: SF) = {
+    verifyChannel(channel, name)
+    decoder(name, data)
+  }
 
 }

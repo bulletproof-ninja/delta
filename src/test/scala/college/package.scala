@@ -22,10 +22,10 @@ package object college {
       extends EventCodec[CollegeEvent, Array[Byte]]
       with NoVersioning[CollegeEvent, Array[Byte]] {
 
-    def nameOf(cls: EventClass): String = cls.getName
+    def name(cls: EventClass): String = cls.getName
 
     def encode(evt: CollegeEvent): Array[Byte] = JavaSerializer.encode(evt)
-    def decode(name: String, data: Array[Byte]) = JavaSerializer.decode(data).asInstanceOf[CollegeEvent]
+    def decode(channel: String, name: String, data: Array[Byte]) = JavaSerializer.decode(data).asInstanceOf[CollegeEvent]
   }
 
 }

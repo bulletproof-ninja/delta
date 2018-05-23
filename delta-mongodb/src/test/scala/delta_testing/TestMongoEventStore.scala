@@ -2,13 +2,11 @@ package delta_testing
 
 import com.mongodb.client.result.DeleteResult
 
-import delta.mongo.{ stringCodec, unitCodec }
 import org.junit._
 import org.junit.Assert._
 import delta.util._
 import delta.ddd._
 import delta.testing._
-import scuff.concurrent.Threads
 import delta.EventCodec
 import delta.Publishing
 import org.bson.BsonValue
@@ -46,8 +44,8 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
       with AggrEventHandler {
     type Return = BsonValue
 
-    def versionOf(evt: EventClass) = scuff.serialVersionUID(evt).toByte
-    def nameOf(evt: EventClass) = evt.getSimpleName
+    def version(evt: EventClass) = scuff.serialVersionUID(evt).toByte
+    def name(evt: EventClass) = evt.getSimpleName
 
     def encode(evt: AggrEvent): BsonValue = evt.dispatch(this)
 

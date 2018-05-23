@@ -7,9 +7,10 @@ package object foo {
     extends EventCodec[MyEvent, Array[Byte]]
     with NoVersioning[MyEvent, Array[Byte]] {
 
-    protected def nameOf(cls: EventClass): String =  cls.getName
+    protected def name(cls: EventClass): String =  cls.getName
     def encode(evt: MyEvent): Array[Byte] = JavaSerializer.encode(evt)
-    def decode(name: String,data: Array[Byte]): MyEvent = JavaSerializer.decode(data).asInstanceOf[MyEvent]
+    def decode(channel: String, name: String,data: Array[Byte]): MyEvent =
+      JavaSerializer.decode(data).asInstanceOf[MyEvent]
 
   }
 }
