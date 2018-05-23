@@ -67,18 +67,18 @@ final class DistributedProcessor[K, D >: Null, EVT] private[hazelcast] (
 
       case null => // First transaction seen
         if (txn.revision == 0) { // First transaction, as expected
-          val model = new Snapshot(EventReducer.process(reducer)(None, txn.events), txn.revision, txn.tick)
-          entry setValue new S(model, true)
-          Updated(model)
+          val snapshot = new Snapshot(EventReducer.process(reducer)(None, txn.events), txn.revision, txn.tick)
+          entry setValue new S(snapshot, true)
+          Updated(snapshot)
         } else { // Not first, so missing some
           entry setValue new S(null, false, TreeMap(txn.revision -> txn))
           MissingRevisions(0 until txn.revision)
         }
 
-      case EntryState(null, _, unapplied) => // Un-applied transactions exists, no model yet
+      case EntryState(null, _, unapplied) => // Un-applied transactions exists, no snapshot yet
         if (txn.revision == 0) { // This transaction is first, so apply
-          val model = new Snapshot(EventReducer.process(reducer)(None, txn.events), txn.revision, txn.tick)
-          entry setValue new S(model, true, unapplied.tail)
+          val snapshot = new Snapshot(EventReducer.process(reducer)(None, txn.events), txn.revision, txn.tick)
+          entry setValue new S(snapshot, true, unapplied.tail)
           processTransaction(entry, unapplied.head._2)
         } else { // Still not first transaction
           val state = new S(null, false, unapplied.updated(txn.revision, txn))
@@ -86,21 +86,21 @@ final class DistributedProcessor[K, D >: Null, EVT] private[hazelcast] (
           MissingRevisions(0 until state.unapplied.head._1)
         }
 
-      case EntryState(model, _, unapplied) =>
-        val expectedRev = model.revision + 1
+      case EntryState(snapshot, _, unapplied) =>
+        val expectedRev = snapshot.revision + 1
         if (txn.revision == expectedRev) { // Expected revision, apply
-          val updModel = new Snapshot(EventReducer.process(reducer)(Some(model.content), txn.events), txn.revision, txn.tick)
+          val updSnapshot = new Snapshot(EventReducer.process(reducer)(Some(snapshot.content), txn.events), txn.revision, txn.tick)
           unapplied.headOption match {
             case None =>
-              val dataUpdated = model.content != updModel.content
-              entry setValue new S(updModel, dataUpdated)
-              Updated(updModel)
+              val dataUpdated = !(snapshot contentEquals updSnapshot)
+              entry setValue new S(updSnapshot, dataUpdated)
+              Updated(updSnapshot)
             case Some((_, unappliedTxn)) =>
-              entry setValue new S(updModel, false, unapplied.tail)
+              entry setValue new S(updSnapshot, false, unapplied.tail)
               processTransaction(entry, unappliedTxn)
           }
         } else if (txn.revision > expectedRev) { // Future revision, missing some
-          val state = new S(model, false, unapplied.updated(txn.revision, txn))
+          val state = new S(snapshot, false, unapplied.updated(txn.revision, txn))
           entry setValue state
           MissingRevisions(expectedRev until state.unapplied.head._1)
         } else {
