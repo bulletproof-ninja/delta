@@ -15,6 +15,8 @@ class TestStreamProcessStore {
   def newStore: StreamProcessStore[Long, String] =
     new ConcurrentMapStore[Long, String](new TrieMap)(_ => Future successful None)
 
+  protected def storeSupportsConditionalWrites: Boolean = true
+
   @Test
   def foo() {
     val store = newStore
@@ -32,22 +34,24 @@ class TestStreamProcessStore {
     store.write(k1, Snapshot("Xyz:88888", 33, 3333L)).await
     rm1 = store.read(k1).await.get
     assertEquals(Snapshot("Xyz:88888", 33, 3333L), rm1)
-    try {
-      val writeSnapshot = Snapshot("Xyz:4444", rm1.revision - 1, rm1.tick + 1)
-      store.write(k1, writeSnapshot).await
-      fail("Should have failed on older revision")
-    } catch {
-      case ise: IllegalStateException =>
-        assertTrue(ise.getMessage.contains(rm1.revision.toString))
-        assertTrue(ise.getMessage.contains((rm1.revision - 1).toString))
-    }
-    try {
-      store.write(k1, Snapshot("Xyz:4444", rm1.revision, rm1.tick - 1)).await
-      fail("Should have failed on older tick")
-    } catch {
-      case ise: IllegalStateException =>
-        assertTrue(ise.getMessage.contains(rm1.tick.toString))
-        assertTrue(ise.getMessage.contains((rm1.tick - 1).toString))
+    if (storeSupportsConditionalWrites) {
+      try {
+        val writeSnapshot = Snapshot("Xyz:4444", rm1.revision - 1, rm1.tick + 1)
+        store.write(k1, writeSnapshot).await
+        fail("Should have failed on older revision")
+      } catch {
+        case ise: IllegalStateException =>
+          assertTrue(ise.getMessage.contains(rm1.revision.toString))
+          assertTrue(ise.getMessage.contains((rm1.revision - 1).toString))
+      }
+      try {
+        store.write(k1, Snapshot("Xyz:4444", rm1.revision, rm1.tick - 1)).await
+        fail("Should have failed on older tick")
+      } catch {
+        case ise: IllegalStateException =>
+          assertTrue(ise.getMessage.contains(rm1.tick.toString))
+          assertTrue(ise.getMessage.contains((rm1.tick - 1).toString))
+      }
     }
   }
 
@@ -59,7 +63,7 @@ class TestStreamProcessStore {
     assertEquals(9999L, snapshot.tick)
   }
 
-    @Test
+  @Test
   def `mix of new and old`() {
     val store = newStore
     val ids = (1L to 10L).map(tick => util.Random.nextLong -> (0 -> tick)).toMap

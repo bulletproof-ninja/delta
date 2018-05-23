@@ -6,7 +6,7 @@ import scala.collection.Map
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
-import delta.util.StreamProcessStore
+import delta.util.{ StreamProcessStore, BlockingCASWrites }
 import scuff._
 import scuff.jdbc.ConnectionProvider
 import delta.util.Exceptions
@@ -14,10 +14,9 @@ import delta.util.Exceptions
 abstract class AbstractJdbcStreamProcessStore[K, D: ColumnType] protected (
     val version: Short,
     table: String, schema: Option[String])(
-    implicit
-    jdbcCtx: ExecutionContext)
+    implicit jdbcCtx: ExecutionContext)
   extends AbstractStore
-  with StreamProcessStore[K, D] {
+  with StreamProcessStore[K, D] with BlockingCASWrites[K, D, Connection] {
   cp: ConnectionProvider =>
 
   case class ColumnDef(name: String, colTypeName: String)
@@ -29,8 +28,8 @@ abstract class AbstractJdbcStreamProcessStore[K, D: ColumnType] protected (
       this
     }
 
-  def maxTick: Future[Option[Long]] =
-    futureQuery { conn =>
+  def tickWatermark: Option[Long] =
+    forQuery { conn =>
       maxTick(tableRef, version)(conn)
     }
 
@@ -147,6 +146,13 @@ AND revision <= ? AND tick <= ?
     ps.setLong(2 + offset, tick)
   }
 
+  protected def readForUpdate[R](key: K)(thunk: (Connection, Option[Snapshot]) => R): R = {
+    forUpdate { conn =>
+      val existing = getAll(conn, List(key)).get(key)
+      thunk(conn, existing)
+    }
+  }
+
   def read(key: K): Future[Option[Snapshot]] = readBatch(List(key)).map(_.get(key))
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] = futureQuery { conn =>
     getAll(conn, keys)
@@ -247,49 +253,53 @@ AND revision <= ? AND tick <= ?
         }
       }
     }
+
+  protected def refreshKey(conn: Connection)(key: K, revision: Int, tick: Long): Unit =
+    refreshAll(conn, Map(key -> (revision -> tick)))
+
+  private def refreshAll(conn: Connection, revisions: Map[K, (Int, Long)]): Unit = {
+    val isBatch = revisions.tail.nonEmpty
+    val ps = conn.prepareStatement(refreshRevTickDefensiveSQL)
+    try {
+      revisions.foreach {
+        case (key, (revision, tick)) =>
+          setRevTick(ps, revision, tick, offset = 0)
+          val offset = setKeyParms(ps, key, offset = 2)
+          setRevTick(ps, revision, tick, offset = offset)
+          if (isBatch) ps.addBatch()
+      }
+      if (isBatch) executeBatch(ps, Nil)
+      else ps.executeUpdate()
+    } finally Try(ps.close)
+  }
+
   def refresh(key: K, revision: Int, tick: Long): Future[Unit] =
     refreshBatch(Map(key -> ((revision, tick))))
   def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] =
     if (revisions.isEmpty) Future successful Unit
-    else futureUpdate { conn =>
-      val isBatch = revisions.tail.nonEmpty
-      val ps = conn.prepareStatement(refreshRevTickDefensiveSQL)
-      try {
-        revisions.foreach {
-          case (key, (revision, tick)) =>
-            setRevTick(ps, revision, tick, offset = 0)
-            val offset = setKeyParms(ps, key, offset = 2)
-            setRevTick(ps, revision, tick, offset = offset)
-            if (isBatch) ps.addBatch()
-        }
-        if (isBatch) executeBatch(ps, Nil)
-        else ps.executeUpdate()
-      } finally Try(ps.close)
-    }
+    else futureUpdate(refreshAll(_, revisions))
 
-  def writeIfAbsent(key: K, snapshot: Snapshot): Future[Option[Snapshot]] =
-    futureUpdate { conn =>
-      val failed = insertSnapshots(conn, Map(key -> snapshot))
-      if (failed.isEmpty) None
-      else Some(getAll(conn, failed)(key))
-    }
+  protected def writeIfAbsent(conn: Connection)(key: K, snapshot: Snapshot): Option[Snapshot] = {
+    val failed = insertSnapshots(conn, Map(key -> snapshot))
+    if (failed.isEmpty) None
+    else Some(getAll(conn, failed)(key))
+  }
 
   /**
     *  Write replacement snapshot, if old snapshot matches.
     *  Otherwise return current snapshot.
     *  @return `None` if write was successful, or `Some` current snapshot
     */
-  def writeReplacement(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]] =
-    futureUpdate { conn =>
-      val ps = conn prepareStatement replaceSnapshotSQL
-      try {
-        val snapshotColOffset = setSnapshot(ps, newSnapshot)
-        val offset = setKeyParms(ps, key, snapshotColOffset)
-        setRevTick(ps, oldSnapshot.revision, oldSnapshot.tick, offset)
-        if (ps.executeUpdate() == 1) None
-        else Some(getAll(conn, List(key))(key))
-      } finally Try(ps.close)
-    }
+  def writeReplacement(conn: Connection)(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot] = {
+    val ps = conn prepareStatement replaceSnapshotSQL
+    try {
+      val snapshotColOffset = setSnapshot(ps, newSnapshot)
+      val offset = setKeyParms(ps, key, snapshotColOffset)
+      setRevTick(ps, oldSnapshot.revision, oldSnapshot.tick, offset)
+      if (ps.executeUpdate() == 1) None
+      else Some(getAll(conn, List(key))(key))
+    } finally Try(ps.close)
+  }
 
 }
 

@@ -8,7 +8,7 @@ import scala.annotation.tailrec
 import scala.concurrent._
 import scuff.jdbc.ConnectionProvider
 
-abstract class AbstractStore(implicit jdbcCtx: ExecutionContext) {
+abstract class AbstractStore(implicit protected val blockingCtx: ExecutionContext) {
   cp: ConnectionProvider =>
 
   protected def selectMaxTick(tableRef: String, version: Short) = s"""

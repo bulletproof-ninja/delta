@@ -7,7 +7,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
 import delta.Snapshot
-import delta.util.{ Exceptions, StreamProcessStore }
+import delta.util.{ Exceptions, StreamProcessStore, BlockingCASWrites }
 import scuff.ScuffString
 import scuff.jdbc.ConnectionProvider
 
@@ -20,13 +20,11 @@ class JdbcStreamProcessHistory[ID: ColumnType, D: ColumnType](
     val version: Short,
     table: String, schema: Option[String] = None)
   extends AbstractStore()(jdbcCtx)
-  with StreamProcessStore[ID, D] {
+  with StreamProcessStore[ID, D] with BlockingCASWrites[ID, D, Connection] {
   cp: ConnectionProvider =>
 
   def this(jdbcCtx: ExecutionContext, version: Short, table: String, schema: String) =
     this(jdbcCtx, version, table, schema.optional)
-
-  protected implicit def jdbcExeCtx = jdbcCtx
 
   /** Ensure table. */
   def ensureTable(): this.type =
@@ -111,10 +109,17 @@ AND t.tick = (
   protected def createTable(conn: Connection): Unit = createTable(conn, createTableDDL)
   protected def createTickIndex(conn: Connection): Unit = createIndex(conn, createTickIndexDDL)
 
-  def maxTick: Future[Option[Long]] =
-    futureQuery { conn =>
+  def tickWatermark: Option[Long] =
+    forQuery { conn =>
       maxTick(tableRef, version)(conn)
     }
+
+  protected def readForUpdate[R](key: ID)(thunk: (Connection, Option[Snapshot]) => R): R = {
+    forUpdate { conn =>
+      val existing = getAll(conn, List(key)).get(key)
+      thunk(conn, existing)
+    }
+  }
 
   def read(key: ID): Future[Option[Snapshot]] = readBatch(List(key)).map(_.get(key))
   def readBatch(keys: Iterable[ID]): Future[Map[ID, Snapshot]] =
@@ -142,18 +147,18 @@ AND t.tick = (
     } finally Try(ps.close)
   }
 
-  def write(key: ID, snapshot: Snapshot): Future[Unit] = {
-    val existing = conditionalWrite(key) {
-      case (conn, None) =>
+  def write(key: ID, snapshot: Snapshot): Future[Unit] = futureUpdate { conn =>
+    val existing = conditionalWrite(conn, key) {
+      case None =>
         insertSnapshots(conn, Map((key, snapshot))).isEmpty
-      case (conn, Some(existing)) if existing.revision <= snapshot.revision && existing.tick < snapshot.tick =>
+      case Some(existing) if existing.revision <= snapshot.revision && existing.tick < snapshot.tick =>
         insertSnapshots(conn, Map((key, snapshot))).isEmpty
-      case (conn, Some(existing)) if existing.revision <= snapshot.revision && existing.tick == snapshot.tick =>
+      case Some(existing) if existing.revision <= snapshot.revision && existing.tick == snapshot.tick =>
         updateSnapshot(conn, key, snapshot)
-      case (_, Some(existing)) =>
+      case Some(existing) =>
         throw Exceptions.writeOlder(key, existing, snapshot)
     }
-    existing.map {
+    existing match {
       case None => ()
       case Some(existing) =>
         throw Exceptions.writeOlder(key, existing, snapshot)
@@ -253,12 +258,10 @@ AND t.tick = (
     } finally Try(ps.close)
   }
 
-  def refresh(key: ID, revision: Int, tick: Long): Future[Unit] =
-    refreshBatch(Map(key -> (revision -> tick)))
+  protected def refreshKey(conn: Connection)(key: ID, revision: Int, tick: Long): Unit =
+    refreshAll(conn, Map(key -> (revision -> tick)))
 
-  def refreshBatch(revisions: Map[ID, (Int, Long)]): Future[Unit] =
-    if (revisions.isEmpty) Future successful Unit
-    else futureUpdate { conn =>
+  private def refreshAll(conn: Connection, revisions: Map[ID, (Int, Long)]): Unit = {
       val notUpdated = revisions.collect {
         case entry @ (key, (rev, tick)) if !updateTransaction(conn, key, rev, tick) =>
           entry
@@ -266,39 +269,45 @@ AND t.tick = (
       insertRevisions(conn, notUpdated)
       // Anything failed here, is discarded as too old.
       // No data is lost, so no point throwing exception
-    }
+  }
 
-  private def conditionalWrite(key: ID)(write: (Connection, Option[Snapshot]) => Boolean): Future[Option[Snapshot]] =
-    futureUpdate { conn =>
-      val existing: Option[Snapshot] = getAll(conn, List(key)).get(key)
-      if (write(conn, existing)) None
-      else {
-        conn.rollback()
-        existing
-      }
-    }
+  def refresh(key: ID, revision: Int, tick: Long): Future[Unit] =
+    refreshBatch(Map(key -> (revision -> tick)))
 
-  protected def writeIfAbsent(key: ID, snapshot: Snapshot): Future[Option[Snapshot]] =
-    conditionalWrite(key) {
-      case (conn, None) =>
+  def refreshBatch(revisions: Map[ID, (Int, Long)]): Future[Unit] =
+    if (revisions.isEmpty) Future successful Unit
+    else futureUpdate(refreshAll(_, revisions))
+
+  private def conditionalWrite(conn: Connection, key: ID)(write: Option[Snapshot] => Boolean): Option[Snapshot] = {
+    val existing: Option[Snapshot] = getAll(conn, List(key)).get(key)
+    if (write(existing)) None
+    else {
+      conn.rollback()
+      existing
+    }
+  }
+
+  protected def writeIfAbsent(conn: Connection)(key: ID, snapshot: Snapshot): Option[Snapshot] =
+    conditionalWrite(conn, key) {
+      case None =>
         insertSnapshots(conn, Map(key -> snapshot)).isEmpty
       case _ =>
         false
     }
 
-  protected def writeReplacement(key: ID, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]] = {
-    if (oldSnapshot.tick == newSnapshot.tick) conditionalWrite(key) {
-      case (conn, Some(existing)) if existing == oldSnapshot =>
+  protected def writeReplacement(conn: Connection)(key: ID, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot] = {
+    if (oldSnapshot.tick == newSnapshot.tick) conditionalWrite(conn, key) {
+      case Some(existing) if existing == oldSnapshot =>
         updateSnapshot(conn, key, newSnapshot)
-      case (_, None) =>
+      case None =>
         sys.error(s"Tried to replace unknown snapshot: $oldSnapshot")
       case _ =>
         false
     }
-    else conditionalWrite(key) {
-      case (conn, Some(existing)) if existing == oldSnapshot =>
+    else conditionalWrite(conn, key) {
+      case Some(existing) if existing == oldSnapshot =>
         insertSnapshots(conn, Map(key -> newSnapshot)).isEmpty
-      case (_, None) => sys.error(s"Tried to replace unknown snapshot: $oldSnapshot")
+      case None => sys.error(s"Tried to replace unknown snapshot: $oldSnapshot")
       case _ =>
         false
     }

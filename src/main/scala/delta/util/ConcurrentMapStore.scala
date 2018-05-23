@@ -1,6 +1,6 @@
 package delta.util
 
-import scala.collection.{Map, JavaConverters}
+import scala.collection.{ Map, JavaConverters }
 import JavaConverters._
 import scala.concurrent.Future
 import scala.util.Try
@@ -18,14 +18,20 @@ import scuff.concurrent.Threads
   * @param lookupFallback Persistent store fallback
   */
 final class ConcurrentMapStore[K, V](
-    cmap: collection.concurrent.Map[K, delta.Snapshot[V]])(
+    cmap: collection.concurrent.Map[K, delta.Snapshot[V]],
+    val tickWatermark: Option[Long] = None)(
     readFallback: K => Future[Option[delta.Snapshot[V]]])
-  extends StreamProcessStore[K, V] {
+  extends StreamProcessStore[K, V] with NonBlockingCASWrites[K, V] {
 
   def this(
       cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
       readFallback: K => Future[Option[delta.Snapshot[V]]]) =
-        this(cmap.asScala)(readFallback)
+    this(cmap.asScala)(readFallback)
+  def this(
+      maxTick: Long,
+      cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
+      readFallback: K => Future[Option[delta.Snapshot[V]]]) =
+    this(cmap.asScala, Some(maxTick))(readFallback)
 
   private[this] val unknownKeys = new collection.concurrent.TrieMap[K, Unit]
 
