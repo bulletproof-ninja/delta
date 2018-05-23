@@ -71,6 +71,7 @@ class JdbcEventStore[ID, EVT, SF](
           dialect.insertMetadata(stream, revision, metadata)
         } catch {
           case sqlEx: SQLException if dialect.isDuplicateKeyViolation(sqlEx) =>
+            Try(conn.rollback)
             selectRevision(stream, revision) match {
               case Some(dupe) => throw new DuplicateRevisionException(dupe)
               case None => throw sqlEx
