@@ -1,7 +1,7 @@
 package delta.java
 
 import scala.collection.JavaConverters._
-import scala.collection.Map
+import scala.collection._
 import java.util.Optional
 import scala.concurrent.{ Future, ExecutionContext }
 import java.util.stream._
@@ -9,27 +9,99 @@ import java.util.Spliterators
 import java.util.Spliterator
 import delta.util.StreamProcessStore
 import delta.Snapshot
+import java.util.function.Consumer
+import scala.util.Try
+import scala.util.Failure
+import java.util.function.BiConsumer
 
 object ScalaHelp {
 
   /** Unwrap state, returning `null` if empty. */
-  def unwrap[T >: Null](opt: Option[T]): T = opt.orNull
+  def getOrNull[T >: Null](opt: Option[T]): T = opt.orNull
 
   /** Turn Scala `Map` into Java `Map`. */
   def asJava[K, V](map: Map[K, V]): java.util.Map[K, V] = map.asJava
   /** Turn Scala `Option` into Java `Optional`. */
   def asJava[T >: Null](opt: Option[T]): Optional[T] = Optional.ofNullable(opt.orNull)
+  /** Turn Scala `Iterable` into Java `Iterable`. */
+  def asJava[T](iter: Iterable[T]): java.lang.Iterable[T] = iter.asJava
 
-  /** Turn Java `Map` into Scala `Map`. */
-  def asScala[K, V](map: java.util.Map[K, V]): Map[K, V] = map.asScala
+  /** Turn Java `Map` into Scala immutable `Map`. */
+  def asScala[K, V](map: java.util.Map[K, V]): immutable.Map[K, V] = map.asScala.toMap
   /** Turn Java `Iterable` into Scala `Iterable`. */
   def asScala[T](iter: java.lang.Iterable[T]): Iterable[T] = iter.asScala
   /** Turn Java `Optional` into Scala `Option`. */
   def asScala[T](opt: Optional[T]): Option[T] = if (opt.isPresent) Some(opt.get) else None
 
-  /**
-    * Transpose `Stream` of `Future`s into `Future` of `Stream`s.
-    */
+  /** var-args to Scala `Seq`. */
+  @annotation.varargs
+  def Seq[T](ts: T*): collection.immutable.Seq[T] = ts.toList
+
+  /** Combine two `Future`s into single `Future`. */
+  def combine[A, B](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B]): Future[(A, B)] = {
+      implicit def ec = exeCtx
+    for {
+      a <- futureA
+      b <- futureB
+    } yield (a, b)
+  }
+  /** Combine three `Future`s into single `Future`. */
+  def combine[A, B, C](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B], futureC: Future[C]): Future[(A, B, C)] = {
+      implicit def ec = exeCtx
+    for {
+      a <- futureA
+      b <- futureB
+      c <- futureC
+    } yield (a, b, c)
+  }
+  /** Combine four `Future`s into single `Future`. */
+  def combine[A, B, C, D](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B], futureC: Future[C], futureD: Future[D]): Future[(A, B, C, D)] = {
+      implicit def ec = exeCtx
+    for {
+      a <- futureA
+      b <- futureB
+      c <- futureC
+      d <- futureD
+    } yield (a, b, c, d)
+  }
+  /** Combine five `Future`s into single `Future`. */
+  def combine[A, B, C, D, E](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B], futureC: Future[C], futureD: Future[D], futureE: Future[E]): Future[(A, B, C, D, E)] = {
+      implicit def ec = exeCtx
+    for {
+      a <- futureA
+      b <- futureB
+      c <- futureC
+      d <- futureD
+      e <- futureE
+    } yield (a, b, c, d, e)
+  }
+  /** Combine six `Future`s into single `Future`. */
+  def combine[A, B, C, D, E, F](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B], futureC: Future[C], futureD: Future[D], futureE: Future[E], futureF: Future[F]): Future[(A, B, C, D, E, F)] = {
+      implicit def ec = exeCtx
+    for {
+      a <- futureA
+      b <- futureB
+      c <- futureC
+      d <- futureD
+      e <- futureE
+      f <- futureF
+    } yield (a, b, c, d, e, f)
+  }
+  /** Combine seven `Future`s into single `Future`. */
+  def combine[A, B, C, D, E, F, G](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B], futureC: Future[C], futureD: Future[D], futureE: Future[E], futureF: Future[F], futureG: Future[G]): Future[(A, B, C, D, E, F, G)] = {
+      implicit def ec = exeCtx
+    for {
+      a <- futureA
+      b <- futureB
+      c <- futureC
+      d <- futureD
+      e <- futureE
+      f <- futureF
+      g <- futureG
+    } yield (a, b, c, d, e, f, g)
+  }
+
+  /** Transpose `Stream` of `Future`s into `Future` of `Stream`s. */
   def transpose[T](futures: Stream[Future[T]], exeCtx: ExecutionContext): Future[Stream[T]] =
     transpose[T, T](futures, exeCtx, identity)
   /**
@@ -68,4 +140,12 @@ object ScalaHelp {
       }
     (Future sequence futures).map(_ => null: Void)
   }
+
+  def reportFailure[R](message: String, reporter: BiConsumer[String, Throwable]): PartialFunction[Try[R], Unit] = {
+    case Failure(th) => reporter.accept(message, th)
+  }
+  def reportFailure[R](reporter: Consumer[Throwable]): PartialFunction[Try[R], Unit] = {
+    case Failure(th) => reporter.accept(th)
+  }
+
 }
