@@ -35,7 +35,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID <% ESID, ET](
     implicit exeCtx: ExecutionContext, ticker: Ticker)
   extends Repository[ID, ET] with MutableEntity {
 
-  private val repo = new EventStoreRepository(entity.name, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
+  private[this] val repo = new EventStoreRepository(entity.name, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
 
   def exists(id: ID): Future[Option[Int]] = repo.exists(id)
 
@@ -52,7 +52,6 @@ class EntityRepository[ESID, EVT, S >: Null, ID <% ESID, ET](
     @volatile var returnValue = null.asInstanceOf[R]
     val futureRev = repo.update(id, expectedRevision, metadata) {
       case ((state, mergeEvents), revision) =>
-//        val state = entity.newState(s)
         val instance = entity.initEntity(state, mergeEvents)
         updateThunk(instance, revision).map { ret =>
           returnValue = ret
