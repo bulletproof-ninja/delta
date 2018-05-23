@@ -23,9 +23,11 @@ object Student extends Entity("student", StudentAssembler) {
 object StudentAssembler extends EventReducer[StudentState, StudentEvent] {
   def init(evt: StudentEvent) = evt match {
     case StudentRegistered(name) => new StudentState(name)
+    case _ => sys.error(s"Should not happen on init state: $evt")
   }
   def next(student: StudentState, evt: StudentEvent) = evt match {
     case StudentChangedName(newName) => student.copy(name = newName)
+    case _ => sys.error(s"Should not happen on next state: $evt")
   }
 
 }
