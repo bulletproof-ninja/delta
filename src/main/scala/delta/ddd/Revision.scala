@@ -15,7 +15,8 @@ object Revision {
       case _ => Latest
     }
   def apply(expected: Int, exact: Boolean = false): Revision =
-    if (exact) new Exactly(expected)
+    if (expected < 0) Latest
+    else if (exact) new Exactly(expected)
     else new Minimum(expected)
 
   /**
@@ -23,6 +24,7 @@ object Revision {
     * For updates, this means no merging allowed.
     */
   case class Exactly(expected: Int) extends Revision {
+    require(expected >= 0, s"Revision must be >= 0, was $expected")
     def value = Some(expected)
     def matches(actual: Int): Boolean = expected == actual
   }
@@ -32,6 +34,7 @@ object Revision {
     * For updates, if possible, merge if higher.
     */
   case class Minimum(expected: Int) extends Revision {
+    require(expected >= 0, s"Revision must be >= 0, was $expected")
     def value = Some(expected)
     def matches(actual: Int): Boolean = actual >= expected
   }
