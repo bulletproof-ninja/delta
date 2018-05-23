@@ -28,24 +28,35 @@ class TestSnapshotJson {
 
   @Test
   def zeros() {
-    val codec = new SnapshotJsonCodec(FooCodec)
+    val codec = new SnapshotJsonCodec(FooCodec, "foo")
     val snapshot = Snapshot(new Foo(42, "JSON", true)(Array("hello", "world")), 0, 0)
     val json = codec encode snapshot
     //    println(json)
-    assertEquals("""{"revision":0,"tick":0,"snapshot":{"number":42,"string":"JSON","bool":true,"list":["hello","world"]}}""", json)
+    assertEquals("""{"rev":0,"tick":0,"foo":{"number":42,"string":"JSON","bool":true,"list":["hello","world"]}}""", json)
     val snapshot2 = codec decode json
     assertEquals(snapshot, snapshot2)
   }
 
   @Test
   def max() {
-    val codec = new SnapshotJsonCodec(FooCodec)
+    val codec = new SnapshotJsonCodec(FooCodec, "foo")
     val snapshot = Snapshot(new Foo(42, "JSON", false, "")(Array("hello", "world")), Int.MaxValue, Long.MaxValue)
     val json = codec encode snapshot
     //    println(json)
-    assertEquals(s"""{"revision":${Int.MaxValue},"tick":${Long.MaxValue},"snapshot":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""", json)
+    assertEquals(s"""{"rev":${Int.MaxValue},"tick":${Long.MaxValue},"foo":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""", json)
     val snapshot2 = codec decode json
     assertEquals(snapshot, snapshot2)
+  }
+
+  @Test
+  def min() {
+    val codec = new SnapshotJsonCodec(FooCodec, "foo")
+    val snapshot = Snapshot(new Foo(42, "JSON", false, "")(Array("hello", "world")), Int.MinValue, Long.MinValue)
+    val json = codec encode snapshot
+    //    println(json)
+    assertEquals(s"""{"tick":${Long.MinValue},"foo":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""", json)
+    val snapshot2 = codec decode json
+    assertEquals(snapshot.copy(revision = -1), snapshot2)
   }
 
 }
