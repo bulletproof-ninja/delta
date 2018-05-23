@@ -1,6 +1,5 @@
 package delta.ddd
 
-import scala.collection.immutable.Map
 import scala.concurrent.Future
 import language.higherKinds
 
@@ -24,14 +23,14 @@ trait Repository[ID, E] extends Updates[ID, E] {
   def load(id: ID): Future[(E, Int)]
 
   /**
-    * Insert new entity. Will, by definition, be given revision `0`.
+    * Insert new entity. Will, by definition, always be given revision `0`.
     * @param id The instance id
     * @param entity The instance to insert
     * @param metadata Optional metadata.
-    * @return The revision (always `0`) if successful,
+    * @return The id if successful,
     * or [[delta.ddd.DuplicateIdException]] if id already exists
     */
-  def insert(id: ID, entity: E, metadata: Map[String, String] = Map.empty): Future[Int]
+  def insert(id: ID, entity: E, metadata: Map[String, String] = Map.empty): Future[ID]
 }
 
 sealed trait Updates[ID, E] {

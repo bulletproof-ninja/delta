@@ -1,6 +1,5 @@
 package sampler.aggr
 
-import collection.immutable.Seq
 import delta.ddd._
 import delta.ddd._
 
@@ -20,7 +19,7 @@ trait Department {
 
 object Department {
   type State = delta.ddd.State[DeptState, DeptEvent]
-
+  implicit def ec = delta.testing.RandomDelayExecutionContext
   def insert(repo: Repository[DeptId, Department])(
     id: DeptId, cmd: CreateDepartment)(
       thunk: Department => Map[String, String]): Future[Int] = {
@@ -29,20 +28,20 @@ object Department {
     val dept = new Impl
     dept.state(DeptCreated(name))
     val metadata = thunk(dept)
-    repo.insert(id, dept, metadata)
+    repo.insert(id, dept, metadata).map(_ => 0)
   }
 
   object Def extends Entity("Department", DeptAssembler) {
     type Id = DeptId
     type Type = Department
-    def init(state: State, mergeEvents: List[DeptEvent]) = new Impl(state, mergeEvents)
+    def init(state: State, mergeEvents: List[DeptEvent]) = new Impl(state)
     def state(dept: Department) = dept match {
       case dept: Impl => dept.state
     }
     def validate(state: DeptState) = require(state != null)
   }
 
-  private[aggr] class Impl(val state: State = Def.newState(), mergeEvents: Seq[DeptEvent] = Nil)
+  private[aggr] class Impl(val state: State = Def.newState())
       extends Department {
     @inline
     private def dept = state.curr

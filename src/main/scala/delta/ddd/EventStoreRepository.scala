@@ -93,7 +93,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
     case (snapshot, _) => snapshot.content -> Nil -> snapshot.revision
   }
 
-  def insert(id: RID, stEvt: RepoType, metadata: Map[String, String]): Future[Int] = stEvt match {
+  def insert(id: RID, stEvt: RepoType, metadata: Map[String, String]): Future[RID] = stEvt match {
     case (state, events) =>
       if (events.isEmpty) {
         Future failed new IllegalStateException(s"Nothing to insert, $id has no events.")
@@ -108,7 +108,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
             }
         }
         committedRevision.foreach(rev => snapshots.write(id, new Snapshot(state, rev, tick)))
-        committedRevision
+        committedRevision.map(_ => id)
       }
   }
 

@@ -50,11 +50,11 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
     updated
   }
 
-  def insert(id: ID, content: E, metadata: Map[String, String]): Future[Int] = {
+  def insert(id: ID, content: E, metadata: Map[String, String]): Future[ID] = {
     val (state, events) = content
     val inserted = impl.insert(id, state, metadata)
-    inserted.foreach { rev =>
-      publishEvents(id, rev, events, metadata)
+    inserted.foreach { id =>
+      publishEvents(id, 0, events, metadata)
     }(publishCtx)
     inserted
   }

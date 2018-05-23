@@ -15,9 +15,9 @@ class ConcurrentMapRepository[K, V <: AnyRef](
     map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
   extends Repository[K, V] with ImmutableEntity[V] {
 
-  def insert(id: K, entity: V, metadata: Map[String, String]): Future[Int] = Future {
+  def insert(id: K, entity: V, metadata: Map[String, String]): Future[K] = Future {
     map.putIfAbsent(id, entity -> 0) match {
-      case None => 0
+      case None => id
       case _ => throw new DuplicateIdException(id)
     }
   }

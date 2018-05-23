@@ -63,7 +63,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID <% ESID, ET](
     futureRev.map(returnValue -> _)
   }
 
-  def insert(id: ID, instance: ET, metadata: Map[String, String]): Future[Int] = {
+  def insert(id: ID, instance: ET, metadata: Map[String, String]): Future[ID] = {
     try {
       val state = entity.validatedState(instance)
       repo.insert(id, state.curr -> state.appliedEvents, metadata)

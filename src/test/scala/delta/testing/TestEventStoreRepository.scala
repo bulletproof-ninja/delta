@@ -221,12 +221,12 @@ abstract class AbstractEventStoreRepositoryTest {
     val baz = TheOneAggr.create()
     repo.insert(id, baz).onComplete {
       case Failure(t) => done.failure(t)
-      case Success(rev0) =>
-        assertEquals(0, rev0)
+      case Success(idAgain) =>
+        assertEquals(id, idAgain)
         repo.insert(id, baz).onComplete {
           case Failure(t) => done.failure(t)
-          case Success(rev0) =>
-            assertEquals(0, rev0)
+          case Success(idAgain) =>
+            assertEquals(id, idAgain)
             done.success(Unit)
         }
     }

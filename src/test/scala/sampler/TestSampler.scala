@@ -11,7 +11,6 @@ import delta.testing.RandomDelayExecutionContext
 import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 import delta.util.LocalPublisher
-import delta.Publisher
 
 class TestSampler {
 
@@ -35,12 +34,12 @@ class TestSampler {
     assertFalse(EmployeeRepo.exists(id).await.isDefined)
     val register = RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor")
     val emp = Employee(register)
-    val insertRev = EmployeeRepo.insert(id, emp, metadata).await
-    assertEquals(0, insertRev)
+    val insertId = EmployeeRepo.insert(id, emp, metadata).await
+    assertEquals(id, insertId)
     Try(EmployeeRepo.insert(id, emp, metadata).await) match {
-      case Success(revision) =>
+      case Success(idAgain) =>
         // Allow idempotent inserts
-        assertEquals(0, revision)
+        assertEquals(id, idAgain)
       case Failure(th) =>
         fail(s"Should succeed, but didn't: $th")
     }
@@ -57,8 +56,8 @@ class TestSampler {
     val id = new EmpId
     assertTrue(EmployeeRepo.exists(id).await.isEmpty)
     val emp = register(id, RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor"))
-    val insertRev = EmployeeRepo.insert(id, emp, metadata).await
-    assertEquals(0, insertRev)
+    val insertId = EmployeeRepo.insert(id, emp, metadata).await
+    assertEquals(id, insertId)
     try {
       EmployeeRepo.update(id, Revision(3), metadata) {
         case (emp, _) =>

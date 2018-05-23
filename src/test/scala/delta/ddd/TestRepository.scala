@@ -26,8 +26,8 @@ class TestRepository {
     withLatch(5) { latch =>
       val repo = new ConcurrentMapRepository[BigInt, Customer]
       val hank = Customer("Hank", "12345")
-      repo.insert(5, hank).foreach { rev =>
-        assertEquals(0, rev)
+      repo.insert(5, hank).foreach { id5 =>
+        assertEquals(BigInt(5), id5)
         latch.countDown()
         val update1 = repo.update(5, Revision(0)) {
           case (customer, rev) =>
