@@ -16,8 +16,6 @@ class RedisStreamProcessStore[K, T](
     blockingCtx: ExecutionContext)(
     jedisProvider: ((BinaryJedis => Any) => Any))
   extends BinaryRedisStreamProcessStore(
-      Codec.concat(keyCodec, Codec.UTF8),
-      Codec.concat(snapshotCodec, Codec.UTF8),
-      hashName, blockingCtx)(jedisProvider) {
-
-}
+      Codec.pipe(keyCodec, Codec.UTF8),
+      Codec.pipe(snapshotCodec, Codec.UTF8),
+      hashName, blockingCtx)(jedisProvider)
