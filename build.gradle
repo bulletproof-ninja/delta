@@ -104,6 +104,7 @@ allprojects {
     }
 
     test {
+        systemProperties System.properties
         testLogging {
             exceptionFormat = 'full'
         }
