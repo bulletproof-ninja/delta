@@ -3,10 +3,10 @@ package delta.util
 import delta._
 import scala.concurrent._
 import scala.collection.concurrent.TrieMap
-import scala.util._, control.NonFatal
 import scala.reflect.ClassTag
 import scuff.concurrent.AsyncStreamConsumer
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Failure
 
 private object MonotonicProcessor {
   private type TXN = Transaction[_, _]
@@ -21,7 +21,8 @@ private object MonotonicProcessor {
 abstract class MonotonicProcessor[ID, EVT, S >: Null](
     protected val processStore: StreamProcessStore[ID, S])(
     implicit protected val evtTag: ClassTag[EVT])
-  extends (Transaction[ID, _ >: EVT] => Future[Unit]) {
+  extends TransactionProcessor[ID, EVT, S]
+  with (Transaction[ID, _ >: EVT] => Future[Unit]) {
 
   protected[util] type TXN = Transaction[ID, _ >: EVT]
   type Snapshot = delta.Snapshot[S]
@@ -97,12 +98,6 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
 
   protected def onUpdate(id: ID, update: Update): Unit
   protected def onMissingRevisions(id: ID, missing: Range): Unit
-
-  protected def process(txn: TXN, currState: Option[S]): S
-  protected def processAsync(txn: TXN, currState: Option[S]): Future[S] =
-    try Future successful process(txn, currState) catch {
-      case NonFatal(th) => Future failed th
-    }
 
   private def applyTransactions(
       txns: List[TXN], snapshot: Option[Snapshot])(
