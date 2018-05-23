@@ -5,13 +5,13 @@ plugins {
 ext {
     getScalaFull = [
         '2.11': '2.11.12',
-        '2.12': '2.12.4',
+        '2.12': '2.12.6',
         '2.13': '2.13.0-M3'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '1.8.0'
+    vScuff = '1.9.0'
     vScalaTest = '3.0.4'
 }
 
@@ -123,7 +123,7 @@ subprojects {
 }
 
 task wrapper(type: Wrapper) {
-    gradleVersion = '4.6'
+    gradleVersion = '4.7'
 }
 
 project(':delta-cassandra') {
@@ -153,8 +153,8 @@ project(':delta-redis') {
 if (vScala != '2.13') {
     project(':delta-mongodb') {
         dependencies {
-            compile "org.mongodb:mongodb-driver-async:3.6.3"
-            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.2.1"
+            compile "org.mongodb:mongodb-driver-async:3.7.0"
+            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.3.0"
         }
     }
 }
