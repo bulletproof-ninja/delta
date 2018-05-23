@@ -119,8 +119,8 @@ class TestCollege {
     val Unknown = "<unknown>"
     populate(200, 30)
     val enrollmentQuery = eventStore.query(eventStore.EventSelector(
-      "Student" -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
-      "Semester" -> Set(classOf[StudentEnrolled]))) _
+      Student.name -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
+      Semester.name -> Set(classOf[StudentEnrolled]))) _
 
     val allStudents = new TrieMap[Student.Id, (Set[Semester.Id], String)].withDefaultValue(Set.empty -> Unknown)
     val readModel = new TrieMap[Semester.Id, Map[Student.Id, String]].withDefaultValue(Map.empty)
@@ -145,8 +145,8 @@ class TestCollege {
           case StudentChangedName(newName) => studentNameChange(newName, studentId)
         }
       val evtHandler = txn.channel match {
-        case "Student" => onStudent(new Student.Id(txn.stream)) _
-        case "Semester" => onSemester(new Semester.Id(txn.stream)) _
+        case Student.name => onStudent(new Student.Id(txn.stream)) _
+        case Semester.name => onSemester(new Semester.Id(txn.stream)) _
       }
       txn.events.foreach(evtHandler)
     }
