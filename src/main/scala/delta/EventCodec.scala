@@ -6,23 +6,23 @@ trait EventCodec[EVT, SF] {
 
   type EventClass = Class[_ <: EVT]
 
-  private[delta] final def getName(evt: EVT): String = signature(evt.getClass)._1
-  private[delta] final def getVersion(evt: EVT): Byte = signature(evt.getClass)._2
-  private[delta] final def signature(evt: EVT): (String, Byte) = signature(evt.getClass)
-  private[delta] final def signature(cls: EventClass): (String, Byte) = signatures.get(cls)
-  private[delta] final def getName(cls: EventClass): String = signature(cls)._1
-  private[delta] final def getVersion(cls: EventClass): Byte = signature(cls)._2
+  final def name(evt: EVT): String = signature(evt.getClass)._1
+  final def version(evt: EVT): Byte = signature(evt.getClass)._2
+  final def signature(evt: EVT): (String, Byte) = signatures.get(evt.getClass)
+  final def signature(cls: EventClass): (String, Byte) = signatures.get(cls)
+  final def name(cls: EventClass): String = signature(cls)._1
+  final def version(cls: EventClass): Byte = signature(cls)._2
   private[this] val signatures = new ClassValue[(String, Byte)] {
     def computeValue(cls: Class[_]) = {
       val evtCls = cls.asInstanceOf[EventClass]
-      name(evtCls) -> version(evtCls)
+      (getName(evtCls), getVersion(evtCls))
     }
   }
 
   /** Return unique name of event. */
-  protected def name(cls: EventClass): String
+  protected def getName(cls: EventClass): String
   /** Return event version number. Must be strictly > 0. */
-  protected def version(cls: EventClass): Byte
+  protected def getVersion(cls: EventClass): Byte
 
   /**
     * Encode event data.
@@ -51,7 +51,7 @@ trait EventCodec[EVT, SF] {
 trait NoVersioning[EVT, SF] {
   codec: EventCodec[EVT, SF] =>
 
-  protected final def version(evt: EventClass) = NoVersioning.NoVersion
+  protected final def getVersion(evt: EventClass) = NoVersioning.NoVersion
 
   override final def decode(channel: String, name: String, version: Byte, data: SF): EVT = {
     if (version != NoVersioning.NoVersion) {
@@ -71,8 +71,8 @@ class EventCodecAdapter[EVT, A, B](
     implicit evtCodec: EventCodec[EVT, B])
   extends EventCodec[EVT, A] {
 
-  protected def name(cls: EventClass) = evtCodec getName cls
-  protected def version(cls: EventClass) = evtCodec getVersion cls
+  protected def getName(cls: EventClass) = evtCodec name cls
+  protected def getVersion(cls: EventClass) = evtCodec version cls
 
   def encode(evt: EVT): A = fmtCodec encode evtCodec.encode(evt)
   def decode(channel: String, eventName: String, eventVersion: Byte, eventData: A): EVT =

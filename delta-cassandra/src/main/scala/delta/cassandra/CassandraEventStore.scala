@@ -273,7 +273,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     (channel: String, evtType: Class[_ <: EVT]) => {
-      val evtName = codec getName evtType
+      val evtName = codec name evtType
       ps.bind(channel, evtName)
     }
   }
@@ -287,7 +287,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     (channel: String, evtType: Class[_ <: EVT], sinceTick: Long) => {
-      ps.bind(channel, codec getName evtType, Long box sinceTick)
+      ps.bind(channel, codec name evtType, Long box sinceTick)
     }
   }
 

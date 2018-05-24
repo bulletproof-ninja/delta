@@ -35,7 +35,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
   protected def isMethodNameEventName: Boolean = false
   private def eventName(method: Method): String =
     if (isMethodNameEventName) NameTransformer decode method.getName
-    else this.getName(method.getReturnType.asInstanceOf[Class[EVT]])
+    else this name method.getReturnType.asInstanceOf[Class[EVT]]
 
   private def decoder(evtName: String, data: SF, version: Byte = NoVersioning.NoVersion): EVT = {
     val isVersioned = version != NoVersioning.NoVersion
@@ -53,26 +53,27 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
       }.asInstanceOf[EVT]
     }
   }
-  private[this] lazy val encoderEvents = getClass.getMethods.flatMap { m =>
-    val EvtClass = classTag[EVT].runtimeClass
-    val FmtClass = classTag[SF].runtimeClass
-    val argTypes = m.getParameterTypes
-    if (argTypes.length == 1 &&
-      EvtClass.isAssignableFrom(argTypes(0)) &&
-      EvtClass != argTypes(0) &&
-      FmtClass.isAssignableFrom(m.getReturnType)) {
-      val evtType = argTypes(0).asInstanceOf[Class[EVT]]
-      Some(this.getName(evtType) -> evtType)
-    } else None
-  }.toMap
+  private def encoderEvents =
+    getClass.getMethods.flatMap { m =>
+      val EvtClass = classTag[EVT].runtimeClass
+      val FmtClass = classTag[SF].runtimeClass
+      val argTypes = m.getParameterTypes
+      if (argTypes.length == 1 &&
+        EvtClass.isAssignableFrom(argTypes(0)) &&
+        EvtClass != argTypes(0) &&
+        FmtClass.isAssignableFrom(m.getReturnType)) {
+        val evtType = argTypes(0).asInstanceOf[Class[EVT]]
+        Some(this.name(evtType) -> evtType)
+      } else None
+    }.toMap
 
-  private[this] lazy val decoderMethods: JMap[String, Method] = {
+  private lazy val decoderMethods: JMap[String, Method] = {
     val noVersion = this.isInstanceOf[NoVersioning[_, _]]
     val argCount = if (noVersion) 1 else 2
     val ByteClass = classOf[Byte]
     val EvtClass = classTag[EVT].runtimeClass
     val FmtClass = classTag[SF].runtimeClass
-    val decoderMethods = getClass.getMethods.filter { m =>
+    val decoderMethodsWithName = getClass.getMethods.filter { m =>
       val argTypes = m.getParameterTypes
       argTypes.length == argCount &&
         argTypes(argCount - 1).isAssignableFrom(FmtClass) &&
@@ -81,7 +82,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
     }.map(m => eventName(m) -> m)
     // When using return type, there can be more than one decoder. Verify there's not.
     if (!isMethodNameEventName) {
-      decoderMethods.groupBy(_._1).toSeq.filter(_._2.size > 1).headOption.foreach {
+      decoderMethodsWithName.groupBy(_._1).toSeq.filter(_._2.size > 1).headOption.foreach {
         case (evtName, methods) =>
           val nlIndent = Platform.EOL + "\t"
           val methodsString = methods.mkString(nlIndent, nlIndent, "")
@@ -89,10 +90,10 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
             s"""Event "$evtName" has ambiguous decoding by the following methods:$methodsString""")
       }
     }
-    val decoderMethodsByName = decoderMethods.foldLeft(new JMap[String, Method]) {
-      case (jmap, (name, method)) => jmap.put(name, method); jmap
+    val decoderMethodsByName = decoderMethodsWithName.foldLeft(new JMap[String, Method]) {
+      case (map, (name, method)) => map.put(name, method); map
     }
-    assert(decoderMethodsByName.size == decoderMethods.size)
+    assert(decoderMethodsByName.size == decoderMethodsWithName.size)
     val missingDecoders = encoderEvents.keys.filterNot(decoderMethodsByName.containsKey)
     if (missingDecoders.nonEmpty) {
       val missing = missingDecoders.mkString("[", ", ", "]")

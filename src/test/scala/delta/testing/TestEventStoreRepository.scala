@@ -332,7 +332,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
     extends EventCodec[AggrEvent, String]
     with NoVersioning[AggrEvent, String] {
 
-    def name(cls: EventClass): String = cls.getSimpleName
+    def getName(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
       case AggrCreated(status) => s""" { "status": "$status" } """
@@ -370,7 +370,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
     type Return = String
 
     override def isMethodNameEventName = true
-    def name(cls: EventClass): String = {
+    def getName(cls: EventClass): String = {
       val lastDot = cls.getName.lastIndexOf('.')
       val nextDot = cls.getName.lastIndexOf('.', lastDot - 1)
       cls.getName.substring(nextDot + 1)

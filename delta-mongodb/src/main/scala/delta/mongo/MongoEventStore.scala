@@ -328,7 +328,7 @@ class MongoEventStore[ID: Codec, EVT](
         val matchByChannel = byChannel.toSeq.map {
           case (ch, eventTypes) =>
             val matcher = new Document("channel", ch)
-            val evtNames = eventTypes.map(codec.getName)
+            val evtNames = eventTypes.map(codec.name)
             matcher.append("events.name", new Document("$in", toJList(evtNames)))
         }
         if (matchByChannel.size == 1) {

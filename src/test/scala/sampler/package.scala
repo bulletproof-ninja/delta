@@ -16,12 +16,12 @@ package sampler {
   trait AbstractEventCodec[SF]
     extends EventCodec[DomainEvent, SF] {
 
-    def name(cls: EventClass): String = {
+    def getName(cls: EventClass): String = {
       val fullName = cls.getName
       val sepIdx = fullName.lastIndexOf('.', fullName.lastIndexOf('.') - 1)
       fullName.substring(sepIdx + 1)
     }
-    def version(cls: EventClass): Byte = serialVersionUID(cls).toByte
+    def getVersion(cls: EventClass): Byte = serialVersionUID(cls).toByte
 
   }
 

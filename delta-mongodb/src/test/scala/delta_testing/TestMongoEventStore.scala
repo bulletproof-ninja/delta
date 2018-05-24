@@ -44,8 +44,8 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
       with AggrEventHandler {
     type Return = BsonValue
 
-    def version(evt: EventClass) = scuff.serialVersionUID(evt).toByte
-    def name(evt: EventClass) = evt.getSimpleName
+    def getVersion(evt: EventClass) = scuff.serialVersionUID(evt).toByte
+    def getName(evt: EventClass) = evt.getSimpleName
 
     def encode(evt: AggrEvent): BsonValue = evt.dispatch(this)
 
