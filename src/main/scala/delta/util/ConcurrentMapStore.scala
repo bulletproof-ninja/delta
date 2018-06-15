@@ -14,6 +14,8 @@ import scuff.concurrent.Threads
   * If the backing map is either empty or incomplete (this would be expected, to
   * save both memory and load time), provide a fallback lookup mechanism for keys
   * not found.
+  * NOTE: This implementation IS NOT a two-way cache. There's no mechanism
+  * to write through.
   * @param cmap The concurrent map implementation
   * @param lookupFallback Persistent store fallback
   */
