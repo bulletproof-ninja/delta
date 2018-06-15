@@ -1,9 +1,9 @@
 package delta.hazelcast
 
-import scala.concurrent.{ Future, Promise }
+import scala.concurrent.Future
 import scala.util.control.NonFatal
 
-import com.hazelcast.core.{ ExecutionCallback, IMap }
+import com.hazelcast.core.IMap
 import com.hazelcast.logging.ILogger
 
 import delta.SnapshotStore
@@ -23,28 +23,23 @@ class IMapSnapshotStore[K, V](
 
   def read(id: K): Future[Option[Snapshot]] = {
     val f = imap.getAsync(id)
-    val p = Promise[Option[Snapshot]]
-    f andThen new ExecutionCallback[Snapshot] {
-      def onResponse(snapshot: Snapshot) = p.success(Option(snapshot))
-      def onFailure(th: Throwable) = p.failure(th)
-    }
-    p.future
+    val callback = CallbackPromise.option[Snapshot]
+    f andThen callback
+    callback.future
   }
 
   private def updateFailure(id: K, th: Throwable) = logger.severe(s"""Updating entry $id in "${imap.getName}" failed""", th)
 
   def write(id: K, snapshot: Snapshot): Future[Unit] = {
     try {
-      val promise = Promise[Unit]
-      val callback = new ExecutionCallback[Void] {
-        def onFailure(th: Throwable) = {
+      val callback = new CallbackPromise[Any, Unit](_ => ()) {
+        override def onFailure(th: Throwable) = {
           updateFailure(id, th)
-          promise failure th
+          super.onFailure(th)
         }
-        def onResponse(v: Void) = promise success Unit
       }
       imap.submitToKey(id, new SnapshotUpdater(Right(snapshot)), callback)
-      promise.future
+      callback.future
     } catch {
       case NonFatal(th) =>
         updateFailure(id, th)

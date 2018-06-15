@@ -2,9 +2,9 @@ package delta.hazelcast
 
 import java.util.Map.Entry
 
-import scala.concurrent.{ Future, Promise }
+import scala.concurrent.Future
 
-import com.hazelcast.core.{ ExecutionCallback, IMap }
+import com.hazelcast.core.IMap
 import com.hazelcast.map.AbstractEntryProcessor
 
 import delta.Snapshot
@@ -13,24 +13,20 @@ object EntryStateUpdater {
   /**
     * Update entry state.
     */
-  def apply[K, D >: Null, EVT](imap: IMap[K, EntryState[D, EVT]])(key: K, snapshot: Snapshot[D]): Future[Unit] = {
-    val updater = new EntryStateUpdater[K, D, EVT](snapshot)
-    val promise = Promise[Unit]()
-    val callback = new ExecutionCallback[Any] {
-      def onResponse(response: Any) = promise.success(())
-      def onFailure(th: Throwable) = promise failure th
-    }
+  def apply[K, EVT, S](imap: IMap[K, EntryState[S, EVT]])(key: K, snapshot: Snapshot[S]): Future[Unit] = {
+    val updater = new EntryStateUpdater[K, EVT, S](snapshot)
+    val callback = CallbackPromise[Any, Unit](_ => ())
     imap.submitToKey(key, updater, callback)
-    promise.future
+    callback.future
   }
 }
 
-private final class EntryStateUpdater[K, D, EVT] private[hazelcast] (val snapshot: Snapshot[D])
-    extends AbstractEntryProcessor[K, EntryState[D, EVT]](true) {
+private final class EntryStateUpdater[K, EVT, S] private[hazelcast] (val snapshot: Snapshot[S])
+    extends AbstractEntryProcessor[K, EntryState[S, EVT]](true) {
 
-  type S = EntryState[D, EVT]
+  type EntryState = delta.hazelcast.EntryState[S, EVT]
 
-  def process(entry: Entry[K, S]): Object = {
+  def process(entry: Entry[K, EntryState]): Object = {
     entry.getValue match {
       case null =>
         entry setValue new EntryState(snapshot, contentUpdated = true)

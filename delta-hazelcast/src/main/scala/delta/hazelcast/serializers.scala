@@ -52,20 +52,22 @@ trait SnapshotSerializer
   }
 }
 
-trait DistributedProcessorSerializer
-    extends StreamSerializer[delta.hazelcast.DistributedProcessor[Any, Any, Any]] {
+trait DistributedMonotonicProcessorSerializer
+  extends StreamSerializer[delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any, Any]] {
 
-  def write(out: ObjectDataOutput, ep: delta.hazelcast.DistributedProcessor[Any, Any, Any]): Unit = {
+  def write(out: ObjectDataOutput, ep: delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any, Any]): Unit = {
     out writeObject ep.txn
+    out writeObject ep.stateCodec
     out writeObject ep.reducer
     out writeObject ep.evtTag
   }
 
   def read(inp: ObjectDataInput) = {
     val txn = inp.readObject[delta.Transaction[Any, Any]]
+    val codec = inp.readObject[scuff.Codec[Any, Any]]
     val reducer = inp.readObject[EventReducer[Any, Any]]
     val evtTag = inp.readObject[ClassTag[Any]]
-    new delta.hazelcast.DistributedProcessor(txn, reducer)(evtTag)
+    new delta.hazelcast.DistributedMonotonicProcessor(txn, codec, reducer)(evtTag)
   }
 }
 
@@ -81,6 +83,15 @@ trait SnapshotUpdaterSerializer
   def read(inp: ObjectDataInput): Updater = {
     new Updater(inp.readObject[Either[(Int, Long), Snapshot[Any]]])
   }
+}
+
+trait EntryStateSnapshotReaderSerializer
+  extends StreamSerializer[delta.hazelcast.EntryStateSnapshotReader.type] {
+
+  type Reader = delta.hazelcast.EntryStateSnapshotReader.type
+
+  def write(out: ObjectDataOutput, ep: Reader): Unit = ()
+  def read(inp: ObjectDataInput): Reader = delta.hazelcast.EntryStateSnapshotReader
 }
 
 trait EntryUpdateResultSerializer

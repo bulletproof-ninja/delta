@@ -142,7 +142,7 @@ project(':delta-jdbc') {
 }
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.9.3"
+        compile "com.hazelcast:hazelcast:3.9.4"
     }
 }
 project(':delta-redis') {
