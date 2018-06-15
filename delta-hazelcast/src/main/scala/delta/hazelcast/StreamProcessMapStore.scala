@@ -17,7 +17,8 @@ import delta.util.StreamProcessStore
 
 /**
   * Hazelcast `MapStore` implementation, using
-  * a `StreamProcessStore` as back-end store.
+  * a generic [[delta.util.StreamProcessStore]] as
+  * back-end store.
   */
 class StreamProcessMapStore[K, T](
   processStore: StreamProcessStore[K, T],
