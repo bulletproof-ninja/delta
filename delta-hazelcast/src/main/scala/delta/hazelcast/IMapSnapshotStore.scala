@@ -17,9 +17,9 @@ import delta.SnapshotStore
   * @param logger `ILogger` instance
   */
 class IMapSnapshotStore[K, V](
-  imap: IMap[K, delta.Snapshot[V]],
-  logger: ILogger)
-    extends SnapshotStore[K, V] {
+    imap: IMap[K, delta.Snapshot[V]],
+    logger: ILogger)
+  extends SnapshotStore[K, V] {
 
   def read(id: K): Future[Option[Snapshot]] = {
     val f = imap.getAsync(id)

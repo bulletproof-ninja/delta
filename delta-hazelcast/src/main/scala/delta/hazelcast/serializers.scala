@@ -11,7 +11,7 @@ import delta.hazelcast.Updated
 import scala.reflect.ClassTag
 
 trait TransactionSerializer
-    extends StreamSerializer[delta.Transaction[Any, Any]] {
+  extends StreamSerializer[delta.Transaction[Any, Any]] {
 
   type TXN = delta.Transaction[Any, Any]
 
@@ -36,7 +36,7 @@ trait TransactionSerializer
 }
 
 trait SnapshotSerializer
-    extends StreamSerializer[Snapshot[Any]] {
+  extends StreamSerializer[Snapshot[Any]] {
 
   def write(out: ObjectDataOutput, s: Snapshot[Any]): Unit = {
     out writeObject s.content
@@ -70,7 +70,7 @@ trait DistributedProcessorSerializer
 }
 
 trait SnapshotUpdaterSerializer
-    extends StreamSerializer[delta.hazelcast.SnapshotUpdater[Any, Any]] {
+  extends StreamSerializer[delta.hazelcast.SnapshotUpdater[Any, Any]] {
 
   type Updater = delta.hazelcast.SnapshotUpdater[Any, Any]
 
@@ -84,7 +84,7 @@ trait SnapshotUpdaterSerializer
 }
 
 trait EntryUpdateResultSerializer
-    extends StreamSerializer[delta.hazelcast.EntryUpdateResult] {
+  extends StreamSerializer[delta.hazelcast.EntryUpdateResult] {
 
   def write(out: ObjectDataOutput, res: delta.hazelcast.EntryUpdateResult): Unit = res match {
     case Updated(model) =>
