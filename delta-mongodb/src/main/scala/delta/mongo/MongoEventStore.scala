@@ -31,6 +31,7 @@ object MongoEventStore {
     if (codecs.isEmpty) getCollection(ns, settings, client, settings.getCodecRegistry)
     else getCollection(ns, settings, client, CodecRegistries.fromCodecs(codecs: _*))
   }
+  @varargs
   def getCollection(
     ns: MongoNamespace, settings: MongoClientSettings, client: MongoClient,
     codecs: Codec[_]*): MongoCollection[Document] = {

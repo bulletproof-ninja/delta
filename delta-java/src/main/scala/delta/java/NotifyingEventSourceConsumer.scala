@@ -24,6 +24,8 @@ abstract class NotifyingEventSourceConsumer[ID, EVT, S >: Null, FMT](
   extends DefaultEventSourceConsumer[ID, EVT, S](processStore, scheduler, batchProcessorWriteBatchSize)
   with NotificationSupport[ID, S, FMT] {
 
+  type FormatKey = Object
+
   def this(
       processStore: StreamProcessStore[ID, S],
       scheduler: ScheduledExecutorService,
@@ -31,14 +33,14 @@ abstract class NotifyingEventSourceConsumer[ID, EVT, S >: Null, FMT](
       evtType: Class[_ <: EVT]) =
     this(processStore, scheduler, batchProcessorWriteBatchSize)(ClassTag(evtType))
 
-  protected def subscribe[T <: S](id: ID, notificationCtx: ExecutionContext, limitTo: Class[_ <: T], consumer: BiConsumer[delta.Snapshot[T], FMT]): Future[Subscription] = {
-    subscribe(notificationCtx)(List(id)) {
+  protected def subscribe[T <: S](key: Object, id: ID, notificationCtx: ExecutionContext, limitTo: Class[_ <: T], consumer: BiConsumer[delta.Snapshot[T], FMT]): Future[Subscription] = {
+    subscribe(notificationCtx)(id :: Nil, key) {
       case (_, snapshot, formatted) if limitTo.isInstance(snapshot.content) =>
         consumer.accept(snapshot.asInstanceOf[delta.Snapshot[T]], formatted)
     }
   }
-  protected def subscribe(id: ID, notificationCtx: ExecutionContext, consumer: BiConsumer[Snapshot, FMT]): Future[Subscription] = {
-    subscribe(notificationCtx)(List(id)) {
+  protected def subscribe(key: Object, id: ID, notificationCtx: ExecutionContext, consumer: BiConsumer[Snapshot, FMT]): Future[Subscription] = {
+    subscribe(notificationCtx)(id :: Nil, key) {
       case (_, snapshot, formatted) => consumer.accept(snapshot, formatted)
     }
   }
