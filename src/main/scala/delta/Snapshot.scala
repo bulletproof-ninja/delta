@@ -7,7 +7,11 @@ case class Snapshot[+Content](
     revision: Int,
     tick: Long) {
 
-  def map[That](f: Content => That): Snapshot[That] = new Snapshot(f(content), revision, tick)
+  def map[That](f: Content => That): Snapshot[That] =
+    new Snapshot(f(content), revision, tick)
+
+  def transpose[That](implicit ev: Content <:< Option[That]): Option[Snapshot[That]] =
+    content.map(content => this.copy(content = content))
 
   override lazy val hashCode: Int = {
     this.content match {
