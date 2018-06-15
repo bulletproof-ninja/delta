@@ -47,7 +47,7 @@ class TestMonotonicProcessor {
         def next(str: String, c: Char) = s"$str$c"
         val process = EventReducer.process(this) _
       }
-      def executionContext(id: Int) = ec
+      def processingContext(id: Int) = ec
       def process(txn: TXN, state: Option[String]) = {
         val newState = Concat.process(state, txn.events)
         //        println(s"Txn ${txn.revision}: $state => $newState")
@@ -116,7 +116,7 @@ class TestMonotonicProcessor {
         val processor = new MonotonicBatchProcessor[Int, Char, String, Unit](
           20.seconds,
           new ConcurrentMapStore(snapshotMap)(NoFallback)) {
-          protected def executionContext(id: Int): ExecutionContext = ec match {
+          protected def processingContext(id: Int): ExecutionContext = ec match {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
           }

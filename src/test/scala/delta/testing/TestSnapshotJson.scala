@@ -27,6 +27,15 @@ class TestSnapshotJson {
   }
 
   @Test
+  def transpose() {
+    val snapshot = Snapshot(Option("Hello"), 1, 1)
+    snapshot.transpose match {
+      case Some(Snapshot("Hello", 1, 1)) => // as expected
+      case _ => fail()
+    }
+  }
+
+  @Test
   def zeros() {
     val codec = new SnapshotJsonCodec(FooCodec, "foo")
     val snapshot = Snapshot(new Foo(42, "JSON", true)(Array("hello", "world")), 0, 0)

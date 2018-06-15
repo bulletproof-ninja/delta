@@ -205,7 +205,7 @@ class TestCollege {
           case Failure(th) => th.printStackTrace(System.err)
         }
       }
-      protected def executionContext(id: Int) = streamPartitions.singleThread(id)
+      protected def processingContext(id: Int) = streamPartitions.singleThread(id)
       override protected def onUpdate(id: Int, update: Update) = update match {
 //        case Update(Snapshot(StudentModel(enrolled), _, _), true) =>
 //          println(s"Student $id is currently enrolled in: $enrolled")
