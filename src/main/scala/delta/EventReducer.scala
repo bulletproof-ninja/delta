@@ -14,14 +14,21 @@ trait EventReducer[S, EVT] extends Serializable {
 object EventReducer {
   def process[S >: Null, EVT: ClassTag](
       reducer: EventReducer[S, EVT])(
-      os: Option[S], events: List[_ >: EVT]): S = {
+      os: Option[S], events: List[_ >: EVT]): S = process[S, EVT, S](reducer, Codec.noop)(os, events)
 
-    events.iterator.foldLeft(os.orNull) {
-      case (null, evt: EVT) => reducer.init(evt)
-      case (state, evt: EVT) => reducer.next(state, evt)
+  def process[S1 >: Null, EVT: ClassTag, S2 >: Null](
+      reducer: EventReducer[S2, EVT],
+      codec: Codec[S1, S2])(
+      os: Option[S1], events: List[_ >: EVT]): S1 = {
+
+    codec decode {
+      events.iterator.foldLeft(os.map(codec.encode).orNull) {
+        case (null, evt: EVT) => reducer.init(evt)
+        case (state, evt: EVT) => reducer.next(state, evt)
+      }
     }
-
   }
+
 }
 
 final class EventReducerAdapter[S1, S2, EVT: ClassTag](reducer: EventReducer[S2, EVT], codec: Codec[S1, S2])
