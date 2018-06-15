@@ -30,13 +30,13 @@ trait JoinStateProcessor[ID, EVT, S >: Null, JS >: Null <: S]
             val tick = snapshot.map(_.tick max txn.tick) getOrElse txn.tick
             val updated = processor(snapshot.map(_.content.asInstanceOf[JS]))
             Future successful Some(Snapshot(updated, processor.revision, tick)) -> Unit
-          }(executionContext(id)).map(_._1.get)(Threads.PiggyBack)
+          }(processingContext(id)).map(_._1.get)(Threads.PiggyBack)
       }
     futureUpdates.foreach {
       case (id, futureUpdate) =>
-        futureUpdate.foreach(onUpdate(id, _))(executionContext(id))
+        futureUpdate.foreach(onUpdate(id, _))(processingContext(id))
     }
-    implicit val ec = executionContext(txn.stream)
+    implicit val ec = processingContext(txn.stream)
     Future.sequence(futureUpdates.values).flatMap { _ =>
       super.processAsync(txn, currState)
     }

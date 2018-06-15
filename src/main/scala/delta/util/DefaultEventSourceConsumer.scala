@@ -45,8 +45,8 @@ abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newBatchMap[K, V]: collection.concurrent.Map[K, V] =
-    new java.util.concurrent.ConcurrentHashMap[K, V].asScala
+  protected def newBatchMap: collection.concurrent.Map[ID, Snapshot] =
+    new java.util.concurrent.ConcurrentHashMap[ID, Snapshot].asScala
 
   protected type BatchResult = Any
 
@@ -55,16 +55,21 @@ abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
     * transactions once replay has finished.
     */
   protected def batchProcessorCompletionTimeout: FiniteDuration = 11.seconds
+  /**
+    * Time delay before replaying missing revisions.
+    * This allows some margin for delayed out-of-order transactions.
+    */
+  protected def replayMissingRevisionsDelay: FiniteDuration = 1111.milliseconds
 
   private class BatchProcessor
-    extends DefaultMonotonicBatchProcessor[ID, EVT, S](newBatchMap[ID, Snapshot], store, batchProcessorCompletionTimeout, batchProcessorWriteBatchSize, newPartitionedExecutionContext) {
+    extends DefaultMonotonicBatchProcessor[ID, EVT, S](store, batchProcessorCompletionTimeout, ExecutionContext.fromExecutorService(scheduler, reportFailure), batchProcessorWriteBatchSize, newPartitionedExecutionContext, newBatchMap) {
     protected def process(tx: TXN, state: Option[S]): S = ???
     override protected def processAsync(tx: TXN, state: Option[S]): Future[S] =
       DefaultEventSourceConsumer.this.processAsync(tx, state)
   }
 
   private class RealtimeProcessor(es: ES)
-    extends DefaultMonotonicProcessor[ID, EVT, S](es, store, newPartitionedExecutionContext, replayMissingRevisionsDelay, scheduler) {
+    extends DefaultMonotonicProcessor[ID, EVT, S](es, store, replayMissingRevisionsDelay, scheduler, newPartitionedExecutionContext) {
     protected def onUpdate(id: ID, update: Update) = onSnapshotUpdate(id, update.snapshot, update.contentUpdated)
     protected def process(tx: TXN, state: Option[S]): S = ???
     override protected def processAsync(tx: TXN, state: Option[S]): Future[S] =
@@ -94,7 +99,5 @@ abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
       case _ =>
         new RealtimeProcessor(es)
     }
-
-  protected def replayMissingRevisionsDelay = 1111.milliseconds
 
 }

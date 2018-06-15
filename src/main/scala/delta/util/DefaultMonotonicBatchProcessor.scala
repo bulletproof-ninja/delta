@@ -5,42 +5,52 @@ import scuff.concurrent.PartitionedExecutionContext
 import scala.concurrent.Future
 import scala.reflect.ClassTag
 import scuff.concurrent.Threads
+import scala.concurrent.ExecutionContext
 
 abstract class DefaultMonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null](
-    mapStore: collection.concurrent.Map[ID, delta.Snapshot[S]],
     store: StreamProcessStore[ID, S],
-    batchProcessorCompletionTimeout: FiniteDuration,
-    batchProcessorWriteBatchSize: Int,
-    partitionThreads: PartitionedExecutionContext)
-  extends MonotonicBatchProcessor[ID, EVT, S, Unit](batchProcessorCompletionTimeout, new ConcurrentMapStore(mapStore)(store.read)) {
+    whenDoneCompletionTimeout: FiniteDuration,
+    protected val whenDoneContext: ExecutionContext,
+    writeBatchSize: Int,
+    partitionThreads: PartitionedExecutionContext,
+    cmap: collection.concurrent.Map[ID, delta.Snapshot[S]])
+  extends MonotonicBatchProcessor[ID, EVT, S, Unit](whenDoneCompletionTimeout, new ConcurrentMapStore(cmap)(store.read))
+  with ConcurrentMapBatchProcessing[ID, EVT, S, Unit] {
 
-  protected def executionContext(id: ID) = partitionThreads.singleThread(id.hashCode)
+  def this(
+      store: StreamProcessStore[ID, S],
+      whenDoneCompletionTimeout: FiniteDuration,
+      whenDoneContext: ExecutionContext,
+      writeBatchSize: Int,
+      failureReporter: Throwable => Unit,
+      processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
+      cmap: collection.concurrent.Map[ID, delta.Snapshot[S]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[S]]) =
+    this(store, whenDoneCompletionTimeout, whenDoneContext, writeBatchSize,
+      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-batch-processor")),
+      cmap)
 
-  def whenDone(): Future[Unit] = {
-    implicit def ec = Threads.PiggyBack
-    partitionThreads.shutdown()
-      .flatMap { _ =>
-        if (unfinishedStreams.nonEmpty) {
-          val ids = unfinishedStreams.mkString(compat.Platform.EOL, ", ", "")
-          throw new IllegalStateException(s"Incomplete stream processing for ids:$ids")
-        }
-        val iter = mapStore.iterator
-        val writes = collection.mutable.Buffer[Future[Unit]]()
-        while (iter.hasNext) {
-          if (batchProcessorWriteBatchSize > 1) {
-            val batch = iter.take(batchProcessorWriteBatchSize).toMap
-            writes += processStore.writeBatch(batch)
-          } else if (batchProcessorWriteBatchSize == 1) {
-            val (id, snapshot) = iter.next
-            writes += processStore.write(id, snapshot)
-          } else { // batchProcessorWriteBatchSize <= 0
-            val batch = iter.toMap
-            writes += processStore.writeBatch(batch)
-          }
-        }
-        Future.sequence(writes)
-      } map { _ =>
-        mapStore.clear()
+  protected def processingContext(id: ID) = partitionThreads.singleThread(id.hashCode)
+
+  protected def onBatchStreamCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
+    partitionThreads.shutdown().map(_ => cmap)(whenDoneContext)
+
+  protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[Unit] = {
+    val iter = snapshots.iterator
+    val writes = collection.mutable.Buffer[Future[Unit]]()
+    while (iter.hasNext) {
+      if (writeBatchSize > 1) {
+        val batch = iter.take(writeBatchSize).toMap
+        writes += processStore.writeBatch(batch)
+      } else if (writeBatchSize == 1) {
+        val (id, snapshot) = iter.next
+        writes += processStore.write(id, snapshot)
+      } else { // batchProcessorWriteBatchSize <= 0
+        val batch = iter.toMap
+        writes += processStore.writeBatch(batch)
       }
+    }
+      implicit def ec = whenDoneContext
+    Future.sequence(writes).map(_ => ())
   }
+
 }

@@ -24,11 +24,11 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
   extends TransactionProcessor[ID, EVT, S]
   with (Transaction[ID, _ >: EVT] => Future[Unit]) {
 
-  protected[util] type TXN = Transaction[ID, _ >: EVT]
+  protected type TXN = Transaction[ID, _ >: EVT]
   type Snapshot = delta.Snapshot[S]
   type Update = processStore.Update
 
-  protected def executionContext(id: ID): ExecutionContext
+  protected def processingContext(id: ID): ExecutionContext
 
   sealed private abstract class StreamStatus
   /** Currently being processed. */
@@ -146,7 +146,7 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
     setActive(txn) match {
       case (Nil, future) => future
       case (unapplied, _) =>
-        upsertUntilInactive(txn.stream, unapplied)(executionContext(txn.stream))
+        upsertUntilInactive(txn.stream, unapplied)(processingContext(txn.stream))
     }
 
   }
@@ -180,4 +180,26 @@ abstract class MonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null, BR](
     *  processor.
     */
   protected def whenDone(): Future[BR]
+}
+
+trait ConcurrentMapBatchProcessing[ID, EVT, S >: Null, BR] {
+  proc: MonotonicBatchProcessor[ID, EVT, S, BR] =>
+
+  protected def whenDoneContext: ExecutionContext
+  protected def onBatchStreamCompletion(): Future[collection.concurrent.Map[ID, Snapshot]]
+  protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[BR]
+  protected def isUnfinishedStreamsFatal = true
+  protected def whenDone(): Future[BR] = {
+      implicit def ec = whenDoneContext
+    onBatchStreamCompletion()
+      .flatMap { cmap =>
+        if (isUnfinishedStreamsFatal && unfinishedStreams.nonEmpty) {
+          val ids = unfinishedStreams.mkString(compat.Platform.EOL, ", ", "")
+          throw new IllegalStateException(s"Incomplete stream processing for ids:$ids")
+        }
+        persist(cmap --= unfinishedStreams).andThen {
+          case _ => cmap.clear()
+        }
+      }
+  }
 }
