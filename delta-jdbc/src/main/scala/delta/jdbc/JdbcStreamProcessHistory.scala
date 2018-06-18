@@ -2,7 +2,7 @@ package delta.jdbc
 
 import java.sql.{ Connection, SQLException }
 
-import scala.collection.Map
+import scala.collection.immutable.HashMap
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
@@ -127,10 +127,10 @@ AND t.tick = (
       getAll(conn, keys)
     }
 
-  private def getAll(conn: Connection, keys: Iterable[ID], map: Map[ID, Snapshot] = Map.empty): Map[ID, Snapshot] = {
+  private def getAll(conn: Connection, keys: Iterable[ID]): Map[ID, Snapshot] = {
     val ps = conn prepareStatement selectSnapshotSQL
     try {
-      keys.foldLeft(map) {
+      keys.foldLeft(HashMap.empty[ID, Snapshot]) {
         case (map, key) =>
           ps.setValue(1, key)
           val rs = ps.executeQuery()
@@ -164,7 +164,7 @@ AND t.tick = (
         throw Exceptions.writeOlder(key, existing, snapshot)
     }
   }
-  def writeBatch(snapshots: Map[ID, Snapshot]): Future[Unit] =
+  def writeBatch(snapshots: collection.Map[ID, Snapshot]): Future[Unit] =
     if (snapshots.isEmpty) Future successful Unit
     else futureUpdate { conn =>
       val failed = insertSnapshots(conn, snapshots).toSet
@@ -178,7 +178,7 @@ AND t.tick = (
       }
     }
 
-  protected def insertRevisions(conn: Connection, revisions: Map[ID, (Int, Long)]): Iterable[ID] =
+  protected def insertRevisions(conn: Connection, revisions: collection.Map[ID, (Int, Long)]): Iterable[ID] =
     if (revisions.isEmpty) Nil else {
       val isBatch = revisions.tail.nonEmpty
       val ps = conn.prepareStatement(insertTransactionSQL)
@@ -192,7 +192,7 @@ AND t.tick = (
             key
         }
         if (isBatch) executeBatch(ps, keys)
-        else if (ps.executeUpdate() == 1) Seq.empty
+        else if (ps.executeUpdate() == 1) Nil
         else keys
       } catch {
         case sqlEx: SQLException if isDuplicateKeyViolation(sqlEx) =>
@@ -215,7 +215,7 @@ AND t.tick = (
   }
 
   /** Insert snapshots, return any failed keys. */
-  protected def insertSnapshots(conn: Connection, snapshots: Map[ID, Snapshot]): Iterable[ID] =
+  protected def insertSnapshots(conn: Connection, snapshots: collection.Map[ID, Snapshot]): Iterable[ID] =
     if (snapshots.isEmpty) Nil else {
       val isBatch = snapshots.tail.nonEmpty
       val ps = conn.prepareStatement(insertSnapshotSQL)
@@ -261,7 +261,7 @@ AND t.tick = (
   protected def refreshKey(conn: Connection)(key: ID, revision: Int, tick: Long): Unit =
     refreshAll(conn, Map(key -> (revision -> tick)))
 
-  private def refreshAll(conn: Connection, revisions: Map[ID, (Int, Long)]): Unit = {
+  private def refreshAll(conn: Connection, revisions: collection.Map[ID, (Int, Long)]): Unit = {
       val notUpdated = revisions.collect {
         case entry @ (key, (rev, tick)) if !updateTransaction(conn, key, rev, tick) =>
           entry
@@ -274,7 +274,7 @@ AND t.tick = (
   def refresh(key: ID, revision: Int, tick: Long): Future[Unit] =
     refreshBatch(Map(key -> (revision -> tick)))
 
-  def refreshBatch(revisions: Map[ID, (Int, Long)]): Future[Unit] =
+  def refreshBatch(revisions: collection.Map[ID, (Int, Long)]): Future[Unit] =
     if (revisions.isEmpty) Future successful Unit
     else futureUpdate(refreshAll(_, revisions))
 

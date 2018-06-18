@@ -2,8 +2,8 @@ package delta.redis
 
 import _root_.redis.clients.jedis.BinaryJedis
 
-import scala.collection.Map
 import scala.collection.JavaConverters._
+import scala.collection.immutable.HashMap
 import scala.concurrent.{ ExecutionContext, Future }
 
 import scuff._
@@ -58,20 +58,20 @@ class BinaryRedisStreamProcessStore[K, T](
     }(blockingCtx)
   }
 
-  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] = Future {
+  def readBatch(keys: Iterable[K]): Future[collection.Map[K, Snapshot]] = Future {
     val keysSeq = keys.toSeq
     val binKeys = keysSeq.map(keyCodec.encode)
     jedis(_.hmget(hash, binKeys: _*))
       .iterator.asScala
       .zip(keysSeq.iterator)
       .filter(_._1 != null)
-      .foldLeft(Map.empty[K, Snapshot]) {
+      .foldLeft(HashMap.empty[K, Snapshot]) {
         case (map, (valBytes, key)) =>
           map.updated(key, snapshotCodec decode valBytes)
       }
   }(blockingCtx)
 
-  def writeBatch(snapshots: Map[K, Snapshot]): Future[Unit] = {
+  def writeBatch(snapshots: collection.Map[K, Snapshot]): Future[Unit] = {
     if (snapshots.isEmpty) Future successful (())
     else Future {
       val (jmap, maxTick) = snapshots.iterator.foldLeft(newJUHashMap(snapshots.size) -> Long.MinValue) {
@@ -141,7 +141,7 @@ class BinaryRedisStreamProcessStore[K, T](
 
   }
 
-  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] = {
+  def refreshBatch(revisions: collection.Map[K, (Int, Long)]): Future[Unit] = {
     if (revisions.isEmpty) Future successful (())
     else {
       val binKeys = revisions.iterator.map {

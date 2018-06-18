@@ -75,7 +75,7 @@ class TestStreamProcessStore {
     val newIdSnapshots = (60L to 70L).map(tick => util.Random.nextLong -> Snapshot("{}", 0, tick)).toMap
     val oldIdSnapshots = ids.mapValues {
       case (rev, tick) => Snapshot("{}", rev + 1, tick + 10)
-    }
+    }.toMap
     store.writeBatch(oldIdSnapshots ++ newIdSnapshots).await
     val moreNewIdSnapshots = (80L to 90L).map(tick => util.Random.nextLong -> Snapshot("{}", 0, tick)).toMap
     store.writeBatch(moreNewIdSnapshots ++ oldIdSnapshots).await

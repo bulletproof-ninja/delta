@@ -27,12 +27,12 @@ import delta.SnapshotStore
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param ticker Ticker implementation
   */
-class EntityRepository[ESID, EVT, S >: Null, ID <% ESID, ET](
+class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     entity: Entity[S, EVT] { type Id = ID; type Type = ET })(
     eventStore: EventStore[ESID, _ >: EVT],
     snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
     assumeCurrentSnapshots: Boolean = false)(
-    implicit exeCtx: ExecutionContext, ticker: Ticker)
+    implicit idConv: ID => ESID, exeCtx: ExecutionContext, ticker: Ticker)
   extends Repository[ID, ET] with MutableEntity {
 
   private[this] val repo = new EventStoreRepository(entity.name, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)

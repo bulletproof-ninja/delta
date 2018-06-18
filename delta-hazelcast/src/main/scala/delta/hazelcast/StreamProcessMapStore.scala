@@ -77,7 +77,9 @@ class StreamProcessMapStore[K, T](
     }
   def loadAll(keys: Collection[K]) = {
     val models = processStore.readBatch(keys.asScala).await(awaitTimeout, logTimedOutFuture)
-    models.mapValues(m => new EntryState[T, Any](m)).asJava
+    models.iterator.foldLeft(new java.util.HashMap[K, EntryState[T, Any]]) {
+      case (jmap, (key, m)) => jmap.put(key, new EntryState(m)); jmap
+    }
   }
 
 }

@@ -27,13 +27,13 @@ import scuff.concurrent.StreamPromise
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param ticker Ticker implementation
   */
-class EventStoreRepository[ESID, EVT, CH, S >: Null, RID <% ESID](
+class EventStoreRepository[ESID, EVT, CH, S >: Null, RID](
     channel: String,
     newState: S => State[S, EVT],
     snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
     assumeCurrentSnapshots: Boolean = false)(
     es: EventStore[ESID, _ >: EVT])(
-    implicit exeCtx: ExecutionContext, ticker: Ticker)
+    implicit idConv: RID => ESID, exeCtx: ExecutionContext, ticker: Ticker)
   extends Repository[RID, (S, List[EVT])] with ImmutableEntity[(S, List[EVT])] {
 
   private type Snapshot = delta.Snapshot[S]

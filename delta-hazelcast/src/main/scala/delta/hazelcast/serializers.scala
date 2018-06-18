@@ -106,7 +106,7 @@ trait EntryUpdateResultSerializer
     case MissingRevisions(range) =>
       out writeByte 2
       out writeInt range.start
-      out writeInt range.end
+      out writeInt range.last
   }
   def read(inp: ObjectDataInput): delta.hazelcast.EntryUpdateResult = inp.readByte match {
     case 0 =>
@@ -114,6 +114,6 @@ trait EntryUpdateResultSerializer
     case 1 =>
       IgnoredDuplicate
     case 2 =>
-      new MissingRevisions(new Range(inp.readInt, inp.readInt, 1))
+      new MissingRevisions(inp.readInt to inp.readInt)
   }
 }

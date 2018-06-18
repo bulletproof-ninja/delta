@@ -2,7 +2,6 @@ package delta.jdbc
 
 import java.sql._
 
-import scala.collection.Map
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
@@ -200,11 +199,11 @@ AND revision <= ? AND tick <= ?
   }
 
   /** Update snapshots, return failures. */
-  protected def updateSnapshots(conn: Connection, snapshots: Map[K, Snapshot]): Seq[K] = if (snapshots.isEmpty) Nil else {
+  protected def updateSnapshots(conn: Connection, snapshots: collection.Map[K, Snapshot]): Iterable[K] = if (snapshots.isEmpty) Nil else {
     val isBatch = snapshots.tail.nonEmpty
     val ps = conn prepareStatement updateSnapshotDefensiveSQL
     try {
-      val keys = snapshots.toSeq.map {
+      val keys = snapshots.map {
         case (key, snapshot) =>
           val snapshotColOffset = setSnapshot(ps, snapshot)
           val offset = setKeyParms(ps, key, snapshotColOffset)
@@ -219,11 +218,11 @@ AND revision <= ? AND tick <= ?
   }
 
   /** Insert snapshots, return failed ids. */
-  protected def insertSnapshots(conn: Connection, snapshots: Map[K, Snapshot]): Iterable[K] = if (snapshots.isEmpty) Nil else {
+  protected def insertSnapshots(conn: Connection, snapshots: collection.Map[K, Snapshot]): Iterable[K] = if (snapshots.isEmpty) Nil else {
     val isBatch = snapshots.tail.nonEmpty
     val ps = conn.prepareStatement(insertSnapshotSQL)
     try {
-      val keys = snapshots.toSeq.map {
+      val keys = snapshots.map {
         case (key, snapshot) =>
           setParmsOnInsert(ps, key, snapshot)
           if (isBatch) ps.addBatch()
@@ -240,12 +239,12 @@ AND revision <= ? AND tick <= ?
   def write(key: K, data: Snapshot): Future[Unit] = futureUpdate { conn =>
     writeSnapshot(conn, key, data)
   }
-  def writeBatch(snapshots: Map[K, Snapshot]): Future[Unit] =
+  def writeBatch(snapshots: collection.Map[K, Snapshot]): Future[Unit] =
     if (snapshots.isEmpty) Future successful Unit
     else futureUpdate { conn =>
       val batchInsertFailures = insertSnapshots(conn, snapshots).toSet
       if (batchInsertFailures.nonEmpty) {
-        val snapshotsToUpdate = snapshots.filterKeys(batchInsertFailures)
+        val snapshotsToUpdate = snapshots.filterKeys(batchInsertFailures).toMap
         val batchUpdateFailures = updateSnapshots(conn, snapshotsToUpdate).toSet
         val writeIndividually = snapshotsToUpdate.filterKeys(batchUpdateFailures)
         writeIndividually.foreach {
@@ -257,7 +256,7 @@ AND revision <= ? AND tick <= ?
   protected def refreshKey(conn: Connection)(key: K, revision: Int, tick: Long): Unit =
     refreshAll(conn, Map(key -> (revision -> tick)))
 
-  private def refreshAll(conn: Connection, revisions: Map[K, (Int, Long)]): Unit = {
+  private def refreshAll(conn: Connection, revisions: collection.Map[K, (Int, Long)]): Unit = {
     val isBatch = revisions.tail.nonEmpty
     val ps = conn.prepareStatement(refreshRevTickDefensiveSQL)
     try {
@@ -275,7 +274,7 @@ AND revision <= ? AND tick <= ?
 
   def refresh(key: K, revision: Int, tick: Long): Future[Unit] =
     refreshBatch(Map(key -> ((revision, tick))))
-  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] =
+  def refreshBatch(revisions: collection.Map[K, (Int, Long)]): Future[Unit] =
     if (revisions.isEmpty) Future successful Unit
     else futureUpdate(refreshAll(_, revisions))
 

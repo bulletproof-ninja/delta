@@ -396,13 +396,12 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   @Before
   def setup(): Unit = {
     metrics = Nil
-      def ?[T](implicit t: T) = implicitly[T]
     es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)
     with Publishing[String, AggrEvent] {
       val publisher = new LocalPublisher[String, AggrEvent](RandomDelayExecutionContext)
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
     val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap)(_ => Future successful None)
-    repo = new EntityRepository(TheOneAggr)(es, snapshotStore)(?, RandomDelayExecutionContext, SysClockTicker)
+    repo = new EntityRepository(TheOneAggr)(es, snapshotStore)
   }
 }

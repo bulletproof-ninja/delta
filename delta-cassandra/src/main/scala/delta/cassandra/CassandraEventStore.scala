@@ -46,8 +46,8 @@ private[cassandra] object CassandraEventStore {
   private val TxnColumns = "stream_id" +: StreamColumns
   private def streamColumns: String = StreamColumns.mkString(",")
   private def txnColumns: String = TxnColumns.mkString(",")
-  private val StreamColumnsIdx = Columns(StreamColumns.indexOf)
-  private val TxnColumnsIdx = Columns(TxnColumns.indexOf)
+  private val StreamColumnsIdx = Columns(StreamColumns.indexOf(_))
+  private val TxnColumnsIdx = Columns(TxnColumns.indexOf(_))
 
   private case class Columns(
     stream_id: Int, revision: Int,

@@ -73,7 +73,7 @@ trait EventSource[ID, EVT] {
     new EventSelector(Map((chEvt :: more.toList): _*))
   def EventSelector(byChannel: java.util.Map[String, java.util.Set[CEVT]]): Selector = {
     import collection.JavaConverters._
-    new EventSelector(byChannel.asScala.toMap.mapValues(_.asScala.toSet))
+    new EventSelector(byChannel.asScala.toMap.mapValues(_.asScala.toSet).toMap)
   }
   /**
     * Only transactions containing the provided events.

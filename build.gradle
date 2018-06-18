@@ -6,12 +6,12 @@ ext {
     getScalaFull = [
         '2.11': '2.11.12',
         '2.12': '2.12.6',
-        '2.13': '2.13.0-M3'
+        '2.13': '2.13.0-M4'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '1.9.0'
+    vScuff = '1.10.1'
     vScalaTest = '3.0.4'
 }
 
@@ -85,7 +85,9 @@ allprojects {
 
                 from components.java
                 artifact sourceJar
-                artifact docsJar
+                if (vScala != '2.13') {
+                    artifact docsJar
+                }
             }
         }
     }
@@ -95,6 +97,7 @@ allprojects {
         key = System.properties.bintrayKey ?: "dryrun"
         dryRun = (user == "dryrun" || key == "dryrun" || version.startsWith('SNAPSHOT'))
         publish = !dryRun
+        override = true
         publications = ['maven']
         pkg {
             userOrg = System.properties.bintrayOrg ?: user

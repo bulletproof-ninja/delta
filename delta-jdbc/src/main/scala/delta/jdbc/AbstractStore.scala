@@ -33,7 +33,7 @@ WHERE version = $version
   protected def futureQuery[R](thunk: Connection => R): Future[R] = Future(forQuery(thunk))
 
   /** Execute batch, return failures. */
-  protected def executeBatch[K](ps: PreparedStatement, keys: Seq[K]): Seq[K] = {
+  protected def executeBatch[K](ps: PreparedStatement, keys: Iterable[K]): Iterable[K] = {
       @tailrec
       def normalize(arr: Array[Int], idx: Int = 0): Array[Int] = {
         if (idx < arr.length) {
