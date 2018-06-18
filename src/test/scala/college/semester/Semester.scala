@@ -26,6 +26,7 @@ object Semester extends Entity("semester", SemesterAssembler) {
 private[semester] object SemesterAssembler extends EventReducer[SemesterState, SemesterEvent] {
   def init(evt: SemesterEvent) = evt match {
     case ClassCreated(name) => new SemesterState(name)
+    case _ => ???
   }
   def next(semester: SemesterState, evt: SemesterEvent) = evt match {
     case StudentEnrolled(studentId) =>
@@ -34,6 +35,7 @@ private[semester] object SemesterAssembler extends EventReducer[SemesterState, S
     case StudentCancelled(studentId) =>
       val without = semester.enrolled - studentId
       semester.copy(enrolled = without)
+    case _ => ???
   }
 }
 
