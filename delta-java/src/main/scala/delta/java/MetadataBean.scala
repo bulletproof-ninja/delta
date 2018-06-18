@@ -1,11 +1,12 @@
 package delta.java
 
-import java.lang.reflect.Method
 import java.beans.Introspector
-import scuff.Proxylicious
-import scala.reflect.ClassTag
-import scala.reflect.NameTransformer
+import java.lang.reflect.Method
 import java.util.Optional
+
+import scala.reflect.ClassTag
+
+import scuff.Proxylicious
 
 /**
   *  Convenience interface for converting
@@ -15,7 +16,7 @@ trait MetadataBean {
 
   /** Convert bean properties to Scala `Map`. */
   def toMap(): Map[String, String] = {
-    MetadataBean.propMethods(this).flatMap {
+    MetadataBean.propMethods(this.getClass).flatMap {
       case (name, readMethod) =>
         if (readMethod.getReturnType == classOf[Option[_]]) {
           readMethod.invoke(this).asInstanceOf[Option[Any]].map(value => name -> String.valueOf(value))
@@ -32,33 +33,49 @@ trait MetadataBean {
 
 private object MetadataBean {
 
-  private def propMethods(bean: MetadataBean): Map[String, Method] =
-    _propMethods.get(bean.getClass)
+  private[this] val getClassMethod = classOf[Object].getMethod("getClass")
 
-  private[this] val _propMethods = new ClassValue[Map[String, Method]] {
+  private def propMethods(beanClass: Class[_ <: MetadataBean]): Map[String, Method] =
+    _propMethods.get(beanClass)._1
+  private def methodProps(beanInterface: Class[_ <: MetadataBean]): Map[Method, String] =
+    _propMethods.get(beanInterface)._2
+
+  private[this] val _propMethods = new ClassValue[(Map[String, Method], Map[Method, String])] {
     def computeValue(cls: Class[_]) = {
-      val bi = Introspector.getBeanInfo(cls, classOf[Object])
-      bi.getPropertyDescriptors.filter(_.getReadMethod != null).map { pd =>
-        val method = pd.getReadMethod
-        method.setAccessible(true)
-        pd.getName -> method
-      }.toMap
+      val bi = Introspector.getBeanInfo(cls)
+      val propMethods = bi.getPropertyDescriptors
+        .filter(_.getReadMethod != null)
+        .filter(_.getReadMethod != getClassMethod)
+        .map { pd =>
+          val method = pd.getReadMethod
+          method.setAccessible(true)
+          pd.getName -> method
+        }.toMap
+      val methodProps = propMethods.map {
+        case (prop, method) => method -> prop
+      }
+      propMethods -> methodProps
     }
   }
 
-  def fromMap[B <: MetadataBean](map: java.util.Map[String, String], cls: Class[_ <: B]): B = {
+  def fromMap[B <: MetadataBean](map: java.util.Map[String, String], beanInterface: Class[_ <: B]): B = {
     import scuff.reflect._
-    val p = new Proxylicious[B]()(ClassTag(cls))
+    val p = new Proxylicious[B]()(ClassTag(beanInterface))
+    val propNames = methodProps(beanInterface)
     p.proxify {
-      case (_, method, Array()) =>
-        val key = NameTransformer decode method.getName
-        if (method.getReturnType == classOf[Option[_]]) map.get(key) match {
-          case null => None
-          case value => DynamicConstructor(value)(ClassTag(method.getReturnType))
-        }
-        else map.get(key) match {
-          case null => null
-          case value => DynamicConstructor(value)(ClassTag(method.getReturnType)).orNull
+      case (_, method, _) =>
+        val propName = propNames(method)
+        map.get(propName) match {
+          case null =>
+            if (method.getReturnType == classOf[Option[_]]) None
+            else if (method.getReturnType == classOf[Optional[_]]) Optional.empty
+            else null
+          case stringValue =>
+            val typedValue = DynamicConstructor[Any](stringValue)(ClassTag(method.getReturnType))
+            println(s"Raw value $stringValue was turned into $typedValue")
+            if (method.getReturnType == classOf[Option[_]]) typedValue
+            else if (method.getReturnType == classOf[Optional[_]]) Optional.ofNullable(typedValue.orNull)
+            else typedValue.orNull
         }
     }
   }
