@@ -1,14 +1,11 @@
 package delta.java
 
+import java.util.concurrent.ScheduledExecutorService
+
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
+
 import delta.util.StreamProcessStore
-import java.util.concurrent.ScheduledExecutorService
-import delta.util.NotificationSupport
-import java.util.function.BiConsumer
-import scala.concurrent.ExecutionContext
-import scuff.Subscription
-import scala.concurrent.Future
 
 /**
   * [[delta.util.DefaultEventSourceConsumer]], adapted for Java.

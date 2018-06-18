@@ -7,8 +7,8 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
 import delta.Snapshot
-import delta.util.{ Exceptions, StreamProcessStore, BlockingCASWrites }
-import scuff.ScuffString
+import delta.util.{ BlockingCASWrites, Exceptions, StreamProcessStore }
+import scuff._
 import scuff.jdbc.ConnectionProvider
 
 /**

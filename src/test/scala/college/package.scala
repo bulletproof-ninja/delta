@@ -1,8 +1,6 @@
 
 import language.implicitConversions
 
-import college.semester._
-import college.student._
 import delta._
 import scuff.JavaSerializer
 
