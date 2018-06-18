@@ -168,7 +168,7 @@ class MongoEventStore[ID: Codec, EVT](
       def apply(txn: TXN) = callback.onNext(txn)
     }
     val onFinish = new SingleResultCallback[Void] {
-      def onResult(result: Void, t: Throwable) {
+      def onResult(result: Void, t: Throwable): Unit = {
         if (t != null) callback.onError(t)
         else callback.onDone()
       }
@@ -185,17 +185,17 @@ class MongoEventStore[ID: Codec, EVT](
     def getEncoderClass = classOf[TXN]
     private[this] val idCodec = implicitly[Codec[ID]]
 
-    private def writeDocument(writer: BsonWriter, name: String = null)(thunk: => Unit) {
+    private def writeDocument(writer: BsonWriter, name: String = null)(thunk: => Unit): Unit = {
       if (name != null) writer.writeStartDocument(name) else writer.writeStartDocument()
       thunk
       writer.writeEndDocument()
     }
-    private def writeArray(name: String, writer: BsonWriter)(thunk: => Unit) {
+    private def writeArray(name: String, writer: BsonWriter)(thunk: => Unit): Unit = {
       writer.writeStartArray(name)
       thunk
       writer.writeEndArray()
     }
-    def encode(writer: BsonWriter, txn: TXN, ctx: EncoderContext) {
+    def encode(writer: BsonWriter, txn: TXN, ctx: EncoderContext): Unit = {
       writer.writeStartDocument()
       writeDocument(writer, "_id") {
         writer.writeName("stream"); idCodec.encode(writer, txn.stream, ctx)

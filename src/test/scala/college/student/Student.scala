@@ -36,11 +36,11 @@ class Student private[student] (val state: Student.State = Student.newState()) {
 
   private def student = state.curr
 
-  private[student] def apply(cmd: RegisterStudent) {
+  private[student] def apply(cmd: RegisterStudent): Unit = {
     require(student == null)
     state(StudentRegistered(cmd.name))
   }
-  def apply(cmd: ChangeStudentName) {
+  def apply(cmd: ChangeStudentName): Unit = {
     val newName = cmd.newName.trim
     if (newName.length == 0) sys.error("No name supplied")
     if (newName != student.name) {

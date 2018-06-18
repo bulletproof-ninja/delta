@@ -35,7 +35,7 @@ class StreamProcessMapStore[K, T](
   @volatile private[this] var _logger: ILogger = _
   protected def logger = _logger
 
-  def init(hz: HazelcastInstance, props: Properties, mapName: String) {
+  def init(hz: HazelcastInstance, props: Properties, mapName: String): Unit = {
     _logger = hz.getLoggingService.getLogger(s"${getClass.getName}: $mapName")
     _mapName = mapName
   }
@@ -43,9 +43,9 @@ class StreamProcessMapStore[K, T](
 
   def loadAllKeys = preloadKeys.asJava
 
-  def delete(k: K) =
+  def delete(k: K): Unit =
     logger.warning(s"Tried to delete $k from $mapName, but ignoring. Override `delete` if needed, or use `evict` instead of `remove`/`delete`.")
-  def deleteAll(keys: Collection[K]) =
+  def deleteAll(keys: Collection[K]): Unit =
     logger.warning(s"Tried to delete ${keys.size} keys from $mapName, but ignoring. Override `deleteAll` if needed. Or use `evict` instead of `remove`/`delete`.")
 
   def store(key: K, state: EntryState[T, Any]): Unit = {
@@ -54,7 +54,7 @@ class StreamProcessMapStore[K, T](
       else processStore.refresh(key, state.snapshot.revision, state.snapshot.tick).await(awaitTimeout, logTimedOutFuture)
     }
   }
-  def storeAll(map: JMap[K, EntryState[T, Any]]) = {
+  def storeAll(map: JMap[K, EntryState[T, Any]]): Unit = {
     val contentUpdated = map.asScala.collect {
       case (key, EntryState(model, true, unapplied)) if unapplied.isEmpty =>
         key -> model

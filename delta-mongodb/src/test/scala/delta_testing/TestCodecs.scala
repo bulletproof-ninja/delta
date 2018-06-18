@@ -11,7 +11,7 @@ import delta.mongo.ScalaEnumCodec
 class TestCodecs {
 
   @Test
-  def scala_enum() {
+  def scala_enum(): Unit = {
     object Cola extends Enumeration {
       val Coke, Pepsi, RC = Value
     }

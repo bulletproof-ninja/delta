@@ -51,7 +51,7 @@ class Employee private[aggr] (
     assert(cmd.newSalary == emp.salary)
     this
   }
-  private def checkAndUpdateSalary(newSalary: Int) {
+  private def checkAndUpdateSalary(newSalary: Int): Unit = {
     require(newSalary > 0)
     if (newSalary != emp.salary) {
       state(EmployeeSalaryChange(newSalary))

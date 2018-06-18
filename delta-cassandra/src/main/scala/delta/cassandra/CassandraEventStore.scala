@@ -19,7 +19,7 @@ import delta.{ EventCodec, EventStore }
 private[cassandra] object CassandraEventStore {
 
   private def ensureTable[ID: ColumnType, SF: ColumnType](
-    session: Session, keyspace: String, table: String, replication: Map[String, Any]) {
+    session: Session, keyspace: String, table: String, replication: Map[String, Any]): Unit = {
     val replicationStr = replication.map {
       case (key, str: CharSequence) => s"'$key':'$str'"
       case (key, cls: Class[_]) => s"'$key':'${cls.getName}'"
@@ -149,7 +149,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
 
   // TODO: Make fully non-blocking
-  private def queryAsync[U](stream: Some[ID], callback: StreamConsumer[TXN, U], stm: BoundStatement) {
+  private def queryAsync[U](stream: Some[ID], callback: StreamConsumer[TXN, U], stm: BoundStatement): Unit = {
     execute(stm) { rs =>
       Try {
         val iter = rs.iterator().asScala.map(row => toTransaction(stream, row, StreamColumnsIdx))

@@ -42,17 +42,17 @@ class Semester private (
 
   private def semester = state.curr
 
-  private def apply(cmd: CreateClass) {
+  private def apply(cmd: CreateClass): Unit = {
     require(semester == null)
     state(ClassCreated(cmd.className))
   }
 
-  def apply(cmd: EnrollStudent) {
+  def apply(cmd: EnrollStudent): Unit = {
     if (!semester.enrolled(cmd.student)) {
       state(StudentEnrolled(cmd.student))
     }
   }
-  def apply(cmd: CancelStudent) {
+  def apply(cmd: CancelStudent): Unit = {
     if (semester.enrolled(cmd.student)) {
       state(StudentCancelled(cmd.student))
     }

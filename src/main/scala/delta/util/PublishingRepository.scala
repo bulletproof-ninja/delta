@@ -18,9 +18,9 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
 
   final type E = (T, List[EVT])
 
-  protected def publish(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String])
+  protected def publish(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String]): Unit
 
-  private def publishEvents(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String]) {
+  private def publishEvents(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String]): Unit = {
     if (events.nonEmpty) try publish(id, revision, events, metadata) catch {
       case NonFatal(e) => publishCtx.reportFailure(e)
     }

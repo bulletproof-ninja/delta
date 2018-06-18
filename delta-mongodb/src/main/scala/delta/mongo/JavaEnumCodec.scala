@@ -12,7 +12,7 @@ class JavaEnumCodec[E <: java.lang.Enum[E]]()(implicit tag: ClassTag[E]) extends
       getEncoderClass.getEnumConstants.foldLeft(Map.empty[String, E]) {
         case (map, enum: E) => map.updated(enum.name, enum)
       }
-    def encode(writer: BsonWriter, value: E, encoderContext: EncoderContext) {
+    def encode(writer: BsonWriter, value: E, encoderContext: EncoderContext): Unit = {
       stringCodec.encode(writer, value.name, encoderContext)
     }
     def decode(reader: BsonReader, decoderContext: DecoderContext): E = {

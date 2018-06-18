@@ -59,7 +59,7 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   var session: Session = _
 
   @Before
-  def setup() {
+  def setup(): Unit = {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, String](
@@ -72,12 +72,12 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))
   }
   @After
-  def teardown() {
+  def teardown(): Unit = {
     deleteAll(session)
   }
 
   @Test
-  def mock() {
+  def mock(): Unit = {
     Assert.assertTrue(true)
   }
 }

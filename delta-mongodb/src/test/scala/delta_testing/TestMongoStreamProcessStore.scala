@@ -15,7 +15,7 @@ object TestMongoStreamProcessStore {
 
   implicit val TestKeyCodec = new Codec[TestKey] {
     def getEncoderClass = classOf[TestKey].asInstanceOf[Class[TestKey]]
-    def encode(writer: BsonWriter, value: TestKey, encoderContext: EncoderContext) {
+    def encode(writer: BsonWriter, value: TestKey, encoderContext: EncoderContext): Unit = {
       writer.writeStartArray()
       writer.writeInt64(value.long)
       writer.writeInt32(value.int)
@@ -36,13 +36,13 @@ object TestMongoStreamProcessStore {
   @volatile private var client: MongoClient = _
 
   @BeforeClass
-  def setupClass() {
+  def setupClass(): Unit = {
     client = MongoClients.create()
     coll = client.getDatabase("test_snapshot_store").getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_"))
     withBlockingCallback[Void]()(coll.drop(_))
   }
   @AfterClass
-  def teardownClass() {
+  def teardownClass(): Unit = {
     withBlockingCallback[Void]()(coll.drop(_))
     client.close()
   }
@@ -59,7 +59,7 @@ class TestMongoStreamProcessStore extends TestStreamProcessStore {
   override def newStore = new MongoStreamProcessStore[Long, String](strCdc, coll)
 
   @Test
-  def mock() {
+  def mock(): Unit = {
     assertTrue(true)
   }
 }

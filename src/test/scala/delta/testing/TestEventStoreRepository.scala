@@ -246,7 +246,7 @@ abstract class AbstractEventStoreRepositoryTest {
       case Success(_) =>
         for (i ← range) {
           val runThis = new Runnable {
-            def run {
+            def run: Unit = {
               val fut = repo.update(id, Revision(0), metadata) {
                 case (foo, _) =>
                   foo(AddNewNumber(i))
@@ -296,12 +296,12 @@ class Aggr(val state: TheOneAggr.State, val mergeEvents: Seq[AggrEvent]) {
     surgeon.getAll[List[AggrEvent]].head._2.reverse
   }
   private[delta] def aggr = state.curr
-  def apply(cmd: AddNewNumber) {
+  def apply(cmd: AddNewNumber): Unit = {
     if (!aggr.numbers.contains(cmd.n)) {
       state(NewNumberWasAdded(cmd.n))
     }
   }
-  def apply(cmd: ChangeStatus) {
+  def apply(cmd: ChangeStatus): Unit = {
     if (aggr.status != cmd.newStatus) {
       state(StatusChanged(cmd.newStatus))
     }
@@ -348,7 +348,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
   }
 
   @Before
-  def setup() {
+  def setup(): Unit = {
 
     es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)
     with Publishing[String, AggrEvent] {
@@ -394,7 +394,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   var metrics: List[Metrics] = _
 
   @Before
-  def setup() {
+  def setup(): Unit = {
     metrics = Nil
       def ?[T](implicit t: T) = implicitly[T]
     es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)

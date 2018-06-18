@@ -35,7 +35,7 @@ object TestJdbcStreamProcessStore {
   }
 
   @AfterClass
-  def dropDb() {
+  def dropDb(): Unit = {
     val conn = ds.getConnection
     try {
       val stm = conn.createStatement()
@@ -61,7 +61,7 @@ class TestJdbcStreamProcessStore
     }.ensureTable()
 
   @Test
-  def mock() {}
+  def mock() = ()
 }
 
 class TestJdbcStreamProcessHistory
@@ -98,7 +98,7 @@ class TestJdbcStreamProcessHistory
   }
 
   @Test
-  def history() {
+  def history(): Unit = {
     val id = util.Random.nextLong()
     val store = newStore(1)
     history(id, store, "")

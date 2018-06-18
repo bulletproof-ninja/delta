@@ -21,7 +21,7 @@ package object mongo {
 
   implicit def tuple2Codec[A: Codec, B: Codec] = new Codec[(A, B)] {
     def getEncoderClass = classOf[Tuple2[_, _]].asInstanceOf[Class[Tuple2[A, B]]]
-    def encode(writer: BsonWriter, value: (A, B), encoderContext: EncoderContext) {
+    def encode(writer: BsonWriter, value: (A, B), encoderContext: EncoderContext): Unit = {
       writer.writeStartArray()
       implicitly[Codec[A]].encode(writer, value._1, encoderContext)
       implicitly[Codec[B]].encode(writer, value._2, encoderContext)
@@ -42,7 +42,7 @@ package object mongo {
   implicit val longCodec = new LongCodec().asInstanceOf[Codec[Long]]
   implicit val unitCodec = new Codec[Unit] {
     def getEncoderClass = classOf[Unit]
-    def encode(writer: BsonWriter, value: Unit, encoderContext: EncoderContext) {
+    def encode(writer: BsonWriter, value: Unit, encoderContext: EncoderContext): Unit = {
       writer.writeUndefined()
     }
     def decode(reader: BsonReader, decoderContext: DecoderContext): Unit = {
@@ -55,7 +55,7 @@ package object mongo {
     private[this] val byName = enum.values.foldLeft(Map.empty[String, E#Value]) {
       case (map, enum) => map.updated(enum.toString, enum)
     }
-    def encode(writer: BsonWriter, value: E#Value, encoderContext: EncoderContext) {
+    def encode(writer: BsonWriter, value: E#Value, encoderContext: EncoderContext): Unit = {
       stringCodec.encode(writer, value.toString, encoderContext)
     }
     def decode(reader: BsonReader, decoderContext: DecoderContext): E#Value = {
@@ -81,7 +81,7 @@ package object mongo {
     var used = false
       def callback = if (!used) new SingleResultCallback[R] {
         used = true
-        def onResult(result: R, t: Throwable) {
+        def onResult(result: R, t: Throwable): Unit = {
           if (t != null) promise failure t
           else promise success Option(result)
         }
@@ -98,7 +98,7 @@ package object mongo {
     var used = false
       def callback = if (!used) new SingleResultCallback[R] {
         used = true
-        def onResult(result: R, t: Throwable) {
+        def onResult(result: R, t: Throwable): Unit = {
           if (t != null) queue offer Failure(t)
           else queue offer Success(result)
         }

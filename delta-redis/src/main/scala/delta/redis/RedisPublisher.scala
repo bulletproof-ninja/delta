@@ -50,7 +50,7 @@ final class RedisPublisher[ID, EVT](
   private[this] val subscribers = collection.mutable.Buffer[FilteredSubscriber]()
 
   private[this] val jedisSubscriber = new BinaryJedisPubSub {
-    override def onMessage(channel: Array[Byte], byteMsg: Array[Byte]) {
+    override def onMessage(channel: Array[Byte], byteMsg: Array[Byte]): Unit = {
       val txn = publishCodec decode byteMsg
       sharedLock {
         subscribers.foreach(_.tell(txn))
@@ -92,7 +92,7 @@ final class RedisPublisher[ID, EVT](
   private[this] val tf = Threads.factory("Redis blocking subscriber")
   protected def newSubscriberThread(r: Runnable): Thread = tf.newThread(r)
 
-  private def startSubscriberThread() {
+  private def startSubscriberThread(): Unit = {
     val channels = allChannels.toSeq.map(channelEncoder)
     val jedis = new BinaryJedis(info)
     val subscriberThread = this newSubscriberThread new Runnable {

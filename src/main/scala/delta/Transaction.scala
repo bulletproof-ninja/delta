@@ -8,10 +8,10 @@ final case class Transaction[+ID, +EVT](
     revision: Int,
     metadata: Map[String, String],
     events: List[EVT]) {
-  private def writeObject(out: java.io.ObjectOutputStream) {
+  private def writeObject(out: java.io.ObjectOutputStream): Unit = {
     Transaction.writeObject(this, out)
   }
-  private def readObject(inp: java.io.ObjectInputStream) {
+  private def readObject(inp: java.io.ObjectInputStream): Unit = {
     Transaction.readObject[ID, EVT](inp) {
       case (tick, ch, id, rev, metadata, events) =>
         val surgeon = new scuff.reflect.Surgeon(this)

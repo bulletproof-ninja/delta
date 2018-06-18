@@ -7,9 +7,8 @@ import org.junit.AfterClass
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-import sampler.{ Aggr, JSON, JsonDomainEventCodec }
+import sampler.{ JSON, JsonDomainEventCodec }
 import sampler.aggr.DomainEvent
-import sampler.jdbc.AggrRootColumn
 import delta.jdbc._
 import delta.jdbc.h2._
 import delta.util.LocalPublisher
@@ -22,7 +21,7 @@ object TestSampler {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
   val h2File = new File(".", h2Name + ".mv.db")
   @AfterClass
-  def cleanup() {
+  def cleanup(): Unit = {
     h2File.delete()
   }
   implicit object StringColumn extends VarCharColumn
@@ -45,7 +44,7 @@ final class TestSampler extends sampler.TestSampler {
   }
 
   @Test
-  def mock() {
+  def mock(): Unit = {
     assertTrue(true)
   }
 }

@@ -24,7 +24,7 @@ object TestCollege {
   @volatile private var client: MongoClient = _
 
   @BeforeClass
-  def setupClass() {
+  def setupClass(): Unit = {
     val settings = com.mongodb.MongoClientSettings.builder().build()
     client = MongoClients.create(settings)
     val ns = new MongoNamespace("unit-testing", getClass.getName.replaceAll("[\\.\\$]+", "_"))
@@ -32,7 +32,7 @@ object TestCollege {
 
   }
   @AfterClass
-  def teardownClass() {
+  def teardownClass(): Unit = {
     withBlockingCallback[Void]()(coll.drop(_))
     client.close()
   }
@@ -42,7 +42,7 @@ class TestCollege extends college.TestCollege {
   import TestCollege._
 
   @After
-  def dropColl() {
+  def dropColl(): Unit = {
     withBlockingCallback[Void]()(coll.drop(_))
   }
 
@@ -60,7 +60,7 @@ class TestCollege extends college.TestCollege {
   }
 
   @Test
-  def mock() {
+  def mock(): Unit = {
     assertTrue(true)
   }
 

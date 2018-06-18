@@ -36,7 +36,7 @@ class TestEventStore {
   }
 
   @Test
-  def serialization() {
+  def serialization(): Unit = {
     val wallClock = System.currentTimeMillis
     val txn = new es.TXN(99, "USER", 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream

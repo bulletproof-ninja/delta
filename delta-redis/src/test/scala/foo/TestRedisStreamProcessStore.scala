@@ -27,12 +27,12 @@ class TestRedisStreamProcessStore extends TestStreamProcessStore {
   }
 
   @Before
-  def setup() {
+  def setup(): Unit = {
     jedisProvider(_.flushAll)
   }
 
   @Test
-  def mock() {
+  def mock(): Unit = {
 
   }
 }

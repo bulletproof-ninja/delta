@@ -34,7 +34,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
   protected def byteDataType = "TINYINT"
 
-  protected def executeDDL(conn: Connection, ddl: String) {
+  protected def executeDDL(conn: Connection, ddl: String): Unit = {
     val stm = conn.createStatement()
     try stm.execute(ddl) finally stm.close()
   }
@@ -133,7 +133,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
       VALUES (?, ?)
   """
   def insertStream(stream: ID, channel: String)(
-      implicit conn: Connection) {
+      implicit conn: Connection): Unit = {
     prepareStatement(streamInsert) { ps =>
       ps.setValue(1, stream)
       ps.setString(2, channel)
@@ -146,7 +146,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
         VALUES (?, ?, ?)
   """
   def insertTransaction(stream: ID, rev: Int, tick: Long)(
-      implicit conn: Connection) {
+      implicit conn: Connection): Unit = {
     prepareStatement(transactionInsert) { ps =>
       ps.setValue(1, stream)
       ps.setInt(2, rev)
@@ -160,7 +160,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
         VALUES (?, ?, ?, ?, ?, ?)
   """
   def insertEvents(stream: ID, rev: Int, events: List[EVT])(
-      implicit conn: Connection, codec: EventCodec[EVT, SF]) {
+      implicit conn: Connection, codec: EventCodec[EVT, SF]): Unit = {
     prepareStatement(eventInsert) { ps =>
       val isBatch = events.tail.nonEmpty
       ps.setValue(1, stream)

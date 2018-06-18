@@ -18,7 +18,7 @@ class TestMonotonicProcessor {
   private val NoFallback = (r: Int) => NoFuture
 
   @Test
-  def `test out-of-order and callback`() {
+  def `test out-of-order and callback`(): Unit = {
     object Tracker {
       def clear() = {
         snapshotMap.clear()
@@ -80,7 +80,7 @@ class TestMonotonicProcessor {
         events = List('r', 'l', 'd', '!'),
         tick = 666, channel = "", metadata = Map.empty))
 
-      def processAndVerify(ec: ExecutionContext, txns: List[Transaction[Int, Char]], n: Int) {
+      def processAndVerify(ec: ExecutionContext, txns: List[Transaction[Int, Char]], n: Int): Unit = {
         Tracker.clear()
         val txnSequence = { txns.map(_.revision).mkString(",") }
         //        println(s"----------------- $n: $txnSequence using $ec ---------------")
@@ -108,8 +108,8 @@ class TestMonotonicProcessor {
   }
 
   @Test
-  def `large entity`() {
-      def test(exeCtx: ExecutionContext) {
+  def `large entity`(): Unit = {
+      def test(exeCtx: ExecutionContext): Unit = {
           implicit def ec = exeCtx
         //        println(s"Testing with $exeCtx")
         val snapshotMap = new TrieMap[Int, Snapshot[String]]

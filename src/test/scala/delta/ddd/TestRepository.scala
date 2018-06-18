@@ -12,7 +12,7 @@ import delta.util.PublishingRepository
 
 class TestRepository {
 
-  private def withLatch(count: Int)(thunk: CountDownLatch => Unit) {
+  private def withLatch(count: Int)(thunk: CountDownLatch => Unit): Unit = {
     val latch = new CountDownLatch(count)
     thunk(latch)
     assertTrue(latch.await(5, TimeUnit.SECONDS))
@@ -22,7 +22,7 @@ class TestRepository {
   case class Customer(name: String, postCode: String)
 
   @Test
-  def `insert success`() {
+  def `insert success`(): Unit = {
     withLatch(5) { latch =>
       val repo = new ConcurrentMapRepository[BigInt, Customer]
       val hank = Customer("Hank", "12345")
@@ -58,12 +58,12 @@ class TestRepository {
   case object CustomerCreated extends VeryBasicEvent
 
   @Test
-  def `event publishing`() {
+  def `event publishing`(): Unit = {
     case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Map[String, String])
     val notifications = new LinkedBlockingQueue[Notification]
     val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new ConcurrentMapRepository, global) {
       type Event = VeryBasicEvent
-      def publish(id: Long, revision: Int, events: List[Event], metadata: Map[String, String]) {
+      def publish(id: Long, revision: Int, events: List[Event], metadata: Map[String, String]): Unit = {
         notifications offer Notification(id, revision, events, metadata)
       }
     }

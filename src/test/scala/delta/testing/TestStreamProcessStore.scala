@@ -18,7 +18,7 @@ class TestStreamProcessStore {
   protected def storeSupportsConditionalWrites: Boolean = true
 
   @Test
-  def foo() {
+  def foo(): Unit = {
     val store = newStore
     val none = store.read(54L).await
     assertEquals(None, none)
@@ -56,7 +56,7 @@ class TestStreamProcessStore {
   }
 
   @Test
-  def `snapshot map`() {
+  def `snapshot map`(): Unit = {
     val snapshot = Snapshot(98765, 123, 9999L).map(_.toString)
     assertEquals("98765", snapshot.content)
     assertEquals(123, snapshot.revision)
@@ -64,7 +64,7 @@ class TestStreamProcessStore {
   }
 
   @Test
-  def `mix of new and old`() {
+  def `mix of new and old`(): Unit = {
     val store = newStore
     val ids = (1L to 10L).map(tick => util.Random.nextLong -> (0 -> tick)).toMap
     store.refreshBatch(ids).await
@@ -88,7 +88,7 @@ class TestStreamProcessStore {
   }
 
   @Test
-  def `tick collision`() {
+  def `tick collision`(): Unit = {
     val store = newStore
     import store.Update
     val key = util.Random.nextLong()

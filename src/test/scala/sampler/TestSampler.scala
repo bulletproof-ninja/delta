@@ -29,7 +29,7 @@ class TestSampler {
   lazy val DepartmentRepo = new EntityRepository(Department.Def)(es)
 
   @Test
-  def inserting() {
+  def inserting(): Unit = {
     val id = new EmpId
     assertFalse(EmployeeRepo.exists(id).await.isDefined)
     val register = RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor")
@@ -52,7 +52,7 @@ class TestSampler {
   }
 
   @Test
-  def updating() {
+  def updating(): Unit = {
     val id = new EmpId
     assertTrue(EmployeeRepo.exists(id).await.isEmpty)
     val emp = register(id, RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor"))

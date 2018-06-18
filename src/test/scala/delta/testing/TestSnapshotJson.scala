@@ -27,7 +27,7 @@ class TestSnapshotJson {
   }
 
   @Test
-  def transpose() {
+  def transpose(): Unit = {
     val snapshot = Snapshot(Option("Hello"), 1, 1)
     snapshot.transpose match {
       case Some(Snapshot("Hello", 1, 1)) => // as expected
@@ -36,7 +36,7 @@ class TestSnapshotJson {
   }
 
   @Test
-  def zeros() {
+  def zeros(): Unit = {
     val codec = new SnapshotJsonCodec(FooCodec, "foo")
     val snapshot = Snapshot(new Foo(42, "JSON", true)(Array("hello", "world")), 0, 0)
     val json = codec encode snapshot
@@ -47,7 +47,7 @@ class TestSnapshotJson {
   }
 
   @Test
-  def max() {
+  def max(): Unit = {
     val codec = new SnapshotJsonCodec(FooCodec, "foo")
     val snapshot = Snapshot(new Foo(42, "JSON", false, "")(Array("hello", "world")), Int.MaxValue, Long.MaxValue)
     val json = codec encode snapshot
@@ -58,7 +58,7 @@ class TestSnapshotJson {
   }
 
   @Test
-  def min() {
+  def min(): Unit = {
     val codec = new SnapshotJsonCodec(FooCodec, "foo")
     val snapshot = Snapshot(new Foo(42, "JSON", false, "")(Array("hello", "world")), Int.MinValue, Long.MinValue)
     val json = codec encode snapshot

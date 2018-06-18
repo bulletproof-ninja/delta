@@ -5,9 +5,8 @@ import org.junit._
 
 import com.mysql.jdbc.jdbc2.optional.MysqlConnectionPoolDataSource
 
-import sampler.{ Aggr, JSON, JsonDomainEventCodec }
+import sampler.{ JSON, JsonDomainEventCodec }
 import sampler.aggr.DomainEvent
-import sampler.jdbc._
 import delta.jdbc._
 import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
@@ -25,7 +24,7 @@ object TestSampler {
     ds
   }
   @AfterClass
-  def dropDb() {
+  def dropDb(): Unit = {
     val conn = ds.getConnection
     try {
       val stm = conn.createStatement()
@@ -47,7 +46,7 @@ final class TestSampler extends sampler.TestSampler {
   }
 
   @Test
-  def mock() {
+  def mock(): Unit = {
     assertTrue(true)
   }
 }

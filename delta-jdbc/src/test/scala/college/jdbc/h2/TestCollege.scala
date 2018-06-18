@@ -24,7 +24,7 @@ object TestCollege {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
   val h2File = new File(".", h2Name + ".mv.db")
   @AfterClass
-  def cleanup() {
+  def cleanup(): Unit = {
     h2File.delete()
   }
 }
@@ -45,7 +45,7 @@ class TestCollege extends college.TestCollege {
   }
 
   @Test
-  def mock() {
+  def mock(): Unit = {
     assertTrue(true)
   }
 

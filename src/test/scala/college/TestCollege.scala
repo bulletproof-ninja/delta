@@ -40,7 +40,7 @@ class TestCollege {
   protected var SemesterRepository: EntityRepository[Int, SemesterEvent, SemesterState, Semester.Id, semester.Semester] = _
 
   @Before
-  def setup() {
+  def setup(): Unit = {
     StudentRepository = new EntityRepository(Student)(eventStore)
     SemesterRepository = new EntityRepository(Semester)(eventStore)
   }
@@ -115,7 +115,7 @@ class TestCollege {
   }
 
   @Test
-  def `many-to-many relationship`() {
+  def `many-to-many relationship`(): Unit = {
     val Unknown = "<unknown>"
     populate(200, 30)
     val enrollmentQuery = eventStore.query(eventStore.EventSelector(
@@ -166,7 +166,7 @@ class TestCollege {
   }
 
   @Test
-  def `with join state`() {
+  def `with join state`(): Unit = {
 
     case class SemesterRev(id: Semester.Id, rev: Int) {
       def this(id: Int, rev: Int) = this(new Semester.Id(id), rev)
