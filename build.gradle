@@ -132,20 +132,20 @@ wrapper {
 
 project(':delta-cassandra') {
     dependencies {
-        compile "com.datastax.cassandra:cassandra-driver-core:3.1.4"
+        compile "com.datastax.cassandra:cassandra-driver-core:3.5.1"
     }
 }
 project(':delta-jdbc') {
     dependencies {
         testCompile "com.h2database:h2:1.4.+"
         testCompile "org.apache.derby:derby:10.12.+"
-        testCompile "mysql:mysql-connector-java:5.1.40"
-        testCompile "org.postgresql:postgresql:42.2.2"
+        testCompile "mysql:mysql-connector-java:5.1.46"
+        testCompile "org.postgresql:postgresql:42.2.4"
     }
 }
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.9.4"
+        compile "com.hazelcast:hazelcast:3.10.4"
     }
 }
 project(':delta-redis') {
@@ -158,8 +158,8 @@ project(':delta-redis') {
 if (vScala != '2.13') {
     project(':delta-mongodb') {
         dependencies {
-            compile "org.mongodb:mongodb-driver-async:3.7.0"
-            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.3.0"
+            compile "org.mongodb:mongodb-driver-async:3.8.0"
+            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.4.0"
         }
     }
 }
