@@ -10,7 +10,7 @@ import scuff.concurrent.Threads
 
 /**
   * Implementation that stores snapshots in a [[scala.collection.concurrent.Map]].
-  * Useful when doing batch processing of past events, as a fast in-memory store.
+  * Useful when doing replay processing of past events, as a fast in-memory store.
   * If the backing map is either empty or incomplete (this would be expected, to
   * save both memory and load time), provide a fallback lookup mechanism for keys
   * not found.

@@ -11,23 +11,23 @@ import delta.Transaction
 
 /**
   * A persistent event source consumer, consisting of
-  * batch and real-time transaction processors, useful for
+  * replay and live transaction processors, useful for
   * building read models and other transaction processors,
   * e.g. sagas.
   * Can be started and stopped on demand, without loss of
   * transactions.
   * @param maxTickProcessed The highest tick processed.
-  * NOTE: Since batch processing is generally
+  * NOTE: Since replay processing is generally
   * not done in tick order, a tick received
-  * through incomplete batch processing
+  * through incomplete replay processing
   * is NOT reliable as a high-water mark. Any
-  * tick received in real-time processing can
+  * tick received in live processing can
   * be considered a high-water mark, and so
-  * can ticks from completed batch processing.
+  * can ticks from completed replay processing.
   */
 trait EventSourceConsumer[ID, EVT] {
 
-  protected type BatchResult
+  protected type ReplayResult
 
   type ES = EventSource[ID, _ >: EVT]
   type TXN = Transaction[ID, _ >: EVT]
@@ -36,14 +36,14 @@ trait EventSourceConsumer[ID, EVT] {
   protected def selector(es: ES): es.Selector
 
   /**
-    * Called at startup, when batch processing of
-    * transactions begins. Unlike real-time processing,
+    * Called at startup, when replay processing of
+    * transactions begins. Unlike live processing,
     * there will be no duplicate revisions passed
-    * to batch processor.
+    * to replay processor.
     *
-    * Batch processing allows
-    * for much faster in-memory processing, because
-    * persistence can be delayed until done.
+    * Replay processing enables in-memory processing,
+    * where persistence can be delayed until done,
+    * making large data sets much faster to process.
     *
     * NOTE: Tick order is arbitrary, thus no guarantee
     * of causal tick processing, between different streams,
@@ -53,14 +53,14 @@ trait EventSourceConsumer[ID, EVT] {
     * not be called.
     *
     * It is highly recommended to return an instance of
-    * [[delta.util.MonotonicBatchProcessor]] here.
+    * [[delta.util.MonotonicReplayProcessor]] here.
     */
-  protected def batchProcessor(es: ES): StreamConsumer[TXN, Future[BatchResult]]
+  protected def replayProcessor(es: ES): StreamConsumer[TXN, Future[ReplayResult]]
 
   /**
-    * When batch processing is completed, a real-time processor
+    * When replay processing is completed, a live processor
     * is requested.
-    * A real-time processor must take care to handle these
+    * A live processor must take care to handle these
     * situations:
     *     1) Out-of-order revisions
     *     2) Duplicate revisions
@@ -71,9 +71,9 @@ trait EventSourceConsumer[ID, EVT] {
     * which will handle all 3 above cases.
     *
     * @param es The [[delta.EventSource]] being processed.
-    * @param batchResult The result of batch processing, if any.
+    * @param replayResult The result of replay processing, if any.
     */
-  protected def realtimeProcessor(es: ES, batchResult: Option[BatchResult]): TXN => _
+  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => _
 
   /** The currently processed tick watermark. */
   protected def tickWatermark: Option[Long]
@@ -108,25 +108,25 @@ trait EventSourceConsumer[ID, EVT] {
   private def start(es: ES, maxEventSourceTickAtStart: Option[Long])(
       selector: es.Selector, maxTickSkew: Int)(
       implicit ec: ExecutionContext): Future[Subscription] = {
-    val batchProcessingDone: Future[Option[BatchResult]] = maxEventSourceTickAtStart match {
+    val replayProcessingDone: Future[Option[ReplayResult]] = maxEventSourceTickAtStart match {
       case None => // EventSource is empty
         Future successful None
       case Some(_) =>
-        val batchProc = StreamPromise(batchProcessor(es))
-        es.query(selector)(batchProc)
-        batchProc.future.map(Option(_))(Threads.PiggyBack)
+        val replayProc = StreamPromise(replayProcessor(es))
+        es.query(selector)(replayProc)
+        replayProc.future.map(Option(_))(Threads.PiggyBack)
     }
-    batchProcessingDone.flatMap { batchResult =>
-      val realtimeProcessor = this.realtimeProcessor(es, batchResult)
-      val liveSubscription = es.subscribe(selector.toComplete)(realtimeProcessor)
+    replayProcessingDone.flatMap { replayResult =>
+      val liveProcessor = this.liveProcessor(es, replayResult)
+      val liveSubscription = es.subscribe(selector.toComplete)(liveProcessor)
       // close window of opportunity, for a potential race condition, by re-querying anything since start
       val windowClosed = maxEventSourceTickAtStart match {
         case None =>
           val windowQuery = es.query(selector) _
-          StreamPromise.foreach(windowQuery)(realtimeProcessor)
+          StreamPromise.foreach(windowQuery)(liveProcessor)
         case Some(maxEventSourceTickAtStart) =>
           val windowQuery = es.querySince(maxEventSourceTickAtStart - maxTickSkew, selector) _
-          StreamPromise.foreach(windowQuery)(realtimeProcessor)
+          StreamPromise.foreach(windowQuery)(liveProcessor)
       }
       windowClosed.map(_ => liveSubscription)
     }
@@ -134,18 +134,18 @@ trait EventSourceConsumer[ID, EVT] {
   private def resume(es: ES, maxEventSourceTickAtStart: Long)(
       selector: es.Selector, tickWatermark: Long, maxTickSkew: Int)(
       implicit ec: ExecutionContext): Future[Subscription] = {
-    val batchProcessingDone: Future[Option[BatchResult]] = {
-      val batchProc = StreamPromise(batchProcessor(es))
-      es.querySince(tickWatermark - maxTickSkew, selector)(batchProc)
-      batchProc.future.map(Option(_))(Threads.PiggyBack)
+    val replayProcessingDone: Future[Option[ReplayResult]] = {
+      val replayProc = StreamPromise(replayProcessor(es))
+      es.querySince(tickWatermark - maxTickSkew, selector)(replayProc)
+      replayProc.future.map(Option(_))(Threads.PiggyBack)
     }
-    batchProcessingDone.flatMap { batchResult =>
-      val realtimeProcessor = this.realtimeProcessor(es, batchResult)
-      val liveSubscription = es.subscribe(selector.toComplete)(realtimeProcessor)
+    replayProcessingDone.flatMap { replayResult =>
+      val liveProcessor = this.liveProcessor(es, replayResult)
+      val liveSubscription = es.subscribe(selector.toComplete)(liveProcessor)
       // close window of opportunity, for a potential race condition, by re-querying anything since start
       val windowQuery = es.querySince(maxEventSourceTickAtStart - maxTickSkew, selector) _
       StreamPromise
-        .foreach(windowQuery)(realtimeProcessor)
+        .foreach(windowQuery)(liveProcessor)
         .map(_ => liveSubscription)
     }
   }

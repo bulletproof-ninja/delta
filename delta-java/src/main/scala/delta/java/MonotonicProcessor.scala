@@ -14,18 +14,18 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
   extends delta.util.MonotonicProcessor[ID, EVT, S](
     processStore)(
     ClassTag(evtClass))
-  with RealtimeProcessor[ID, EVT]
+  with LiveProcessor[ID, EVT]
 
-/** Monotonic batch processor. */
-abstract class MonotonicBatchProcessor[ID, EVT, S >: Null](
+/** Monotonic replay processor. */
+abstract class MonotonicReplayProcessor[ID, EVT, S >: Null](
     processStore: StreamProcessStore[ID, S],
     completionTimeout: Int, completionUnit: TimeUnit,
     evtClass: Class[_ <: EVT])
-  extends delta.util.MonotonicBatchProcessor[ID, EVT, S, Object](
+  extends delta.util.MonotonicReplayProcessor[ID, EVT, S, Object](
     new FiniteDuration(completionTimeout, completionUnit),
     processStore)(
     ClassTag(evtClass))
-  with BatchProcessor[ID, EVT]
+  with ReplayProcessor[ID, EVT]
 
 /** Monotonic processor with join state. */
 abstract class JoinStateProcessor[ID, EVT, S >: Null, JS >: Null <: S](
@@ -35,12 +35,12 @@ abstract class JoinStateProcessor[ID, EVT, S >: Null, JS >: Null <: S](
     processStore, evtClass)
   with delta.util.JoinStateProcessor[ID, EVT, S, JS]
 
-/** Monotonic batch processor with join state. */
-abstract class JoinStateBatchProcessor[ID, EVT, S >: Null, JS >: Null <: S](
+/** Monotonic replay processor with join state. */
+abstract class JoinStateReplayProcessor[ID, EVT, S >: Null, JS >: Null <: S](
     processStore: StreamProcessStore[ID, S],
     completionTimeout: Int, completionUnit: TimeUnit,
     evtClass: Class[_ <: EVT])
-  extends MonotonicBatchProcessor[ID, EVT, S](
+  extends MonotonicReplayProcessor[ID, EVT, S](
     processStore, completionTimeout, completionUnit, evtClass)
   with delta.util.JoinStateProcessor[ID, EVT, S, JS] {
 

@@ -17,10 +17,10 @@ abstract class EventSourceConsumer[ID, EVT](protected val tickWatermark: Option[
   def this(tickWatermark: java.lang.Long, evtType: Class[_ <: EVT]) =
     this(Option(tickWatermark).map(_.longValue))(ClassTag(evtType))
 
-  type BatchResult = Object
+  type ReplayResult = Object
 
-  protected def batchProcessor(es: ES): BatchProcessor[ID, EVT]
-  protected def realtimeProcessor(es: ES, batchResult: Option[Object]): RealtimeProcessor[ID, EVT]
+  protected def replayProcessor(es: ES): ReplayProcessor[ID, EVT]
+  protected def liveProcessor(es: ES, replayResult: Option[Object]): LiveProcessor[ID, EVT]
 
   /** Turn Scala `List` of events into Java `Iterable`. */
   protected def iterable(list: List[_ >: EVT]): java.lang.Iterable[EVT] = {

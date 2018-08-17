@@ -177,7 +177,7 @@ class TestCollege {
     case class SemesterModel(students: Set[Student.Id] = Set.empty) extends Model
 
     class ModelBuilder(memMap: TrieMap[Int, delta.Snapshot[Model]])
-      extends MonotonicBatchProcessor[Int, SemesterEvent, Model, Unit](
+      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Unit](
           10.seconds,
           new ConcurrentMapStore(memMap)(_ => Future successful None))
       with JoinStateProcessor[Int, SemesterEvent, Model, StudentModel] {

@@ -1,6 +1,6 @@
 package delta.hazelcast
 
-import delta.util.MonotonicBatchProcessor
+import delta.util.MonotonicReplayProcessor
 import scala.reflect.ClassTag
 import com.hazelcast.core.IMap
 import scala.concurrent.duration.FiniteDuration
@@ -11,9 +11,9 @@ import scala.concurrent.ExecutionContext
 import scuff.concurrent.PartitionedExecutionContext
 import scuff.concurrent.Threads
 import scuff.Codec
-import delta.util.ConcurrentMapBatchProcessing
+import delta.util.ConcurrentMapReplayProcessing
 
-object HzMonotonicBatchProcessor {
+object HzMonotonicReplayProcessor {
   private[this] def read[ID, EVT, WS, RS](
       imap: IMap[ID, EntryState[RS, EVT]],
       conv: RS => WS)(id: ID): Future[Option[delta.Snapshot[WS]]] = {
@@ -34,16 +34,16 @@ object HzMonotonicBatchProcessor {
   }
 }
 
-abstract class HzMonotonicBatchProcessor[ID, EVT: ClassTag, WS >: Null, RS](
+abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, WS >: Null, RS](
     imap: IMap[ID, EntryState[RS, EVT]],
     stateCodec: Codec[RS, WS],
     whenDoneCompletionTimeout: FiniteDuration,
     protected val whenDoneContext: ExecutionContext,
     partitionThreads: PartitionedExecutionContext,
     cmap: collection.concurrent.Map[ID, delta.Snapshot[WS]])
-  extends MonotonicBatchProcessor[ID, EVT, WS, Unit](
-    whenDoneCompletionTimeout, HzMonotonicBatchProcessor.makeStore(cmap, imap, stateCodec))
-  with ConcurrentMapBatchProcessing[ID, EVT, WS, Unit] {
+  extends MonotonicReplayProcessor[ID, EVT, WS, Unit](
+    whenDoneCompletionTimeout, HzMonotonicReplayProcessor.makeStore(cmap, imap, stateCodec))
+  with ConcurrentMapReplayProcessing[ID, EVT, WS, Unit] {
 
   def this(
       imap: IMap[ID, EntryState[RS, EVT]],
@@ -54,11 +54,11 @@ abstract class HzMonotonicBatchProcessor[ID, EVT: ClassTag, WS >: Null, RS](
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
       cmap: collection.concurrent.Map[ID, delta.Snapshot[WS]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[WS]]) =
     this(imap, stateCodec, whenDoneCompletionTimeout, whenDoneContext,
-      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-batch-processor")),
+      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor")),
       cmap)
 
   protected def processingContext(id: ID): ExecutionContext = partitionThreads.singleThread(id.##)
-  protected def onBatchStreamCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
     partitionThreads.shutdown().map(_ => cmap)(whenDoneContext)
 
   protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[Unit] = {

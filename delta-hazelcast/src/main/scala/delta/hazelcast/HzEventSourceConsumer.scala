@@ -23,11 +23,11 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, WS >: Null, RS >: Null](
     stateCodec: Codec[RS, WS],
     reducer: EventReducer[WS, EVT],
     protected val tickWatermark: Option[Long],
-    batchProcessingCompletionTimeout: FiniteDuration,
+    replayProcessingCompletionTimeout: FiniteDuration,
     scheduler: ScheduledExecutorService)
   extends EventSourceConsumer[ID, EVT] {
 
-  protected type BatchResult = Any
+  protected type ReplayResult = Any
 
   protected def reportFailure(th: Throwable): Unit
   /** Event source selector. */
@@ -43,22 +43,22 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, WS >: Null, RS >: Null](
 
   /**
     * Instantiate new concurrent map used to hold state during
-    * batch processing. This can be overridden to provide a
+    * replay processing. This can be overridden to provide a
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newBatchMap: collection.concurrent.Map[ID, Snapshot[WS]] =
+  protected def newReplayMap: collection.concurrent.Map[ID, Snapshot[WS]] =
     new java.util.concurrent.ConcurrentHashMap[ID, Snapshot[WS]].asScala
 
   /**
-    * Called at startup, when batch processing of
-    * transactions begins. Unlike real-time processing,
+    * Called at startup, when replay processing of
+    * transactions begins. Unlike live processing,
     * there will be no duplicate revisions passed
-    * to batch processor.
+    * to replay processor.
     *
-    * Batch processing allows
-    * for much faster in-memory processing, because
-    * persistence can be delayed until done.
+    * Replay processing enables in-memory processing,
+    * where persistence can be delayed until done,
+    * making large data sets much faster to process.
     *
     * NOTE: Tick order is arbitrary, thus no guarantee
     * of causal tick processing, between different streams,
@@ -68,24 +68,24 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, WS >: Null, RS >: Null](
     * not be called.
     *
     * It is highly recommended to return an instance of
-    * [[delta.util.MonotonicBatchProcessor]] here.
+    * [[delta.util.MonotonicReplayProcessor]] here.
     */
 
   private[this] val reduce = EventReducer.process(reducer) _
-  protected def batchProcessor(es: ES) =
-    new HzMonotonicBatchProcessor[ID, EVT, WS, RS](
+  protected def replayProcessor(es: ES) =
+    new HzMonotonicReplayProcessor[ID, EVT, WS, RS](
       imap,
       stateCodec,
-      batchProcessingCompletionTimeout,
+      replayProcessingCompletionTimeout,
       executionContext,
       newPartitionedExecutionContext,
-      newBatchMap) {
+      newReplayMap) {
     def process(txn: TXN, currState: Option[WS]): WS = reduce(currState, txn.events)
   }
 
   protected def missingRevisionsReplayDelay: FiniteDuration = 1111.milliseconds
 
-  protected def realtimeProcessor(es: ES, batchResult: Option[BatchResult]): TXN => _ = {
+  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => _ = {
     new HzMonotonicProcessor[ID, EVT, WS, RS](
       es, imap, stateCodec, reducer, reportFailure,
       scheduler, missingRevisionsReplayDelay)

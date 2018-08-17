@@ -7,15 +7,15 @@ import scala.reflect.ClassTag
 import scuff.concurrent.Threads
 import scala.concurrent.ExecutionContext
 
-abstract class DefaultMonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null](
+abstract class DefaultMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
     store: StreamProcessStore[ID, S],
     whenDoneCompletionTimeout: FiniteDuration,
     protected val whenDoneContext: ExecutionContext,
     writeBatchSize: Int,
     partitionThreads: PartitionedExecutionContext,
     cmap: collection.concurrent.Map[ID, delta.Snapshot[S]])
-  extends MonotonicBatchProcessor[ID, EVT, S, Unit](whenDoneCompletionTimeout, new ConcurrentMapStore(cmap)(store.read))
-  with ConcurrentMapBatchProcessing[ID, EVT, S, Unit] {
+  extends MonotonicReplayProcessor[ID, EVT, S, Unit](whenDoneCompletionTimeout, new ConcurrentMapStore(cmap)(store.read))
+  with ConcurrentMapReplayProcessing[ID, EVT, S, Unit] {
 
   def this(
       store: StreamProcessStore[ID, S],
@@ -26,12 +26,12 @@ abstract class DefaultMonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null](
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
       cmap: collection.concurrent.Map[ID, delta.Snapshot[S]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[S]]) =
     this(store, whenDoneCompletionTimeout, whenDoneContext, writeBatchSize,
-      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-batch-processor")),
+      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-replay-processor")),
       cmap)
 
   protected def processingContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 
-  protected def onBatchStreamCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
     partitionThreads.shutdown().map(_ => cmap)(whenDoneContext)
 
   protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[Unit] = {
@@ -44,7 +44,7 @@ abstract class DefaultMonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null](
       } else if (writeBatchSize == 1) {
         val (id, snapshot) = iter.next
         writes += processStore.write(id, snapshot)
-      } else { // batchProcessorWriteBatchSize <= 0
+      } else { // replayProcessorWriteReplaySize <= 0
         val batch = iter.toMap
         writes += processStore.writeBatch(batch)
       }

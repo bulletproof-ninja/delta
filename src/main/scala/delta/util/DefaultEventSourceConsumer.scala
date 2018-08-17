@@ -12,21 +12,21 @@ import java.util.concurrent.ScheduledExecutorService
 abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
     protected val store: StreamProcessStore[ID, S],
     protected val scheduler: ScheduledExecutorService,
-    batchProcessorWriteBatchSize: Int)
+    replayProcessorWriteBatchSize: Int)
   extends EventSourceConsumer[ID, EVT]
   with TransactionProcessor[ID, EVT, S] {
 
   protected type Snapshot = delta.Snapshot[S]
   protected def tickWatermark: Option[Long] = store.tickWatermark
 
-  require(batchProcessorWriteBatchSize > 0, s"Write batch size must be positive, was $batchProcessorWriteBatchSize")
+  require(replayProcessorWriteBatchSize > 0, s"Write batch size must be positive, was $replayProcessorWriteBatchSize")
 
   protected def reportFailure(th: Throwable): Unit
   /** Event source selector. */
   protected def selector(es: ES): es.CompleteSelector
 
   /**
-    * Realtime callback on snapshot updates.
+    * Callback on snapshot updates from live processing.
     * @param id Snapshot (stream) id
     * @param snapshot The snapshot content, revision, and tick
     * @param contentUpdated `true` if snapshot content was updated, `false` if just revision and/or tick
@@ -41,34 +41,34 @@ abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
 
   /**
     * Instantiate new concurrent map used to hold state during
-    * batch processing. This can be overridden to provide a
+    * replay processing. This can be overridden to provide a
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newBatchMap: collection.concurrent.Map[ID, Snapshot] =
+  protected def newReplayMap: collection.concurrent.Map[ID, Snapshot] =
     new java.util.concurrent.ConcurrentHashMap[ID, Snapshot].asScala
 
-  protected type BatchResult = Any
+  protected type ReplayResult = Any
 
   /**
-    * Time allowed for batch processor to finish remaining
+    * Time allowed for replay processor to finish remaining
     * transactions once replay has finished.
     */
-  protected def batchProcessorCompletionTimeout: FiniteDuration = 11.seconds
+  protected def replayProcessorCompletionTimeout: FiniteDuration = 11.seconds
   /**
     * Time delay before replaying missing revisions.
     * This allows some margin for delayed out-of-order transactions.
     */
   protected def replayMissingRevisionsDelay: FiniteDuration = 1111.milliseconds
 
-  private class BatchProcessor
-    extends DefaultMonotonicBatchProcessor[ID, EVT, S](store, batchProcessorCompletionTimeout, ExecutionContext.fromExecutorService(scheduler, reportFailure), batchProcessorWriteBatchSize, newPartitionedExecutionContext, newBatchMap) {
+  private class ReplayProcessor
+    extends DefaultMonotonicReplayProcessor[ID, EVT, S](store, replayProcessorCompletionTimeout, ExecutionContext.fromExecutorService(scheduler, reportFailure), replayProcessorWriteBatchSize, newPartitionedExecutionContext, newReplayMap) {
     protected def process(tx: TXN, state: Option[S]): S = ???
     override protected def processAsync(tx: TXN, state: Option[S]): Future[S] =
       DefaultEventSourceConsumer.this.processAsync(tx, state)
   }
 
-  private class RealtimeProcessor(es: ES)
+  private class LiveProcessor(es: ES)
     extends DefaultMonotonicProcessor[ID, EVT, S](es, store, replayMissingRevisionsDelay, scheduler, newPartitionedExecutionContext) {
     protected def onUpdate(id: ID, update: Update) = onSnapshotUpdate(id, update.snapshot, update.contentUpdated)
     protected def process(tx: TXN, state: Option[S]): S = ???
@@ -77,27 +77,27 @@ abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
 
   }
 
-  protected def batchProcessor(es: ES): StreamConsumer[TXN, Future[BatchResult]] = this match {
+  protected def replayProcessor(es: ES): StreamConsumer[TXN, Future[ReplayResult]] = this match {
     case js: JoinState[ID, EVT, S] =>
-      new BatchProcessor with JoinStateProcessor[ID, EVT, S, S] {
+      new ReplayProcessor with JoinStateProcessor[ID, EVT, S, S] {
         def preprocess(streamId: ID, streamRevision: Int, tick: Long, evt: EVT, metadata: Map[String, String]): Map[ID, Processor] = ???
         override def preprocess(txn: TXN)(implicit ev: ClassTag[EVT]): Map[ID, Processor] =
           js.preprocess(txn)(ev)
       }
     case _ =>
-      new BatchProcessor
+      new ReplayProcessor
   }
 
-  protected def realtimeProcessor(es: ES, batchResult: Option[BatchResult]): MonotonicProcessor[ID, EVT, S] =
+  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): MonotonicProcessor[ID, EVT, S] =
     this match {
       case js: JoinState[ID, EVT, S] =>
-        new RealtimeProcessor(es) with JoinStateProcessor[ID, EVT, S, S] {
+        new LiveProcessor(es) with JoinStateProcessor[ID, EVT, S, S] {
           def preprocess(streamId: ID, streamRevision: Int, tick: Long, evt: EVT, metadata: Map[String, String]): Map[ID, Processor] = ???
           override def preprocess(txn: TXN)(implicit ev: ClassTag[EVT]): Map[ID, Processor] =
             js.preprocess(txn)(ev)
         }
       case _ =>
-        new RealtimeProcessor(es)
+        new LiveProcessor(es)
     }
 
 }

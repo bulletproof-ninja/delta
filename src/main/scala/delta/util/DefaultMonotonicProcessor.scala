@@ -23,7 +23,7 @@ abstract class DefaultMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
       reportFailure: Throwable => Unit,
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1)) =
     this(es, store, replayMissingRevisionsDelay, scheduler,
-      PartitionedExecutionContext(processingThreads, reportFailure, Threads.factory(s"default-batch-processor")))
+      PartitionedExecutionContext(processingThreads, reportFailure, Threads.factory(s"default-replay-processor")))
 
   protected def processingContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 

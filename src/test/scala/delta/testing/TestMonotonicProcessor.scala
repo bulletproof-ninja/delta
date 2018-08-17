@@ -29,7 +29,7 @@ class TestMonotonicProcessor {
       @volatile var latch: CountDownLatch = _
     }
     class Mono(ec: ExecutionContext)
-      extends MonotonicBatchProcessor[Int, Char, String, Unit](
+      extends MonotonicReplayProcessor[Int, Char, String, Unit](
         20.seconds,
         new ConcurrentMapStore(Tracker.snapshotMap)(NoFallback)) {
       def whenDone() = Future successful (())
@@ -113,7 +113,7 @@ class TestMonotonicProcessor {
           implicit def ec = exeCtx
         //        println(s"Testing with $exeCtx")
         val snapshotMap = new TrieMap[Int, Snapshot[String]]
-        val processor = new MonotonicBatchProcessor[Int, Char, String, Unit](
+        val processor = new MonotonicReplayProcessor[Int, Char, String, Unit](
           20.seconds,
           new ConcurrentMapStore(snapshotMap)(NoFallback)) {
           protected def processingContext(id: Int): ExecutionContext = ec match {

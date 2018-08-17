@@ -3,5 +3,5 @@ package delta.java
 import delta.Transaction
 import scala.concurrent.Future
 
-trait RealtimeProcessor[ID, EVT]
+trait LiveProcessor[ID, EVT]
   extends (Transaction[ID, _ >: EVT] => Future[Unit])

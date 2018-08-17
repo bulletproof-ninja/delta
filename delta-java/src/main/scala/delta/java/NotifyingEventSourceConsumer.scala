@@ -11,17 +11,17 @@ import scuff.Subscription
   * [[delta.util.DefaultEventSourceConsumer]] with [[delta.util.NotificationSupport]],
   * adapted for Java.
   * @param processStore The stream process store used to track stream progress
-  * @param batchProcessorWriteBatchSize Batch size when writing batch processed state to store
-  * @param batchProcessorWriteCompletionTimeout Timeout after replay has completed
+  * @param replayProcessorWriteBatchSize Batch size when writing replay processed state to store
+  * @param replayProcessorWriteCompletionTimeout Timeout after replay has completed
   * @param scheduler The scheduler used to schedule replay of potentially missing revisions, as well as general executor
   * @param evtTag The class tag for event type
   */
 abstract class NotifyingEventSourceConsumer[ID, EVT, S >: Null, FMT](
     processStore: StreamProcessStore[ID, S],
     scheduler: ScheduledExecutorService,
-    batchProcessorWriteBatchSize: Int)(
+    replayProcessorWriteBatchSize: Int)(
     implicit evtTag: ClassTag[EVT])
-  extends DefaultEventSourceConsumer[ID, EVT, S](processStore, scheduler, batchProcessorWriteBatchSize)
+  extends DefaultEventSourceConsumer[ID, EVT, S](processStore, scheduler, replayProcessorWriteBatchSize)
   with NotificationSupport[ID, S, FMT] {
 
   type FormatKey = Object
@@ -29,9 +29,9 @@ abstract class NotifyingEventSourceConsumer[ID, EVT, S >: Null, FMT](
   def this(
       processStore: StreamProcessStore[ID, S],
       scheduler: ScheduledExecutorService,
-      batchProcessorWriteBatchSize: Int,
+      replayProcessorWriteBatchSize: Int,
       evtType: Class[_ <: EVT]) =
-    this(processStore, scheduler, batchProcessorWriteBatchSize)(ClassTag(evtType))
+    this(processStore, scheduler, replayProcessorWriteBatchSize)(ClassTag(evtType))
 
   protected def subscribe[T <: S](key: Object, id: ID, notificationCtx: ExecutionContext, limitTo: Class[_ <: T], consumer: BiConsumer[delta.Snapshot[T], FMT]): Future[Subscription] = {
     subscribe(notificationCtx)(id :: Nil, key) {

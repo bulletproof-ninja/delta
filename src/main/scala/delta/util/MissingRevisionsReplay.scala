@@ -9,6 +9,10 @@ import delta.EventSource
 import java.util.concurrent.ScheduledExecutorService
 import delta.Transaction
 
+/**
+ * Request replay of transactions from [[delta.EventSource]]
+ * when revisions are missing.
+ */
 trait MissingRevisionsReplay[ID, EVT] {
 
   private[this] val outstandingReplays = new TrieMap[ID, (Range, ScheduledFuture[_])]

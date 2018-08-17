@@ -94,7 +94,7 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
   }
 
   private[this] val streamStatus = new TrieMap[ID, StreamStatus]
-  protected def unfinishedStreams: collection.Set[ID] = streamStatus.keySet
+  protected def incompleteStreams: collection.Set[ID] = streamStatus.keySet
 
   protected def onUpdate(id: ID, update: Update): Unit
   protected def onMissingRevisions(id: ID, missing: Range): Unit
@@ -153,10 +153,10 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
 }
 
 /**
-  * The default batch processor.
+  * The default replay processor.
   * @see delta.util.EventSourceProcessor
   */
-abstract class MonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null, BR](
+abstract class MonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, BR](
     protected val completionTimeout: FiniteDuration,
     processStore: StreamProcessStore[ID, S])
   extends MonotonicProcessor[ID, EVT, S](processStore)
@@ -164,7 +164,7 @@ abstract class MonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null, BR](
 
   override def onDone(): Future[BR] = {
     super.onDone().map { res =>
-      require(unfinishedStreams.isEmpty, s"Stream processing must be finished by now!")
+      require(incompleteStreams.isEmpty, s"Stream processing must be finished by now!")
       res
     }(scuff.concurrent.Threads.PiggyBack)
   }
@@ -173,31 +173,31 @@ abstract class MonotonicBatchProcessor[ID, EVT: ClassTag, S >: Null, BR](
   protected def onMissingRevisions(id: ID, missing: Range): Unit = ()
 
   /**
-    *  Called when batch processing is done.
+    *  Called when replay processing is done.
     *  This is the time to persist all generated
     *  state, and return any information that
-    *  will be handed over to the real-time
+    *  will be handed over to the live
     *  processor.
     */
   protected def whenDone(): Future[BR]
 }
 
-trait ConcurrentMapBatchProcessing[ID, EVT, S >: Null, BR] {
-  proc: MonotonicBatchProcessor[ID, EVT, S, BR] =>
+trait ConcurrentMapReplayProcessing[ID, EVT, S >: Null, BR] {
+  proc: MonotonicReplayProcessor[ID, EVT, S, BR] =>
 
   protected def whenDoneContext: ExecutionContext
-  protected def onBatchStreamCompletion(): Future[collection.concurrent.Map[ID, Snapshot]]
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Snapshot]]
   protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[BR]
   protected def isUnfinishedStreamsFatal = true
   protected def whenDone(): Future[BR] = {
       implicit def ec = whenDoneContext
-    onBatchStreamCompletion()
+    onReplayCompletion()
       .flatMap { cmap =>
-        if (isUnfinishedStreamsFatal && unfinishedStreams.nonEmpty) {
-          val ids = unfinishedStreams.mkString(compat.Platform.EOL, ", ", "")
+        if (isUnfinishedStreamsFatal && incompleteStreams.nonEmpty) {
+          val ids = incompleteStreams.mkString(compat.Platform.EOL, ", ", "")
           throw new IllegalStateException(s"Incomplete stream processing for ids:$ids")
         }
-        persist(cmap --= unfinishedStreams).andThen {
+        persist(cmap --= incompleteStreams).andThen {
           case _ => cmap.clear()
         }
       }
