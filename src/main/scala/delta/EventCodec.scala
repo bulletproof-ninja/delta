@@ -1,7 +1,9 @@
 package delta
 
 import scuff.Codec
+import scala.annotation.implicitNotFound
 
+@implicitNotFound("Undefined event storage format: ${SF}. An implicit instance of delta.EventCodec[${EVT}, ${SF}] must be in scope")
 trait EventCodec[EVT, SF] {
 
   type EventClass = Class[_ <: EVT]
