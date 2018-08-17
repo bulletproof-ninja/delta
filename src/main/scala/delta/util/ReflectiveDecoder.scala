@@ -11,10 +11,16 @@ import scala.reflect.NameTransformer
 /**
   * Will look for event decode methods, which must match
   * the following signature:
-  * For versioned events (default), the method must have two
-  * arguments, 1. `Byte`, 2. `SF` (the encoding format) and
-  * for `NoVersioning` events, the method must take a single
-  * argument, `SF`.
+  *
+  *  - For versioned events (default), the method must have two
+  *    arguments, 1. `Byte`, 2. `SF` (the encoding format)
+  * - For [[delta.util.NoVersioning]] events, the method must take a single
+  *   argument, `SF`.
+  *
+  * This is a convenience trait to allow encoding and decoding of events
+  * to be in the same file, without the having to rely on symmetric traits.
+  * Encoder methods and decoder methods are matched upon instantiation, thus
+  * fail-fast runtime failure at startup.
   */
 abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (channel: Option[String])
   extends EventCodec[EVT, SF] {

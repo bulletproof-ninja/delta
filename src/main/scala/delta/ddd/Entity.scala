@@ -9,7 +9,8 @@ private[delta] object Entity {
 }
 
 /**
-  * Type-class for entity.
+  * Type-class for Entity definition.
+  * Only for top-level (aggregate root) entities.
   */
 abstract class Entity[S >: Null, EVT](val name: String, reducer: EventReducer[S, EVT]) {
 

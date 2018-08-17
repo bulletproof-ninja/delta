@@ -1,12 +1,14 @@
 package delta.ddd
 
-/** Revision. */
+/** Entity revision abstraction. */
 sealed abstract class Revision {
   private[ddd] def validate(actual: Int): Unit =
     if (!matches(actual)) throw new Revision.MismatchException(value.get, actual)
   def matches(actual: Int): Boolean
   def value: Option[Int]
 }
+
+/** Entity revision abstraction. */
 object Revision {
 
   def apply(expected: Option[Int]): Revision =

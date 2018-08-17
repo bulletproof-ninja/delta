@@ -8,7 +8,7 @@ import delta.ddd.Revision
 import delta.ddd.ImmutableEntity
 
 /**
-  * [[delta.ddd.Repository]] wrapper for non-event-sourced
+  * [[delta.ddd.Repository]] wrapper for non-Event-source
   * repositories, while still publishing events.
   */
 abstract class PublishingRepository[ID, T <: AnyRef, EVT](

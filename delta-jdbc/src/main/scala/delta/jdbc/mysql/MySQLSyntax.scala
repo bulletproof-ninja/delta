@@ -4,6 +4,9 @@ import java.sql.Connection
 import java.sql.SQLException
 import delta.jdbc.AbstractStore
 
+/**
+ * MySQL syntax adapter for stream process stores.
+ */
 trait MySQLSyntax {
   self: AbstractStore =>
 
