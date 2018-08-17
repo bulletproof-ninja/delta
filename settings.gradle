@@ -1,3 +1,5 @@
+enableFeaturePreview('STABLE_PUBLISHING')
+
 switch (System.properties.scalaVersion) {
         case '2.11':
                 include 'delta-cassandra',
