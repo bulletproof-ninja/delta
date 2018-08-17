@@ -132,7 +132,7 @@ class TestCollege {
             allStudents.update(studentId, (studentSemesters + semesterId, studentName))
             readModel.update(semesterId, semesterStudents.updated(studentId, studentName))
         }
-        def studentNameChange(studentName: String, studentId: Student.Id) {
+        def studentNameChange(studentName: String, studentId: Student.Id): Unit = {
           val (studentSemesters, _) = allStudents(studentId)
           allStudents.update(studentId, (studentSemesters, studentName))
           studentSemesters.foreach { semesterId =>
