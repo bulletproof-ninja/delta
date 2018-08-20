@@ -9,6 +9,11 @@ import scala.reflect.ClassTag
 import scala.concurrent.duration._
 import java.util.concurrent.ScheduledExecutorService
 
+/**
+ * Default implementation of [[delta.util.EventSourceConsumer]].
+ * Combine with [[delta.util.SubscriptionSupport]] for default
+ * subscription/notification implementation.
+ */
 abstract class DefaultEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
     protected val store: StreamProcessStore[ID, S],
     protected val scheduler: ScheduledExecutorService,
