@@ -8,7 +8,7 @@ import scala.concurrent._
 import scuff.Subscription
 
 /**
-  * [[delta.util.DefaultEventSourceConsumer]] with [[delta.util.NotificationSupport]],
+  * [[delta.util.DefaultEventSourceConsumer]] with [[delta.util.SubscriptionSupport]],
   * adapted for Java.
   * @param processStore The stream process store used to track stream progress
   * @param replayProcessorWriteBatchSize Batch size when writing replay processed state to store
@@ -22,7 +22,7 @@ abstract class NotifyingEventSourceConsumer[ID, EVT, S >: Null, FMT](
     replayProcessorWriteBatchSize: Int)(
     implicit evtTag: ClassTag[EVT])
   extends DefaultEventSourceConsumer[ID, EVT, S](processStore, scheduler, replayProcessorWriteBatchSize)
-  with NotificationSupport[ID, S, FMT] {
+  with SubscriptionSupport[ID, S, FMT] {
 
   type FormatKey = Object
 

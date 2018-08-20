@@ -12,8 +12,8 @@ import scuff.concurrent.MultiMap
   * @tparam S The state type
   * @tparam PF The Snapshot publish format
   */
-trait NotificationSupport[ID, S >: Null, PF] {
-  consumer: DefaultEventSourceConsumer[ID, _, S] =>
+trait SubscriptionSupport[ID, S >: Null, PF] {
+  consumer: EventSourceConsumer[ID, _] =>
 
   private type Subscriber = NotificationSubscriber[ID, S, PF, Callback]
   private[this] val subscribers = new TrieMap[FormatKey, MultiMap[ID, Subscriber]]
@@ -23,10 +23,10 @@ trait NotificationSupport[ID, S >: Null, PF] {
     */
   protected type FormatKey
   protected def contentUpdatesOnly: Boolean = false
-  protected def format(key: FormatKey, id: ID, snapshot: Snapshot, contentUpdated: Boolean): PF
+  protected def format(key: FormatKey, id: ID, snapshot: Snapshot[S], contentUpdated: Boolean): PF
   protected def store: StreamProcessStore[ID, S]
 
-  protected def onSnapshotUpdate(id: ID, snapshot: Snapshot, contentUpdated: Boolean): Unit = {
+  protected def onSnapshotUpdate(id: ID, snapshot: Snapshot[S], contentUpdated: Boolean): Unit = {
     if (contentUpdated || !contentUpdatesOnly) {
       subscribers.foreach {
         case (fmtKey, subscribers) =>
@@ -39,7 +39,7 @@ trait NotificationSupport[ID, S >: Null, PF] {
     }
   }
 
-  type Callback = (ID, Snapshot, PF)
+  type Callback = (ID, Snapshot[S], PF)
 
   private def unsubscribe(fmtKey: FormatKey, subs: Map[ID, Subscriber]): Unit = {
     val subscribers = this.subscribers(fmtKey)
@@ -78,7 +78,7 @@ trait NotificationSupport[ID, S >: Null, PF] {
         subById.foreach {
           case (id, sub) =>
             val initialState = result.get(id).map { snapshot =>
-              (id, snapshot, format(fmtKey, id, snapshot, true))
+              (id, snapshot, format(fmtKey, id, snapshot, contentUpdated = true /* full rendering */))
             }
             sub.onInitial(initialState)
         }
