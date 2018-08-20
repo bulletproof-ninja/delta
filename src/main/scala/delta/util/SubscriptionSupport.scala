@@ -1,11 +1,14 @@
 package delta.util
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent._
 import scala.util.Failure
 
 import scuff.Subscription
 import scuff.concurrent.MultiMap
+import java.util.concurrent.ArrayBlockingQueue
+import delta.ddd.Revision
+import delta.Snapshot
 
 /**
   * @tparam ID The id type
@@ -87,5 +90,34 @@ trait SubscriptionSupport[ID, S >: Null, PF] {
         }
       }
 
+  }
+
+  protected def lookupRevision(notificationCtx: ExecutionContext)(id: ID, expectedRevision: Revision, fmtKey: FormatKey): Future[delta.Snapshot[PF]] = {
+    val promise = Promise[delta.Snapshot[PF]]
+    val subscription = new ArrayBlockingQueue[Future[Subscription]](1)
+      def cancelSubscription(): Unit = {
+        notificationCtx execute new Runnable {
+          def run = blocking {
+            subscription.take().foreach(_.cancel)(notificationCtx)
+          }
+        }
+      }
+    subscription offer subscribe(notificationCtx)(id :: Nil, fmtKey) {
+      case (_, snapshot @ Snapshot(_, revision, _), formattedContent) =>
+        if (expectedRevision matches snapshot.revision) {
+
+          val promiseFulfilled = promise trySuccess snapshot.copy(content = formattedContent)
+          if (promiseFulfilled) cancelSubscription()
+
+        } else expectedRevision match {
+          case Revision.Exactly(expectedRevision) if expectedRevision < revision && !promise.isCompleted =>
+
+            val promiseFulfilled = promise tryFailure new IllegalStateException(s"Expected revision $expectedRevision for $id is stale and cannot be retrieved. Current revision is $revision. Try using Minimum revision?")
+            if (promiseFulfilled) cancelSubscription()
+
+          case _ => // Ignore (keep subscription active)
+        }
+    }
+    promise.future
   }
 }
