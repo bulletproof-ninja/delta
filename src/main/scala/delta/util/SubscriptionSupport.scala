@@ -92,8 +92,8 @@ trait SubscriptionSupport[ID, S >: Null, PF] {
 
   }
 
-  protected def lookupRevision(notificationCtx: ExecutionContext)(id: ID, expectedRevision: Revision, fmtKey: FormatKey): Future[delta.Snapshot[PF]] = {
-    val promise = Promise[delta.Snapshot[PF]]
+  protected def lookupRevision(notificationCtx: ExecutionContext)(id: ID, expectedRevision: Revision, fmtKey: FormatKey): Future[(delta.Snapshot[S], PF)] = {
+    val promise = Promise[(delta.Snapshot[S], PF)]
     val subscription = new ArrayBlockingQueue[Future[Subscription]](1)
       def cancelSubscription(): Unit = {
         notificationCtx execute new Runnable {
@@ -106,7 +106,7 @@ trait SubscriptionSupport[ID, S >: Null, PF] {
       case (_, snapshot @ Snapshot(_, revision, _), formattedContent) =>
         if (expectedRevision matches snapshot.revision) {
 
-          val promiseFulfilled = promise trySuccess snapshot.copy(content = formattedContent)
+          val promiseFulfilled = promise trySuccess (snapshot -> formattedContent)
           if (promiseFulfilled) cancelSubscription()
 
         } else expectedRevision match {
