@@ -127,7 +127,7 @@ subprojects {
 }
 
 wrapper {
-    gradleVersion = '4.9'
+    gradleVersion = '4.10'
 }
 
 project(':delta-cassandra') {
