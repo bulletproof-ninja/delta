@@ -40,16 +40,16 @@ a finite increment.
 ## Design principles
 
 - Non-blocking code, `Future` based API.
-- Pluggable architecture. Storage and messaging are implementation neutral. With multiple supported implementations, is easier to use with existing infrastructure. Current implementations:
+- Pluggable architecture. Storage and messaging are implementation neutral. With multiple supported implementations, it's easier to use with existing infrastructure. Current implementations:
   - Storage:
-    - Generic JDBC, with MySQL, and PostgreSQL adaptations.
+    - Generic JDBC, with MySQL, and PostgreSQL adaptations. Custom adaptions are straightforward.
     - MongoDB
     - Cassandra
   - Messaging:
     - Redis Pub/Sub
     - Hazelcast Topic
 - No third-party dependencies (except for storage/messaging implementations)
-- Minimally invasive. Large degree of freedom in implementation. Uses type classes instead of inheritance.
+- Minimally invasive. Large degree of freedom in implementation. Uses type classes instead of inheritance. No annotation hell.
 - Fast, scalable. Written for very large data sets; supports both horizontal and vertical scaling.
 - Customizable. Attempts to provide sane defaults, but enables high degree of customization.
 
@@ -59,6 +59,8 @@ a finite increment.
 
 - Complete data history. Intrinsically complete and correct audit trail of any and all changes.
 - Very fast. Append-only writes. Prebuilt reads (push and pull).
-- Scalable. Single key sharding.
-- No object-relational mismatch. Unlike ORM tools, it enables an OO and/or functional domain design.
-- Easy and flexible authentication. Any and all updates are done through explicit use case specific commands, each of which can have custom authentication, if necessary.
+- Scalable; effortless sharding.
+- No object-relational mismatch.
+- No RDBMS schema upgrades.
+- Fully separate OLTP/OLAP.
+- Easy and flexible authentication. Any and all updates are done through explicit, use case specific, commands, each of which can have custom authentication, if required.
