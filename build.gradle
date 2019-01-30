@@ -5,13 +5,13 @@ plugins {
 ext {
     getScalaFull = [
         '2.11': '2.11.12',
-        '2.12': '2.12.6',
-        '2.13': '2.13.0-M4'
+        '2.12': '2.12.8',
+        '2.13': '2.13.0-M5'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '1.10.1'
+    vScuff = '1.12.1'
     vScalaTest = '3.0.4'
 }
 
@@ -145,7 +145,7 @@ project(':delta-jdbc') {
 }
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.10.4"
+        compile "com.hazelcast:hazelcast:3.11.1"
     }
 }
 project(':delta-redis') {
