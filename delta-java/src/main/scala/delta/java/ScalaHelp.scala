@@ -39,7 +39,8 @@ object ScalaHelp {
   /** var-args to Scala `Seq`. */
   @annotation.varargs
   def Seq[T](ts: T*): collection.immutable.Seq[T] = ts.toVector
-  def Seq[T](stream: java.util.stream.Stream[T]): collection.immutable.Seq[T] = stream.toArray.map(_.asInstanceOf[T]).toVector
+  def Seq[T](stream: java.util.stream.Stream[T]): collection.immutable.Seq[T] =
+    stream.toArray.toVector.asInstanceOf[collection.immutable.Seq[T]]
 
   /** Combine two `Future`s into single `Future`. */
   def combine[A, B](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B]): Future[(A, B)] = {
