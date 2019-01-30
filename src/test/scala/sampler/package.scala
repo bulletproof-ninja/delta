@@ -1,7 +1,7 @@
 
 import sampler.aggr.DomainEvent
 import scuff.serialVersionUID
-import delta.EventCodec
+import delta.EventFormat
 import delta.util.ReflectiveDecoder
 import sampler.aggr.Employee
 import sampler.aggr.Department
@@ -13,8 +13,8 @@ import language.implicitConversions
 package sampler {
   case class Id[T](int: Int = Random.nextInt)
 
-  trait AbstractEventCodec[SF]
-    extends EventCodec[DomainEvent, SF] {
+  trait AbstractEventFormat[SF]
+    extends EventFormat[DomainEvent, SF] {
 
     def getName(cls: EventClass): String = {
       val fullName = cls.getName
@@ -49,9 +49,9 @@ package object sampler {
 
   implicit def id2int(id: Id[_]) = id.int
 
-  implicit object JsonDomainEventCodec
+  implicit object JsonDomainEventFormat
     extends ReflectiveDecoder[DomainEvent, JSON]
-    with AbstractEventCodec[JSON]
+    with AbstractEventFormat[JSON]
     with aggr.emp.JsonCodec
     with aggr.dept.JsonCodec {
 

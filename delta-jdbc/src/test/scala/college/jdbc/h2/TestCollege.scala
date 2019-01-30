@@ -11,7 +11,7 @@ import college.CollegeEvent
 import delta.EventStore
 import delta.jdbc._
 import delta.jdbc.h2.H2Dialect
-import delta.util.LocalPublisher
+import delta.util.LocalHub
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
@@ -39,7 +39,10 @@ class TestCollege extends college.TestCollege {
     ds.setURL(s"jdbc:h2:./${h2Name}")
     new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
       sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(s"transactions:$ch")
+      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
+      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       protected def dataSource = ds
     }.ensureSchema()
   }

@@ -31,6 +31,7 @@ object TestJdbcStreamProcessStore {
     ds setCharacterEncoding "UTF-8"
     ds setDatabaseName db
     ds setUser "root"
+    ds setUseSSL false
     ds
   }
 

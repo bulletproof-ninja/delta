@@ -16,11 +16,11 @@ import com.mongodb.connection.ClusterType
 
 import scuff._
 import scuff.concurrent.Threads
-import delta.EventCodec
-import delta.NoVersioning
+import delta.EventFormat
 import scala.annotation.varargs
 import com.mongodb.async.client.{ MongoClient, MongoClients }
 import collection.JavaConverters._
+import delta.Transaction.Channel
 
 object MongoEventStore {
   @varargs
@@ -75,7 +75,7 @@ object MongoEventStore {
   * }}}
   */
 class MongoEventStore[ID: Codec, EVT](
-  dbColl: MongoCollection[Document])(implicit codec: EventCodec[EVT, BsonValue])
+  dbColl: MongoCollection[Document])(implicit evtFmt: EventFormat[EVT, BsonValue])
     extends delta.EventStore[ID, EVT] {
 
   protected val store = {
@@ -147,7 +147,7 @@ class MongoEventStore[ID: Codec, EVT](
   }
 
   def commit(
-    channel: String, stream: ID, revision: Int, tick: Long,
+    channel: Channel, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     val txn = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
@@ -202,7 +202,7 @@ class MongoEventStore[ID: Codec, EVT](
         writer.writeInt32("rev", txn.revision)
       }
       writer.writeInt64("tick", txn.tick)
-      writer.writeString("channel", txn.channel)
+      writer.writeString("channel", txn.channel.toString)
       if (txn.metadata.nonEmpty) {
         writeDocument(writer, "metadata") {
           txn.metadata.foreach {
@@ -214,12 +214,12 @@ class MongoEventStore[ID: Codec, EVT](
       writeArray("events", writer) {
         txn.events.foreach { evt =>
           writeDocument(writer) {
-            val (name, version) = codec signature evt
+            val EventFormat.EventSig(name, version) = evtFmt signature evt
             writer.writeString("name", name)
-            if (version != NoVersioning.NoVersion) {
+            if (version != evtFmt.NoVersion) {
               writer.writeInt32("v", version.unsigned)
             }
-            writer.writeName("data"); bsonCodec.encode(writer, codec.encode(evt), ctx)
+            writer.writeName("data"); bsonCodec.encode(writer, evtFmt.encode(evt), ctx)
           }
         }
       }
@@ -251,7 +251,8 @@ class MongoEventStore[ID: Codec, EVT](
     }
 
     @annotation.tailrec
-    private def readEvents(channel: String, reader: BsonReader, events: List[EVT] = Nil)(implicit ctx: DecoderContext): List[EVT] = {
+    private def readEvents(channel: Channel, metadata: Map[String, String], reader: BsonReader, events: List[EVT] = Nil)(
+        implicit ctx: DecoderContext): List[EVT] = {
       if (reader.readBsonType() == BsonType.END_OF_DOCUMENT) {
         events.reverse
       } else {
@@ -262,13 +263,13 @@ class MongoEventStore[ID: Codec, EVT](
               val version = reader.readInt32().toByte
               reader.readName("data")
               version
-            case "data" => NoVersioning.NoVersion
+            case "data" => evtFmt.NoVersion
             case unexpected => sys.error(s"Unexpected name: $unexpected")
           }
           val data = bsonCodec.decode(reader, ctx)
-          codec.decode(channel, name, version, data)
+          evtFmt.decode(name, version, data, channel, metadata)
         }
-        readEvents(channel, reader, evt :: events)
+        readEvents(channel, metadata, reader, evt :: events)
       }
     }
     def decode(reader: BsonReader, ctx: DecoderContext): TXN = {
@@ -279,16 +280,17 @@ class MongoEventStore[ID: Codec, EVT](
         idCodec.decode(reader, ctx) -> reader.readInt32("rev")
       }
       val tick = reader.readInt64("tick")
-      val channel = reader.readString("channel")
+      val channel = Channel(reader.readString("channel"))
       val (metadata, events) = reader.readName match {
         case "metadata" =>
           val metadata = readDocument(reader)(readMetadata(reader))
           metadata -> readArray(reader, "events") {
-            readEvents(channel, reader)
+            readEvents(channel, metadata, reader)
           }
         case "events" =>
-          Map.empty[String, String] -> readArray(reader) {
-            readEvents(channel, reader)
+          val metadata = Map.empty[String, String]
+          metadata -> readArray(reader) {
+            readEvents(channel, metadata, reader)
           }
         case other => throw new IllegalStateException(s"Unknown field: $other")
       }
@@ -329,7 +331,7 @@ class MongoEventStore[ID: Codec, EVT](
         val matchByChannel = byChannel.toSeq.map {
           case (ch, eventTypes) =>
             val matcher = new Document("channel", ch)
-            val evtNames = eventTypes.map(codec.name)
+            val evtNames = eventTypes.map(evtFmt.signature(_).name)
             matcher.append("events.name", new Document("$in", toJList(evtNames)))
         }
         if (matchByChannel.size == 1) {

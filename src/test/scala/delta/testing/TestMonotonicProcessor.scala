@@ -8,6 +8,7 @@ import org.junit.Assert._
 import org.junit.Test
 
 import delta.{ EventReducer, Snapshot, Transaction }
+import Transaction.Channel
 import delta.util._
 import scuff.concurrent.PartitionedExecutionContext
 import scala.concurrent._, duration._
@@ -33,9 +34,10 @@ class TestMonotonicProcessor {
         20.seconds,
         new ConcurrentMapStore(Tracker.snapshotMap)(NoFallback)) {
       def whenDone() = Future successful (())
-      override def onUpdate(key: Int, update: Update) = {
+      override def onSnapshotUpdate(id: Int, update: SnapshotUpdate) = {
         //        println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
-        assertEquals(42, key)
+//        assertEquals(42, update.id)
+        assertTrue(update.contentUpdated)
         Tracker.lastSnapshotUpdate = update.snapshot
         if (update.snapshot.revision == 4) {
           assertEquals(1L, Tracker.latch.getCount)
@@ -54,31 +56,32 @@ class TestMonotonicProcessor {
         newState
       }
     }
+    val Ch = Channel("")
     val txns = List(
       Transaction(
         stream = 42, revision = 0,
         events = List('H', 'e', 'l', 'l'),
-        tick = 100, channel = "", metadata = Map.empty),
+        tick = 100, channel = Ch, metadata = Map.empty),
       Transaction(
         stream = 42, revision = 1,
         events = List('o', ','),
-        tick = 105, channel = "", metadata = Map.empty),
+        tick = 105, channel = Ch, metadata = Map.empty),
       Transaction(
         stream = 42, revision = 2,
         events = List(' '),
-        tick = 220, channel = "", metadata = Map.empty),
+        tick = 220, channel = Ch, metadata = Map.empty),
       Transaction(
         stream = 42, revision = 0,
         events = List('H', 'e', 'l', 'l'),
-        tick = 100, channel = "", metadata = Map.empty),
+        tick = 100, channel = Ch, metadata = Map.empty),
       Transaction(
         stream = 42, revision = 3,
         events = List('W', 'o'),
-        tick = 300, channel = "", metadata = Map.empty),
+        tick = 300, channel = Ch, metadata = Map.empty),
       Transaction(
         stream = 42, revision = 4,
         events = List('r', 'l', 'd', '!'),
-        tick = 666, channel = "", metadata = Map.empty))
+        tick = 666, channel = Ch, metadata = Map.empty))
 
       def processAndVerify(ec: ExecutionContext, txns: List[Transaction[Int, Char]], n: Int): Unit = {
         Tracker.clear()
@@ -135,7 +138,7 @@ class TestMonotonicProcessor {
           val events = (0 to rand.nextInt(5)).map(_ => rand.nextPrintableChar).toList
           new Transaction(
             tick = rev,
-            channel = "Chars",
+            channel = Channel("Chars"),
             stream = id,
             revision = rev,
             metadata = Map.empty[String, String],

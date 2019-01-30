@@ -3,7 +3,7 @@ package delta.jdbc
 import java.sql._
 
 import scuff._
-import delta.EventCodec
+import delta.EventFormat
 import scala.util.Try
 
 class DefaultDialect[ID: ColumnType, EVT, SF: ColumnType](schema: String = null)
@@ -19,16 +19,18 @@ private[jdbc] object Dialect {
 protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     final val schema: Option[String]) {
 
+  protected type Channel = delta.Transaction.Channel
+  
   private[jdbc] def idType = implicitly[ColumnType[ID]]
   private[jdbc] def sfType = implicitly[ColumnType[SF]]
 
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
   protected def schemaPrefix = schema.map(_ + ".") getOrElse ""
-  protected def streamTable = s"${schemaPrefix}es_stream"
-  protected def transactionTable = s"${schemaPrefix}es_transaction"
-  protected def eventTable = s"${schemaPrefix}es_event"
-  protected def metadataTable = s"${schemaPrefix}es_metadata"
+  protected def streamTable = s"${schemaPrefix}delta_stream"
+  protected def transactionTable = s"${schemaPrefix}delta_transaction"
+  protected def eventTable = s"${schemaPrefix}delta_event"
+  protected def metadataTable = s"${schemaPrefix}delta_metadata"
   protected def channelIndex = s"${streamTable.replace(".", "_")}_channel_idx"
   protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
   protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
@@ -132,11 +134,11 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
       (stream_id, channel)
       VALUES (?, ?)
   """
-  def insertStream(stream: ID, channel: String)(
+  def insertStream(stream: ID, channel: Channel)(
       implicit conn: Connection): Unit = {
     prepareStatement(streamInsert) { ps =>
       ps.setValue(1, stream)
-      ps.setString(2, channel)
+      ps.setString(2, channel.toString)
       ps.executeUpdate()
     }
   }
@@ -160,18 +162,18 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
         VALUES (?, ?, ?, ?, ?, ?)
   """
   def insertEvents(stream: ID, rev: Int, events: List[EVT])(
-      implicit conn: Connection, codec: EventCodec[EVT, SF]): Unit = {
+      implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
     prepareStatement(eventInsert) { ps =>
       val isBatch = events.tail.nonEmpty
       ps.setValue(1, stream)
       ps.setInt(2, rev)
       events.iterator.zipWithIndex.foreach {
         case (evt, idx) =>
-          val (name, version) = codec signature evt
+          val EventFormat.EventSig(name, version) = evtFmt signature evt
           ps.setByte(3, idx.toByte)
           ps.setString(4, name)
           ps.setByte(5, version)
-          ps.setValue(6, codec encode evt)
+          ps.setValue(6, evtFmt encode evt)
           if (isBatch) ps.addBatch()
       }
       if (isBatch) ps.executeBatch()
@@ -281,7 +283,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     ORDER BY e.stream_id, e.revision, e.event_idx
   """
 
-  def selectTransactionsByChannels(channels: Set[String], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByChannels(channels: Set[Channel], sinceTick: Long = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -294,16 +296,16 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
-        ps.setString(colIdx.next, channel)
+        ps.setChannel(colIdx.next, channel)
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxnColumnsIdx)
       }
     }
   }
-  def selectTransactionsByEvents(eventsByChannel: Map[String, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByEvents(eventsByChannel: Map[Channel, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
-      implicit conn: Connection, codec: EventCodec[EVT, SF]): Unit = {
+      implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
     val tickBound = sinceTick != Long.MinValue
     val prefix = if (tickBound) {
       s"WHERE t.tick >= ? AND"
@@ -316,10 +318,10 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
-        ps.setString(colIdx.next, channel)
+        ps.setChannel(colIdx.next, channel)
       }
       events foreach { evt =>
-        ps.setString(colIdx.next, codec name evt)
+        ps.setString(colIdx.next, evtFmt.signature(evt).name)
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxnColumnsIdx)

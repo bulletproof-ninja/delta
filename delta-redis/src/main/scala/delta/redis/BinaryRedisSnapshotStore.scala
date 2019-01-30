@@ -19,7 +19,7 @@ class BinaryRedisSnapshotStore[K, T](
     jedisProvider: ((BinaryJedis => Any) => Any))
   extends SnapshotStore[K, T] {
 
-  protected val hash = RedisEncoder encode hashName
+  protected val hash = RedisCodec encode hashName
 
   protected def jedis[R](thunk: BinaryJedis => R): R = blocking(jedisProvider(thunk)).asInstanceOf[R]
   protected def pipeline[R](conn: BinaryJedis = null)(thunk: Pipeline => R): R = {

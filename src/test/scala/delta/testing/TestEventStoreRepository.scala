@@ -128,7 +128,7 @@ abstract class AbstractEventStoreRepositoryTest {
     repo.insert(id, newFoo, metadata).onComplete {
       case Failure(t) => done.failure(t)
       case Success(_) =>
-        repo.update("Foo", Revision(0), metadata) {
+        repo.update("Foo", Some(0), metadata) {
           case (foo, rev) =>
             assertEquals(0, rev)
             assertEquals("New", foo.aggr.status)
@@ -136,8 +136,8 @@ abstract class AbstractEventStoreRepositoryTest {
           case Failure(t) => done.failure(t)
           case Success((_, rev)) =>
             assertEquals(0, rev)
-            repo.update(id, Revision.Exactly(0)) {
-              case (foo, rev) =>
+            repo.update(id, Some(0)) {
+              case (foo, rev) if rev == 0 =>
                 assertEquals(0, rev)
                 assertEquals("New", foo.aggr.status)
                 foo(AddNewNumber(44))
@@ -145,7 +145,7 @@ abstract class AbstractEventStoreRepositoryTest {
               case Failure(t) => done.failure(t)
               case Success((_, rev)) =>
                 assertEquals(1, rev)
-                repo.update("Foo", Revision(0)) {
+                repo.update("Foo", Some(0)) {
                   case (foo, rev) =>
                     assertEquals(1, rev)
                     assertTrue(foo.mergeEvents.contains(NewNumberWasAdded(44)))
@@ -155,7 +155,7 @@ abstract class AbstractEventStoreRepositoryTest {
                   case Failure(t) => done.failure(t)
                   case Success((_, rev)) =>
                     assertEquals(1, rev)
-                    repo.update("Foo", Revision(1), metadata) {
+                    repo.update("Foo", Some(1), metadata) {
                       case (foo, rev) =>
                         assertEquals(1, rev)
                         assertTrue(foo.mergeEvents.isEmpty)
@@ -190,7 +190,7 @@ abstract class AbstractEventStoreRepositoryTest {
     }
     val update1 = repo.insert(id, newFoo).flatMap {
       case _ =>
-        repo.update(id, Revision(0)) {
+        repo.update(id, Some(0)) {
           case (foo, rev) =>
             assertEquals(0, rev)
             foo(AddNewNumber(42))
@@ -247,7 +247,7 @@ abstract class AbstractEventStoreRepositoryTest {
         for (i ← range) {
           val runThis = new Runnable {
             def run: Unit = {
-              val fut = repo.update(id, Revision(0), metadata) {
+              val fut = repo.update(id, Some(0), metadata) {
                 case (foo, _) =>
                   foo(AddNewNumber(i))
                   Future successful foo
@@ -264,8 +264,8 @@ abstract class AbstractEventStoreRepositoryTest {
           assertEquals(range.size, updateRevisions.size)
           val revisions = updateRevisions.map {
             case (_, f) => Await.result(f, Duration.Inf)
-          }.toSeq.sorted
-          done.complete(Try(assertEquals((1 to range.size).toSeq, revisions)))
+          }.toList.sorted
+          done.complete(Try(assertEquals((1 to range.size).toList, revisions)))
         }
     }
   }
@@ -276,7 +276,7 @@ abstract class AbstractEventStoreRepositoryTest {
     repo.insert(id, foo).onComplete {
       case Failure(t) => done.failure(t)
       case Success(_) =>
-        repo.update(id, Revision(0)) {
+        repo.update(id, Some(0)) {
           case (foo, rev) =>
             assertEquals(0, rev)
             Future successful foo
@@ -329,9 +329,9 @@ object TheOneAggr extends Entity("", AggrStateAssembler) {
 class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTest {
 
   implicit object Codec
-    extends EventCodec[AggrEvent, String]
-    with NoVersioning[AggrEvent, String] {
+    extends EventFormat[AggrEvent, String] {
 
+    def getVersion(cls: EventClass) = NoVersion
     def getName(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
@@ -339,20 +339,24 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
       case NewNumberWasAdded(num) => s""" { "num": $num } """
       case StatusChanged(newStatus) => s""" { "status": "$newStatus" } """
     }
-    def decode(channel: String, name: String, json: String): AggrEvent =
-      name match {
+    def decode(encoded: Encoded): AggrEvent = {
+      val json = encoded.data
+      encoded.name match {
         case "AggrCreated" => AggrCreated(status = json.field("status"))
         case "NewNumberWasAdded" => NewNumberWasAdded(n = json.field("num").toInt)
         case "StatusChanged" => StatusChanged(newStatus = json.field("status"))
       }
+    }
   }
 
   @Before
   def setup(): Unit = {
 
-    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)
-    with Publishing[String, AggrEvent] {
-      val publisher = new LocalPublisher[String, AggrEvent](ec)
+    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext) with Publishing[String, AggrEvent] {
+      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
+      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
+      val txnHub = new LocalHub[TXN](toNamespace, ec)
+      val txnChannels = Set(TheOneAggr.channel)
     }
     repo = new EntityRepository(TheOneAggr)(es)
   }
@@ -361,15 +365,16 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
 
 class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepositoryTest {
 
+  import ReflectiveDecoder._
+
   implicit object Codec
-    extends ReflectiveDecoder[AggrEvent, String]
+    extends ReflectiveDecoder[AggrEvent, String](MatchOnMethodName)
     with AggrEventHandler
-    with EventCodec[AggrEvent, String]
-    with NoVersioning[AggrEvent, String] {
+    with EventFormat[AggrEvent, String] {
 
     type Return = String
 
-    override def isMethodNameEventName = true
+    def getVersion(cls: EventClass) = NoVersion
     def getName(cls: EventClass): String = {
       val lastDot = cls.getName.lastIndexOf('.')
       val nextDot = cls.getName.lastIndexOf('.', lastDot - 1)
@@ -379,15 +384,15 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
     def on(evt: AggrCreated): Return = s""" { "status": "${evt.status}" } """
-    def `testing.AggrCreated`(json: String): AggrCreated =
-      new AggrCreated(status = json.field("status"))
+    def `testing.AggrCreated`(encoded: Encoded): AggrCreated =
+      new AggrCreated(status = encoded.data.field("status"))
 
     def on(evt: NewNumberWasAdded): Return = s""" { "num": ${evt.n} } """
-    def `testing.NewNumberWasAdded`(json: String): NewNumberWasAdded =
-      new NewNumberWasAdded(n = json.field("num").toInt)
+    def `testing.NewNumberWasAdded`(encoded: Encoded): NewNumberWasAdded =
+      new NewNumberWasAdded(n = encoded.data.field("num").toInt)
 
     def on(evt: StatusChanged): Return = s""" { "status": "${evt.newStatus}" } """
-    def `testing.StatusChanged`(json: String): StatusChanged = new StatusChanged(newStatus = json.field("status"))
+    def `testing.StatusChanged`(encoded: Encoded): StatusChanged = new StatusChanged(newStatus = encoded.data.field("status"))
   }
 
   case class Metrics(id: String, duration: Long, timestamp: Long)
@@ -396,9 +401,11 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   @Before
   def setup(): Unit = {
     metrics = Nil
-    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext)
-    with Publishing[String, AggrEvent] {
-      val publisher = new LocalPublisher[String, AggrEvent](RandomDelayExecutionContext)
+    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext) with Publishing[String, AggrEvent] {
+      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
+      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
+      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      val txnChannels = Set(TheOneAggr.channel)
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
     val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap)(_ => Future successful None)

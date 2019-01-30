@@ -31,7 +31,7 @@ class MongoStreamProcessStore[K: ClassTag, V](
   }
 
   def tickWatermark: Option[Long] = {
-    tickIndexFuture.flatMap { _ =>
+    val future = tickIndexFuture.flatMap { _ =>
       withFutureCallback[Document] { cb =>
         coll.find()
           .sort(new Document("tick", -1))
@@ -41,7 +41,8 @@ class MongoStreamProcessStore[K: ClassTag, V](
       } map { maybeDoc =>
         maybeDoc.map(_.getLong("tick").longValue)
       }
-    }(ec).await(11.seconds)
+    }
+    blocking(future await 11.seconds)
   }
 
   private def _id(keys: java.util.List[K]): Document = new Document("_id", new Document("$in", keys))

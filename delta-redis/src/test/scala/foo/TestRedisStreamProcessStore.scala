@@ -4,7 +4,7 @@ import delta.testing.TestStreamProcessStore
 import delta.redis._
 
 import org.junit._
-import delta.util.SnapshotJsonCodec
+import delta.util.json
 import scuff.Codec
 import redis.clients.jedis.JedisPool
 import delta.util.StreamProcessStore
@@ -22,7 +22,7 @@ class TestRedisStreamProcessStore extends TestStreamProcessStore {
   override def newStore: StreamProcessStore[Long, String] = {
     new RedisStreamProcessStore[Long, String](
       keyCodec = Codec.fromString(_.toLong),
-      snapshotCodec = SnapshotJsonCodec(jsonStringCodec),
+      snapshotCodec = json.SnapshotCodec(jsonStringCodec),
       getClass.getSimpleName, ec)(jedisProvider)
   }
 

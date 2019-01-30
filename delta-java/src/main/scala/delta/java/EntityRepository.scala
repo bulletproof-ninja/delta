@@ -5,7 +5,6 @@ import scala.concurrent.ExecutionContext
 import delta.Ticker
 
 import scala.concurrent.Future
-import delta.ddd.Revision
 import scuff.concurrent.Threads.PiggyBack
 
 import java.util.function.BiConsumer
@@ -36,7 +35,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
   def insert(id: ID, entity: ET, metadata: Map[String, String]): Future[ID] =
     repo.insert(id, entity, metadata)
 
-  def update(id: ID, expectedRevision: Revision, metadata: Map[String, String], consumer: BiConsumer[ET, Integer]): Future[Integer] = {
+  def update(id: ID, expectedRevision: Option[Int], metadata: Map[String, String], consumer: BiConsumer[ET, Integer]): Future[Integer] = {
     repo.update(id, expectedRevision, metadata) {
       case (entity, revision) =>
         try Future successful consumer.accept(entity, revision) catch {
@@ -44,7 +43,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }.map(toJInt)(PiggyBack)
   }
-  def update(id: ID, expectedRevision: Revision, consumer: BiConsumer[ET, Integer]): Future[Integer] = {
+  def update(id: ID, expectedRevision: Option[Int], consumer: BiConsumer[ET, Integer]): Future[Integer] = {
     repo.update(id, expectedRevision) {
       case (entity, revision) =>
         try Future successful consumer.accept(entity, revision) catch {
@@ -61,7 +60,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     }.map(toJInt)(PiggyBack)
   }
 
-  def updateReturn[R](id: ID, expectedRevision: Revision, metadata: Map[String, String], withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
+  def updateReturn[R](id: ID, expectedRevision: Option[Int], metadata: Map[String, String], withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
     repo.update(id, expectedRevision, metadata) {
       case (entity, revision) =>
         try Future successful withReturn(entity, revision) catch {
@@ -69,7 +68,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }.map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
-  def updateReturn[R](id: ID, expectedRevision: Revision, withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
+  def updateReturn[R](id: ID, expectedRevision: Option[Int], withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
     repo.update(id, expectedRevision, Map.empty) {
       case (entity, revision) =>
         try Future successful withReturn(entity, revision) catch {
@@ -86,7 +85,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     }.map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
 
-  def updateAsync[R](id: ID, expectedRevision: Revision, metadata: Map[String, String], withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
+  def updateAsync[R](id: ID, expectedRevision: Option[Int], metadata: Map[String, String], withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
     repo.update(id, expectedRevision, metadata) {
       case (entity, revision) =>
         try withReturn(entity, revision) catch {
@@ -94,7 +93,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }.map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
-  def updateAsync[R](id: ID, expectedRevision: Revision, withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
+  def updateAsync[R](id: ID, expectedRevision: Option[Int], withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
     repo.update(id, expectedRevision, Map.empty) {
       case (entity, revision) =>
         try withReturn(entity, revision) catch {

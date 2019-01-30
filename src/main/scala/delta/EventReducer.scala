@@ -4,7 +4,7 @@ import scuff._
 import scala.reflect.ClassTag
 
 /**
-  *  Generic state reducer.
+  *  Generic event reducer.
   */
 trait EventReducer[S, EVT] extends Serializable {
   def init(evt: EVT): S
@@ -29,10 +29,4 @@ object EventReducer {
     }
   }
 
-}
-
-final class EventReducerAdapter[S1, S2, EVT: ClassTag](reducer: EventReducer[S2, EVT], codec: Codec[S1, S2])
-  extends EventReducer[S1, EVT] {
-  def init(e: EVT) = codec decode reducer.init(e)
-  def next(s: S1, e: EVT) = codec decode reducer.next(codec encode s, e)
 }

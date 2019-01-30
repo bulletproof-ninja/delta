@@ -8,11 +8,11 @@ import java.util.concurrent.ScheduledExecutorService
 
 abstract class DefaultMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
     es: EventSource[ID, _ >: EVT],
-    store: StreamProcessStore[ID, S],
+    protected val processStore: StreamProcessStore[ID, S],
     replayMissingRevisionsDelay: FiniteDuration,
     scheduler: ScheduledExecutorService,
     partitionThreads: PartitionedExecutionContext)
-  extends MonotonicProcessor[ID, EVT, S](store)
+  extends MonotonicProcessor[ID, EVT, S]
   with MissingRevisionsReplay[ID, EVT] {
 
   def this(
@@ -27,8 +27,8 @@ abstract class DefaultMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
 
   protected def processingContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 
-  private[this] val replay = onMissingRevisions(es, scheduler, partitionThreads.reportFailure) _
-  protected def onMissingRevisions(id: ID, missing: Range): Unit =
-    replay(id, missing, replayMissingRevisionsDelay)(apply)
+  private[this] val replay = onMissingRevisions(es, replayMissingRevisionsDelay, scheduler, partitionThreads.reportFailure) _
+
+  protected def onMissingRevisions(id: ID, missing: Range): Unit = replay(id, missing)(apply)
 
 }

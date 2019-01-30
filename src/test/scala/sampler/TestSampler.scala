@@ -6,11 +6,11 @@ import org.junit.Assert._
 import org.junit.Test
 
 import delta.{ EventStore, LamportTicker, Publishing }
-import delta.ddd.{ DuplicateIdException, EntityRepository, Revision }
+import delta.ddd.{ DuplicateIdException, EntityRepository }
 import delta.testing.RandomDelayExecutionContext
 import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
-import delta.util.LocalPublisher
+import delta.util.LocalHub
 
 class TestSampler {
 
@@ -19,7 +19,10 @@ class TestSampler {
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
       RandomDelayExecutionContext) with Publishing[Int, DomainEvent] {
-      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
+      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
+      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      val txnChannels = Set(Employee.Def.channel, Department.Def.channel)
     }
 
   implicit def ec = RandomDelayExecutionContext
@@ -59,24 +62,25 @@ class TestSampler {
     val insertId = EmployeeRepo.insert(id, emp, metadata).await
     assertEquals(id, insertId)
     try {
-      EmployeeRepo.update(id, Revision(3), metadata) {
-        case (emp, _) =>
+      EmployeeRepo.update(id, metadata) {
+        case (emp, 3) =>
           emp(UpdateSalary(45000))
+        case (_, rev) =>
+          throw new IllegalStateException(rev.toString)
       }.await
       fail("Should throw a Revision.MismatchException")
     } catch {
-      case Revision.MismatchException(expected, actual) =>
-        assertEquals(3, expected)
-        assertEquals(0, actual)
+      case e: IllegalStateException =>
+        assertEquals("0", e.getMessage)
     }
-    var revs = EmployeeRepo.update(id, Revision(0), metadata) {
+    var revs = EmployeeRepo.update(id, Some(0), metadata) {
       case (emp, revision) =>
         emp(UpdateSalary(45000))
         revision
     }.await
     assertEquals(0, revs._1)
     assertEquals(1, revs._2)
-    revs = EmployeeRepo.update(id, Revision(0), metadata) {
+    revs = EmployeeRepo.update(id, Some(0), metadata) {
       case (emp, revision) =>
         emp(UpdateSalary(45000))
         revision
@@ -84,16 +88,15 @@ class TestSampler {
     assertEquals(1, revs._1)
     assertEquals(1, revs._2)
     try {
-      EmployeeRepo.update(id, Revision.Exactly(0), metadata) {
-        case (emp, revision) =>
+      EmployeeRepo.update(id, metadata) {
+        case (emp, 0) =>
           emp(UpdateSalary(66000))
-          revision
+        case (_, rev) => throw new IllegalStateException(rev.toString)
       }.await
-      fail("Should throw a Revision.Mismatch")
+      fail("Should throw a Match exception")
     } catch {
-      case Revision.MismatchException(expected, actual) =>
-        assertEquals(0, expected)
-        assertEquals(1, actual)
+      case e: IllegalStateException =>
+        assertEquals("1", e.getMessage)
     }
   }
 

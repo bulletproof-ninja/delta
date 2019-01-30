@@ -4,7 +4,6 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
 import delta.ddd.Repository
-import delta.ddd.Revision
 import delta.ddd.ImmutableEntity
 
 /**
@@ -32,7 +31,7 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
   }(PiggyBack)
 
   protected def update[R](
-      expectedRevision: Revision, id: ID,
+      expectedRevision: Option[Int], id: ID,
       metadata: Map[String, String],
       updateThunk: (E, Int) => Future[UT[R]]): Future[impl.UM[R]] = {
     @volatile var toPublish: List[EVT] = Nil

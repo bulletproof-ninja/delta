@@ -9,18 +9,23 @@ import delta.hazelcast.IgnoredDuplicate
 import delta.hazelcast.MissingRevisions
 import delta.hazelcast.Updated
 import scala.reflect.ClassTag
+import delta.hazelcast.EntryState
+import scala.collection.immutable.TreeMap
+import delta.Transaction
 
 trait TransactionSerializer
   extends StreamSerializer[delta.Transaction[Any, Any]] {
 
   type TXN = delta.Transaction[Any, Any]
 
+  private[this] val serializer = delta.Transaction.Serialization
+
   def write(out: ObjectDataOutput, txn: TXN): Unit = {
     val output = out match {
       case out: java.io.ObjectOutput => out
       case out: java.io.OutputStream => new ObjectOutputStream(out)
     }
-    delta.Transaction.writeObject(txn, output)
+    serializer.writeObject(txn, output)
   }
 
   def read(inp: ObjectDataInput): TXN = {
@@ -28,7 +33,7 @@ trait TransactionSerializer
       case inp: java.io.ObjectInput => inp
       case inp: java.io.InputStream => new ObjectInputStream(inp)
     }
-    delta.Transaction.readObject[Any, Any](input) {
+    serializer.readObject[Any, Any](input) {
       case (tick, ch, id, rev, metadata, events) =>
         new TXN(tick, ch, id, rev, metadata, events)
     }
@@ -53,21 +58,19 @@ trait SnapshotSerializer
 }
 
 trait DistributedMonotonicProcessorSerializer
-  extends StreamSerializer[delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any, Any]] {
+  extends StreamSerializer[delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any]] {
 
-  def write(out: ObjectDataOutput, ep: delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any, Any]): Unit = {
+  def write(out: ObjectDataOutput, ep: delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any]): Unit = {
     out writeObject ep.txn
-    out writeObject ep.stateCodec
     out writeObject ep.reducer
     out writeObject ep.evtTag
   }
 
   def read(inp: ObjectDataInput) = {
     val txn = inp.readObject[delta.Transaction[Any, Any]]
-    val codec = inp.readObject[scuff.Codec[Any, Any]]
     val reducer = inp.readObject[EventReducer[Any, Any]]
     val evtTag = inp.readObject[ClassTag[Any]]
-    new delta.hazelcast.DistributedMonotonicProcessor(txn, codec, reducer)(evtTag)
+    new delta.hazelcast.DistributedMonotonicProcessor(txn, reducer)(evtTag)
   }
 }
 
@@ -117,3 +120,18 @@ trait EntryUpdateResultSerializer
       new MissingRevisions(inp.readInt to inp.readInt)
   }
 }
+
+trait EntryStateSerializer
+  extends StreamSerializer[EntryState[Any, Any]] {
+    def write(out: ObjectDataOutput, es: EntryState[Any, Any]) = {
+      out writeObject es.snapshot
+      out writeBoolean es.contentUpdated
+      out writeObject es.unapplied
+    }
+    def read(inp: ObjectDataInput): EntryState[Any, Any] = {
+      val snapshot = inp.readObject[Snapshot[Any]]
+      val contentUpdated= inp.readBoolean()
+      val unapplied = inp.readObject[TreeMap[Int, Transaction[Any, Any]]]
+      new EntryState[Any, Any](snapshot, contentUpdated, unapplied)
+    }
+  }

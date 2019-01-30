@@ -1,23 +1,35 @@
 package delta.java
 
 import delta.EventStore
-import delta.Publisher
+import delta.MessageHub
 import delta.Publishing
 import scuff.StreamConsumer
-import delta.Transaction
+import delta.Transaction, Transaction.Channel
 import scala.concurrent.Future
 
 trait PublishingEventStore[ID, EVT] extends EventStore[ID, EVT] with Publishing[ID, EVT]
 
 object PublishingEventStore {
-  def create[ID, EVT](eventStore: EventStore[ID, EVT], publisher: Publisher[ID, EVT]): PublishingEventStore[ID, EVT] =
-    new EventStoreProxy(eventStore, publisher) with PublishingEventStore[ID, EVT]
+
+  def withPublishing[ID, EVT](
+      eventStore: EventStore[ID, EVT],
+      txnHub: MessageHub[Transaction[ID, EVT]],
+      txnChannels: Set[String],
+      channelToNamespace: java.util.function.Function[String, String]): PublishingEventStore[ID, EVT] = {
+    val typedChannels = txnChannels.map(Channel(_))
+    new EventStoreProxy(eventStore, txnHub, typedChannels, channelToNamespace) with PublishingEventStore[ID, EVT]
+  }
 }
 
 private abstract class EventStoreProxy[ID, EVT](
     evtStore: EventStore[ID, EVT],
-    protected val publisher: Publisher[ID, EVT])
+    protected val txnHub: MessageHub[Transaction[ID, EVT]],
+    protected val txnChannels: Set[Channel],
+    ch2ns: java.util.function.Function[String, String])
   extends EventStore[ID, EVT] {
+  publishing: Publishing[ID, EVT] =>
+
+  protected def toNamespace(ch: Channel) = Namespace(ch2ns(ch.toString))
 
   import language.implicitConversions
   implicit private def adapt(selector: this.Selector): evtStore.Selector = selector match {
@@ -40,7 +52,7 @@ private abstract class EventStoreProxy[ID, EVT](
   def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction[ID, E], U]): Unit =
     evtStore.replayStreamRange(stream, revisionRange)(callback)
 
-  def commit(channel: String, stream: ID, revision: Int, tick: Long,
+  def commit(channel: Channel, stream: ID, revision: Int, tick: Long,
       events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN] =
     evtStore.commit(channel, stream, revision, tick, events, metadata)
 

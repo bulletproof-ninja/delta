@@ -10,13 +10,11 @@ import scala.util._
 import delta.util.MissingRevisionsReplay
 import delta.EventSource
 import java.util.concurrent.ScheduledExecutorService
-import scuff.Codec
 
-class HzMonotonicProcessor[ID, EVT: ClassTag, WS >: Null, RS >: Null](
+class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
     es: EventSource[ID, _ >: EVT],
-    imap: IMap[ID, EntryState[RS, EVT]],
-    stateCodec: Codec[RS, WS],
-    reducer: EventReducer[WS, EVT],
+    imap: IMap[ID, EntryState[S, EVT]],
+    reducer: EventReducer[S, EVT],
     reportFailure: Throwable => Unit,
     missingRevisionsReplayScheduler: ScheduledExecutorService,
     missingRevisionsReplayDelay: FiniteDuration = 1111.milliseconds)
@@ -25,14 +23,14 @@ class HzMonotonicProcessor[ID, EVT: ClassTag, WS >: Null, RS >: Null](
 
   implicit private[this] val ec = ExecutionContext.fromExecutorService(missingRevisionsReplayScheduler, reportFailure)
 
-  private[this] val replay = onMissingRevisions(es, missingRevisionsReplayScheduler, reportFailure) _
-  private[this] val process = DistributedMonotonicProcessor(imap, stateCodec, reducer) _
+  private[this] val replay = onMissingRevisions(es, missingRevisionsReplayDelay, missingRevisionsReplayScheduler, reportFailure) _
+  private[this] val process = DistributedMonotonicProcessor(imap, reducer) _
 
   type TXN = Transaction[ID, _ >: EVT]
   def apply(txn: TXN) = {
     process(txn) andThen {
       case Success(MissingRevisions(range)) =>
-        replay(txn.stream, range, missingRevisionsReplayDelay)(apply)
+        replay(txn.stream, range)(apply)
       case Failure(th) => reportFailure(th)
     }
   }

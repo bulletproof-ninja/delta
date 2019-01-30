@@ -11,7 +11,6 @@ import delta.{ EventReducer, Snapshot, Transaction }
 import com.hazelcast.core.IMap
 import scala.concurrent.Future
 import scala.reflect.{ ClassTag, classTag }
-import scuff.Codec
 
 case class EntryState[S, EVT](
   snapshot: Snapshot[S],
@@ -24,22 +23,7 @@ case class MissingRevisions(range: Range) extends EntryUpdateResult
 case class Updated[S](snapshot: Snapshot[S]) extends EntryUpdateResult
 
 object DistributedMonotonicProcessor {
-  /**
-    * Process transaction, ensuring proper sequencing.
-    */
-  def apply[K, EVT: ClassTag, WS >: Null, RS >: Null](imap: IMap[K, EntryState[RS, EVT]], stateCodec: Codec[RS, WS], reducer: EventReducer[WS, EVT])(
-    txn: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
-    val verifiedTxn: Transaction[K, EVT] = {
-      txn.events.collect { case evt: EVT => evt } match {
-        case Nil => sys.error(s"${txn.channel} transaction ${txn.stream}(rev:${txn.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
-        case events => txn.copy(events = events)
-      }
-    }
-    val processor = new DistributedMonotonicProcessor[K, EVT, WS, RS](verifiedTxn, stateCodec, reducer)
-    val callback = CallbackPromise[EntryUpdateResult]
-    imap.submitToKey(txn.stream, processor, callback)
-    callback.future
-  }
+
   /**
     * Process transaction, ensuring proper sequencing.
     */
@@ -51,27 +35,27 @@ object DistributedMonotonicProcessor {
         case events => txn.copy(events = events)
       }
     }
-    val processor = new DistributedMonotonicProcessor[K, EVT, S, S](verifiedTxn, Codec.noop, reducer)
+    val processor = new DistributedMonotonicProcessor[K, EVT, S](verifiedTxn, reducer)
     val callback = CallbackPromise[EntryUpdateResult]
     imap.submitToKey(txn.stream, processor, callback)
     callback.future
   }
+
 }
 
 /**
  *  Distributed monotonic [[delta.Transaction]] entry processor, ensuring
  *  monotonic stream revision ordering.
  */
-final class DistributedMonotonicProcessor[K, EVT, WS >: Null, RS >: Null] private[hazelcast] (
+final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] (
   val txn: Transaction[K, EVT],
-  val stateCodec: Codec[RS, WS],
-  val reducer: EventReducer[WS, EVT])(implicit val evtTag: ClassTag[EVT])
-    extends AbstractEntryProcessor[K, EntryState[RS, EVT]](true) {
+  val reducer: EventReducer[S, EVT])(implicit val evtTag: ClassTag[EVT])
+    extends AbstractEntryProcessor[K, EntryState[S, EVT]](true) {
 
-  type EntryState = delta.hazelcast.EntryState[RS, EVT]
+  type EntryState = delta.hazelcast.EntryState[S, EVT]
   type TXN = Transaction[_, EVT]
 
-  private[this] val reduce = EventReducer.process(reducer, stateCodec) _
+  private[this] val reduce = EventReducer.process(reducer) _
 
   def process(entry: Entry[K, EntryState]): Object = processTransaction(entry, this.txn)
 

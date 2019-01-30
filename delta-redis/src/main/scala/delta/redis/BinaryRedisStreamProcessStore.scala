@@ -133,7 +133,7 @@ class BinaryRedisStreamProcessStore[K, T](
       }
       if (success) {
         if (updateMaxTick) updateLastTickWrittenIfNeeded(maxTick)
-      } else {
+      } else { // retry
         refreshBatch(conn)(binKeys, revisions)
       }
 
@@ -144,12 +144,16 @@ class BinaryRedisStreamProcessStore[K, T](
   def refreshBatch(revisions: collection.Map[K, (Int, Long)]): Future[Unit] = {
     if (revisions.isEmpty) Future successful (())
     else {
-      val binKeys = revisions.iterator.map {
-        case (key, _) => keyCodec encode key
-      }.toSeq
+      var binKeys: List[Array[Byte]] = Nil
+      var revTicks: List[(Int, Long)] = Nil
+      revisions.foreach {
+        case (key, revTickTuple) =>
+          binKeys ::= keyCodec encode key
+          revTicks ::= revTickTuple
+      }
       Future {
         jedis { conn =>
-          refreshBatch(conn)(binKeys, revisions.values.toSeq)
+          refreshBatch(conn)(binKeys, revTicks)
         }
       }(blockingCtx)
     }

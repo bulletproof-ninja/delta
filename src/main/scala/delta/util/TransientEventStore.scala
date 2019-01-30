@@ -5,33 +5,33 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
 import scuff.StreamConsumer
-import delta.{ EventCodec, EventStore }
+import delta.{ EventFormat, EventStore }
 
 /**
   * Non-persistent implementation, probably only useful for testing.
   */
 abstract class TransientEventStore[ID, EVT, SF](
-  execCtx: ExecutionContext)(implicit codec: EventCodec[EVT, SF])
+  execCtx: ExecutionContext)(implicit evtFmt: EventFormat[EVT, SF])
     extends EventStore[ID, EVT] {
 
-  private def Txn(id: ID, rev: Int, channel: String, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
+  private def Txn(id: ID, rev: Int, channel: Channel, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
     val eventsSF = events.map { evt =>
-      val (name, version) = codec.signature(evt)
-      (name, version, codec.encode(evt))
+      val EventFormat.EventSig(name, version) = evtFmt.signature(evt)
+      (name, version, evtFmt encode evt)
     }
     new Txn(id, rev, channel, tick, metadata, eventsSF)
   }
   private class Txn(
       id: ID,
       val rev: Int,
-      channel: String,
+      channel: Channel,
       val tick: Long,
       metadata: Map[String, String],
       eventsSF: List[(String, Byte, SF)]) {
     def toTransaction: TXN = {
       val events = eventsSF.map {
         case (name, version, data) =>
-          codec.decode(channel, name, version, data)
+          evtFmt.decode(name, version, data, channel, metadata)
       }
       Transaction(tick, channel, id, rev, metadata, events)
     }
@@ -53,7 +53,7 @@ abstract class TransientEventStore[ID, EVT, SF](
   def currRevision(stream: ID): Future[Option[Int]] = Future(findCurrentRevision(stream))
 
   def commit(
-    channel: String, stream: ID, revision: Int, tick: Long,
+    channel: Channel, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = Future {
     val transactions = txnMap.getOrElse(stream, Vector[Txn]())
     val expectedRev = transactions.size

@@ -18,16 +18,14 @@ private object MonotonicProcessor {
   }
 }
 
-abstract class MonotonicProcessor[ID, EVT, S >: Null](
-    protected val processStore: StreamProcessStore[ID, S])(
-    implicit protected val evtTag: ClassTag[EVT])
+trait MonotonicProcessor[ID, EVT, S >: Null]
   extends TransactionProcessor[ID, EVT, S]
   with (Transaction[ID, _ >: EVT] => Future[Unit]) {
 
-  protected type TXN = Transaction[ID, _ >: EVT]
   type Snapshot = delta.Snapshot[S]
-  type Update = processStore.Update
+  type SnapshotUpdate = delta.util.SnapshotUpdate[S]
 
+  protected def processStore: StreamProcessStore[ID, S]
   protected def processingContext(id: ID): ExecutionContext
 
   sealed private abstract class StreamStatus
@@ -96,7 +94,7 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
   private[this] val streamStatus = new TrieMap[ID, StreamStatus]
   protected def incompleteStreams: collection.Set[ID] = streamStatus.keySet
 
-  protected def onUpdate(id: ID, update: Update): Unit
+  protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit
   protected def onMissingRevisions(id: ID, missing: Range): Unit
 
   private def applyTransactions(
@@ -117,7 +115,7 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
           Future successful (snapshot -> txns)
         }
       case Nil =>
-        Future successful snapshot -> Nil
+        Future successful (snapshot -> Nil)
     }
 
   }
@@ -129,7 +127,7 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
     }
     val inactiveFuture = upsertResult.flatMap {
       case (update, stillUnapplied) =>
-        update.foreach(onUpdate(stream, _))
+        update.foreach(upd => onSnapshotUpdate(stream, upd))
         setInactive(stream, stillUnapplied) match {
           case Nil => Future successful (())
           case moreUnapplied => upsertUntilInactive(stream, moreUnapplied)
@@ -153,13 +151,18 @@ abstract class MonotonicProcessor[ID, EVT, S >: Null](
 }
 
 /**
-  * The default replay processor.
-  * @see delta.util.EventSourceProcessor
-  */
-abstract class MonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, BR](
+ * Monotonic replay processor.
+ * @see delta.util.EventSourceProcessor
+ * @tparam ID Stream identifier
+ * @tparam EVT Event type
+ * @tparam S State type
+ * @tparam BR Batch result. Typically just `Unit`
+ */
+abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, BR](
     protected val completionTimeout: FiniteDuration,
-    processStore: StreamProcessStore[ID, S])
-  extends MonotonicProcessor[ID, EVT, S](processStore)
+    protected val processStore: StreamProcessStore[ID, S])(
+    implicit protected val evtTag: ClassTag[EVT])
+  extends MonotonicProcessor[ID, EVT, S]
   with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
   override def onDone(): Future[BR] = {
@@ -169,16 +172,16 @@ abstract class MonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, BR](
     }(scuff.concurrent.Threads.PiggyBack)
   }
 
-  protected def onUpdate(id: ID, update: Update): Unit = ()
+  protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit = ()
   protected def onMissingRevisions(id: ID, missing: Range): Unit = ()
 
   /**
-    *  Called when replay processing is done.
-    *  This is the time to persist all generated
-    *  state, and return any information that
-    *  will be handed over to the live
-    *  processor.
-    */
+   *  Called when replay processing is done.
+   *  This is the time to persist all generated
+   *  state, and return any information that
+   *  will be handed over to the live
+   *  processor.
+   */
   protected def whenDone(): Future[BR]
 }
 

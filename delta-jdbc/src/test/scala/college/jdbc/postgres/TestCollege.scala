@@ -7,7 +7,7 @@ import college.CollegeEvent
 import delta.EventStore
 import delta.jdbc._
 import delta.testing.RandomDelayExecutionContext
-import delta.util.LocalPublisher
+import delta.util.LocalHub
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
 import delta.Publishing
@@ -52,7 +52,9 @@ class TestCollege extends college.TestCollege {
     val sql = new PostgreSQLDialect[Int, CollegeEvent, Array[Byte]](schema)
     new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
       sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(s"trans:$ch")
+      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       protected def dataSource = ds
     }.ensureSchema()
   }

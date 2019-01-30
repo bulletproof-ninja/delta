@@ -3,9 +3,9 @@ package delta.redis
 import _root_.redis.clients.jedis.Protocol
 import java.nio.charset.Charset
 
-object RedisEncoder extends RedisEncoder
+object RedisCodec extends RedisCodec
 
-class RedisEncoder {
+class RedisCodec extends scuff.Codec[String, Array[Byte]] {
   private[this] val _charset = Charset.forName(Protocol.CHARSET)
   final def encode(str: String): Array[Byte] = str.getBytes(_charset)
   final def decode(bytes: Array[Byte]): String = decode(bytes, 0, -1)

@@ -1,6 +1,7 @@
 package delta.ddd
 
 import delta.EventReducer
+import delta.Transaction.Channel
 
 private[delta] object Entity {
   def defaultName(e: Class[_]): String = {
@@ -12,7 +13,9 @@ private[delta] object Entity {
   * Type-class for Entity definition.
   * Only for top-level (aggregate root) entities.
   */
-abstract class Entity[S >: Null, EVT](val name: String, reducer: EventReducer[S, EVT]) {
+abstract class Entity[S >: Null, EVT](name: String, reducer: EventReducer[S, EVT]) {
+
+  val channel = Channel(name)
 
   type Id
   type Type

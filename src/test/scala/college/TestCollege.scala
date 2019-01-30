@@ -28,7 +28,9 @@ class TestCollege {
   lazy val eventStore: EventStore[Int, CollegeEvent] =
     new TransientEventStore[Int, CollegeEvent, Array[Byte]](
       RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] {
-      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = MessageHub.Namespace(ch.toString)
+      val txnHub = new LocalHub[TXN](txn => toNamespace(txn.channel), RandomDelayExecutionContext)
+      val txnChannels = Set(Student.channel, Semester.channel)
     }
 
   implicit def ec = RandomDelayExecutionContext
@@ -119,8 +121,8 @@ class TestCollege {
     val Unknown = "<unknown>"
     populate(200, 30)
     val enrollmentQuery = eventStore.query(eventStore.EventSelector(
-      Student.name -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
-      Semester.name -> Set(classOf[StudentEnrolled]))) _
+      Student.channel -> Set(classOf[StudentChangedName], classOf[StudentRegistered]),
+      Semester.channel -> Set(classOf[StudentEnrolled]))) _
 
     val allStudents = new TrieMap[Student.Id, (Set[Semester.Id], String)].withDefaultValue(Set.empty -> Unknown)
     val readModel = new TrieMap[Semester.Id, Map[Student.Id, String]].withDefaultValue(Map.empty)
@@ -145,8 +147,8 @@ class TestCollege {
           case StudentChangedName(newName) => studentNameChange(newName, studentId)
         }
       val evtHandler = txn.channel match {
-        case Student.name => onStudent(new Student.Id(txn.stream)) _
-        case Semester.name => onSemester(new Semester.Id(txn.stream)) _
+        case Student.channel => onStudent(new Student.Id(txn.stream)) _
+        case Semester.channel => onSemester(new Semester.Id(txn.stream)) _
       }
       txn.events.foreach(evtHandler)
     }
@@ -178,13 +180,14 @@ class TestCollege {
 
     class ModelBuilder(memMap: TrieMap[Int, delta.Snapshot[Model]])
       extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Unit](
-          10.seconds,
-          new ConcurrentMapStore(memMap)(_ => Future successful None))
-      with JoinStateProcessor[Int, SemesterEvent, Model, StudentModel] {
+        10.seconds,
+        new ConcurrentMapStore(memMap)(_ => Future successful None))
+      with MonotonicJoinState[Int, SemesterEvent, Model, StudentModel] {
 
-      protected def preprocess(semesterId: Int, semesterRev: Int, tick: Long, evt: SemesterEvent, md: Map[String, String]): Map[Int, Processor] = preprocess(semesterId, semesterRev, evt)
+      protected def join(semesterId: Int, semesterRev: Int, tick: Long, evt: SemesterEvent, md: Map[String, String]): Map[Int, Processor] =
+        preprocessJoin(semesterId, semesterRev, evt)
 
-      private def preprocess(semesterId: Int, semesterRev: Int, evt: SemesterEvent): Map[Int, Processor] = {
+      private def preprocessJoin(semesterId: Int, semesterRev: Int, evt: SemesterEvent): Map[Int, Processor] = {
         val semester = new SemesterRev(semesterId, semesterRev)
         evt match {
           case StudentEnrolled(studentId) => Map {
@@ -206,11 +209,11 @@ class TestCollege {
         }
       }
       protected def processingContext(id: Int) = streamPartitions.singleThread(id)
-      override protected def onUpdate(id: Int, update: Update) = update match {
-//        case Update(Snapshot(StudentModel(enrolled), _, _), true) =>
-//          println(s"Student $id is currently enrolled in: $enrolled")
-//        case Update(Snapshot(SemesterModel(students), rev, _), true) =>
-//          println(s"Semester $id:$rev currently has enrolled: $students")
+      override protected def onSnapshotUpdate(id: Int, update: SnapshotUpdate) = update match {
+        case SnapshotUpdate(Snapshot(StudentModel(enrolled), _, _), true) =>
+          println(s"Student $id is currently enrolled in: $enrolled")
+        case SnapshotUpdate(Snapshot(SemesterModel(students), rev, _), true) =>
+          println(s"Semester $id:$rev currently has enrolled: $students")
         case _ => // Ignore
       }
 
@@ -236,18 +239,18 @@ class TestCollege {
     }
 
     val (_, semesterIds) = populate(200, 30)
-//    val studentRevs = (Future sequence studentIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
-//      .map {
-//        case (id, revOpt) => id -> revOpt.getOrElse{fail(s"Student $id does not exist"); -1}
-//      }.toMap
+    //    val studentRevs = (Future sequence studentIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
+    //      .map {
+    //        case (id, revOpt) => id -> revOpt.getOrElse{fail(s"Student $id does not exist"); -1}
+    //      }.toMap
     val semesterRevs: Map[Semester.Id, Int] = (Future sequence semesterIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
       .map {
-        case (id, revOpt) => id -> revOpt.getOrElse{fail(s"Semester $id does not exist"); -1}
+        case (id, revOpt) => id -> revOpt.getOrElse { fail(s"Semester $id does not exist"); -1 }
       }.toMap
     val inMemoryMap = new TrieMap[Int, Snapshot[Model]]
     val builder = StreamPromise(new ModelBuilder(inMemoryMap))
-    eventStore.query(eventStore.Selector("Semester"))(builder)
-//    val queryProcess = StreamPromise.foreach(semesterQuery)(builder)
+    eventStore.query(eventStore.Selector(Semester.channel))(builder)
+    //    val queryProcess = StreamPromise.foreach(semesterQuery)(builder)
     builder.future.await
     inMemoryMap.foreach {
       case (semesterId, Snapshot(SemesterModel(students), rev, _)) =>
@@ -272,4 +275,5 @@ class TestCollege {
         }
     }
   }
+
 }

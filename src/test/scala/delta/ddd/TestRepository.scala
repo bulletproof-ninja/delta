@@ -29,7 +29,7 @@ class TestRepository {
       repo.insert(5, hank).foreach { id5 =>
         assertEquals(BigInt(5), id5)
         latch.countDown()
-        val update1 = repo.update(5, Revision(0)) {
+        val update1 = repo.update(5, Some(0)) {
           case (customer, rev) =>
             assertEquals(0, rev)
             latch.countDown()
@@ -74,7 +74,7 @@ class TestRepository {
     assertEquals(0, n1.revision)
     assertEquals(1, n1.events.size)
     assertEquals(CustomerCreated, n1.events.head)
-    repo.update[Nothing](5, Revision(0)) {
+    repo.update[Nothing](5, Some(0)) {
       case ((hank, _), _) =>
         hank.copy(name = "Hankster") -> List(CustomerUpdated)
     }

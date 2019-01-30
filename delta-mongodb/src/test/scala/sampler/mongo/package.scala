@@ -6,11 +6,12 @@ import sampler.aggr.DomainEvent
 
 package object mongo {
 
-  object BsonDomainEventCodec
-    extends AbstractEventCodec[BsonValue] {
-    def encode(evt: DomainEvent) = BsonJsonCodec decode JsonDomainEventCodec.encode(evt)
-    def decode(channel: String, name: String, version: Byte, data: BsonValue) =
-      JsonDomainEventCodec.decode(channel, name, version, BsonJsonCodec encode data)
+  object BsonDomainEventFormat
+    extends AbstractEventFormat[BsonValue] {
+    def encode(evt: DomainEvent) = BsonJsonCodec decode JsonDomainEventFormat.encode(evt)
+    def decode(encoded: Encoded) = {
+      JsonDomainEventFormat decode encoded.map(BsonJsonCodec.encode)
+    }
   }
 
 }

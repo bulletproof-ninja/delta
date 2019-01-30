@@ -116,8 +116,10 @@ package object jdbc {
 
   private[jdbc] implicit class DeltaPrep(private val ps: PreparedStatement) extends AnyVal {
     def setValue[T: ColumnType](colIdx: Int, value: T): Unit = ps.setObject(colIdx, implicitly[ColumnType[T]] writeAs value)
+    def setChannel(colIdx: Int, ch: Transaction.Channel): Unit = ps.setString(colIdx, ch.toString)
   }
   private[jdbc] implicit class DeltaRes(private val rs: ResultSet) extends AnyVal {
     def getValue[T: ColumnType](colIdx: Int): T = implicitly[ColumnType[T]].readFrom(rs, colIdx)
+    def getChannel(colIdx: Int): Transaction.Channel = Transaction.Channel(rs.getString(colIdx))
   }
 }

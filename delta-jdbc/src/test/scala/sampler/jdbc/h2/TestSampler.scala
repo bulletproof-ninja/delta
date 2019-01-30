@@ -7,11 +7,11 @@ import org.junit.AfterClass
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-import sampler.{ JSON, JsonDomainEventCodec }
+import sampler.{ JSON, JsonDomainEventFormat }
 import sampler.aggr.DomainEvent
 import delta.jdbc._
 import delta.jdbc.h2._
-import delta.util.LocalPublisher
+import delta.util.LocalHub
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
@@ -38,7 +38,9 @@ final class TestSampler extends sampler.TestSampler {
     new JdbcEventStore(sql, RandomDelayExecutionContext)
       with Publishing[Int, DomainEvent]
       with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       protected def dataSource = ds
     }.ensureSchema()
   }

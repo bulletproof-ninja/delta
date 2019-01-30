@@ -5,7 +5,7 @@ import java.sql.{ Connection, ResultSet, SQLException }
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
-import delta.{ EventCodec, EventStore }
+import delta.{ EventFormat, EventStore }
 import scuff.StreamConsumer
 import scuff.concurrent.Threads
 import scuff.jdbc.ConnectionProvider
@@ -16,12 +16,17 @@ private object JdbcEventStore {
     val tf = Threads.factory("jdbc-executor", tg)
     Threads.newCachedThreadPool(tf)
   }
+  final class RawEvent[SF](name: String, version: Byte, data: SF) {
+    def decode[EVT](channel: delta.Transaction.Channel, metadata: Map[String, String])(
+        implicit evtFmt: EventFormat[EVT, SF]): EVT =
+          evtFmt.decode(name, version, data, channel, metadata)
+  }
 }
 
 class JdbcEventStore[ID, EVT, SF](
   dialect: Dialect[ID, EVT, SF],
   blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)(
-    implicit codec: EventCodec[EVT, SF])
+    implicit evtFmt: EventFormat[EVT, SF])
     extends EventStore[ID, EVT] {
   cp: ConnectionProvider =>
 
@@ -58,7 +63,7 @@ class JdbcEventStore[ID, EVT, SF](
   }
 
   def commit(
-    channel: String, stream: ID, revision: Int, tick: Long,
+    channel: Channel, stream: ID, revision: Int, tick: Long,
     events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN] = {
     require(revision >= 0, "Must be non-negative revision, was: " + revision)
     require(events.nonEmpty, "Must have at least one event")
@@ -114,11 +119,12 @@ class JdbcEventStore[ID, EVT, SF](
   @annotation.tailrec
   private def processTransactions(singleStream: Boolean, onNext: TXN => Unit)(
     stream: ID, revision: Int, rs: ResultSet, col: dialect.Columns): Unit = {
-    val channel = rs.getString(col.channel)
+    import JdbcEventStore.RawEvent
+    val channel = rs.getChannel(col.channel)
     val tick = rs.getLong(col.tick)
     var lastEvtIdx: Byte = -1
     var metadata = Map.empty[String, String]
-    var events = List.empty[EVT]
+    var rawEvents = List.empty[RawEvent[SF]]
     var continue = false
     var nextTxnKey: Option[(ID, Int)] = None
     do {
@@ -134,7 +140,7 @@ class JdbcEventStore[ID, EVT, SF](
         val name = rs.getString(col.event_name)
         val version = rs.getByte(col.event_version)
         val data = dialect.sfType.readFrom(rs, col.event_data)
-        events = codec.decode(channel, name, version, data) :: events
+        rawEvents = new RawEvent(name, version, data) :: rawEvents
       }
       lastEvtIdx = evtIdx
       val nextRow =
@@ -148,7 +154,10 @@ class JdbcEventStore[ID, EVT, SF](
       }
       continue = nextRow.isDefined
     } while (continue && nextTxnKey.isEmpty)
-    onNext(Transaction(tick, channel, stream, revision, metadata, events.reverse))
+    val events = rawEvents.foldLeft(List.empty[EVT]) {
+      case (list, rawEvent) => rawEvent.decode(channel, metadata) :: list
+    }
+    onNext(Transaction(tick, channel, stream, revision, metadata, events))
     nextTxnKey match {
       case Some((stream, revision)) =>
         processTransactions(singleStream, onNext)(stream, revision, rs, col)

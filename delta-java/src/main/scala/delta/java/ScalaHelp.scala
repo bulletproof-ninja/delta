@@ -33,9 +33,13 @@ object ScalaHelp {
   /** Turn Java `Optional` into Scala `Option`. */
   def asScala[T](opt: Optional[T]): Option[T] = if (opt.isPresent) Some(opt.get) else None
 
+  def tuple[A, B](a: A, b: B): (A, B) = a -> b
+  def tuple[A, B, C](a: A, b: B, c: C): (A, B, C) = (a, b, c)
+
   /** var-args to Scala `Seq`. */
   @annotation.varargs
-  def Seq[T](ts: T*): collection.immutable.Seq[T] = ts.toList
+  def Seq[T](ts: T*): collection.immutable.Seq[T] = ts.toVector
+  def Seq[T](stream: java.util.stream.Stream[T]): collection.immutable.Seq[T] = stream.toArray.map(_.asInstanceOf[T]).toVector
 
   /** Combine two `Future`s into single `Future`. */
   def combine[A, B](exeCtx: ExecutionContext, futureA: Future[A], futureB: Future[B]): Future[(A, B)] = {

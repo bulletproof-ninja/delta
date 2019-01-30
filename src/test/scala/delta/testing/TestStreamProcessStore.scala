@@ -90,7 +90,7 @@ class TestStreamProcessStore {
   @Test
   def `tick collision`(): Unit = {
     val store = newStore
-    import store.Update
+
     val key = util.Random.nextLong()
     val snapshot1 = new Snapshot("[1]", -1, 555L)
     store.write(key, snapshot1).await
@@ -114,7 +114,7 @@ class TestStreamProcessStore {
     }.await._1
     assertEquals(None, stillNoUpdate)
     assertEquals(snapshot2, store.read(key).await.get)
-    val Update(snapshot3, s3Updated) = store.upsert(key) {
+    val SnapshotUpdate(snapshot3, s3Updated) = store.upsert(key) {
       case None => fail("Should not happen"); ???
       case Some(existing) =>
         assertEquals(snapshot2, existing)
@@ -123,7 +123,7 @@ class TestStreamProcessStore {
     assertFalse(s3Updated)
     assertEquals(Snapshot(snapshot2.content, -1, 556L), snapshot3)
     assertEquals(snapshot3, store.read(key).await.get)
-    val Update(snapshot4, s4Updated) = store.upsert(key) {
+    val SnapshotUpdate(snapshot4, s4Updated) = store.upsert(key) {
       case None => fail("Should not happen"); ???
       case Some(existing) =>
         assertEquals(snapshot3, existing)

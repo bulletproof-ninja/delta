@@ -10,11 +10,9 @@ import delta.SnapshotStore
   * [[delta.ddd.Entity]]-based [[delta.ddd.Repository]] implementation.
   * @tparam ESID Event store id type
   * @tparam EVT Repository event type
-  * @tparam CH Channel type
   * @tparam S Repository state type
   * @tparam ID Repository id type. Must be the same as, or translatable to, the event store id type
   * @tparam ET The entity type
-  * @param channel The channel
   * @param entity Entity type class
   * @param eventStore The event store implementation
   * @param snapshots Snapshot store. Defaults to no-op.
@@ -35,7 +33,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     implicit idConv: ID => ESID, exeCtx: ExecutionContext, ticker: Ticker)
   extends Repository[ID, ET] with MutableEntity {
 
-  private[this] val repo = new EventStoreRepository(entity.name, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
+  private[this] val repo = new EventStoreRepository(entity.channel, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
 
   def exists(id: ID): Future[Option[Int]] = repo.exists(id)
 
@@ -47,7 +45,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
   }
 
   protected def update[R](
-      expectedRevision: Revision, id: ID,
+      expectedRevision: Option[Int], id: ID,
       metadata: Map[String, String], updateThunk: (ET, Int) => Future[R]): Future[(R, Int)] = {
     @volatile var returnValue = null.asInstanceOf[R]
     val futureRev = repo.update(id, expectedRevision, metadata) {

@@ -9,12 +9,13 @@ import scala.util.Try
 import delta.ddd.EntityRepository
 import delta._
 import delta.testing._
+import delta.Transaction.Channel
 
 class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStoreRepositoryTest {
 
-  implicit object AggrEventCodec
+  implicit object AggrEventFormat
       extends ReflectiveDecoder[AggrEvent, String]
-      with EventCodec[AggrEvent, String]
+      with EventFormat[AggrEvent, String]
       with AggrEventHandler {
     type Return = String
 
@@ -28,20 +29,20 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
 
     def on(evt: AggrCreated) = s"""{"status":"${evt.status}"}"""
     val FindStatus = """\{"status":"(\w+)"\}""".r
-    def aggrCreated(version: Byte, json: String): AggrCreated = version match {
-      case 1 => FindStatus.findFirstMatchIn(json).map(m => AggrCreated(m group 1)).getOrElse(throw new IllegalArgumentException(json))
+    def aggrCreated(enc: Encoded): AggrCreated = enc.version match {
+      case 1 => FindStatus.findFirstMatchIn(enc.data).map(m => AggrCreated(m group 1)).getOrElse(throw new IllegalArgumentException(enc.data))
     }
 
     def on(evt: NewNumberWasAdded) = s"""{"number":${evt.n}}"""
     val FindNumber = """\{"number":(\d+)\}""".r
-    def newNumberWasAdded(version: Byte, json: String): NewNumberWasAdded = version match {
-      case 1 => FindNumber.findFirstMatchIn(json).map(m => NewNumberWasAdded(m.group(1).toInt)).getOrElse(throw new IllegalArgumentException(json))
+    def newNumberWasAdded(enc: Encoded): NewNumberWasAdded = enc.version match {
+      case 1 => FindNumber.findFirstMatchIn(enc.data).map(m => NewNumberWasAdded(m.group(1).toInt)).getOrElse(throw new IllegalArgumentException(enc.data))
     }
 
     def on(evt: StatusChanged) = s"""{"newStatus":"${evt.newStatus}"}"""
     val FindNewStatus = """\{"newStatus":"(\w*)"\}""".r
-    def statusChanged(version: Byte, json: String): StatusChanged = version match {
-      case 1 => FindNewStatus.findFirstMatchIn(json).map(m => StatusChanged(m group 1)).getOrElse(throw new IllegalArgumentException(json))
+    def statusChanged(enc: Encoded): StatusChanged = enc.version match {
+      case 1 => FindNewStatus.findFirstMatchIn(enc.data).map(m => StatusChanged(m group 1)).getOrElse(throw new IllegalArgumentException(enc.data))
     }
   }
 
@@ -64,7 +65,9 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, String](
       session, TableDescriptor) with Publishing[String, AggrEvent] {
-      val publisher = new LocalPublisher[String, AggrEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(s"txn:$ch")
+      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+      val txnChannels = Set(Channel("any"))
     }
     repo = new EntityRepository(TheOneAggr)(es)
   }

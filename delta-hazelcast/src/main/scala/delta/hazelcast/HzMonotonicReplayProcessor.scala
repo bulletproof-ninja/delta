@@ -10,50 +10,45 @@ import scala.concurrent.Future
 import scala.concurrent.ExecutionContext
 import scuff.concurrent.PartitionedExecutionContext
 import scuff.concurrent.Threads
-import scuff.Codec
 import delta.util.ConcurrentMapReplayProcessing
 
 object HzMonotonicReplayProcessor {
-  private[this] def read[ID, EVT, WS, RS](
-      imap: IMap[ID, EntryState[RS, EVT]],
-      conv: RS => WS)(id: ID): Future[Option[delta.Snapshot[WS]]] = {
-    val callback = CallbackPromise[delta.Snapshot[RS], Option[delta.Snapshot[WS]]] {
+  private[this] def read[ID, EVT, S](
+      imap: IMap[ID, EntryState[S, EVT]])(id: ID): Future[Option[delta.Snapshot[S]]] = {
+    val callback = CallbackPromise[delta.Snapshot[S], Option[delta.Snapshot[S]]] {
       case null => None
       case s: delta.Snapshot[_] => Some {
-        s.asInstanceOf[delta.Snapshot[RS]].map(conv)
+        s.asInstanceOf[delta.Snapshot[S]]
       }
     }
     imap.submitToKey(id, EntryStateSnapshotReader, callback)
     callback.future
   }
-  private def makeStore[ID, EVT: ClassTag, WS, RS](
-      cmap: collection.concurrent.Map[ID, delta.Snapshot[WS]],
-      imap: IMap[ID, EntryState[RS, EVT]],
-      stateCodec: Codec[RS, WS]): StreamProcessStore[ID, WS] = {
-    new ConcurrentMapStore(cmap, None)(read(imap, stateCodec.encode))
+  private def makeStore[ID, EVT: ClassTag, S](
+      cmap: collection.concurrent.Map[ID, delta.Snapshot[S]],
+      imap: IMap[ID, EntryState[S, EVT]]): StreamProcessStore[ID, S] = {
+    new ConcurrentMapStore(cmap, None)(read(imap))
   }
 }
 
-abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, WS >: Null, RS](
-    imap: IMap[ID, EntryState[RS, EVT]],
-    stateCodec: Codec[RS, WS],
+abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
+    imap: IMap[ID, EntryState[S, EVT]],
     whenDoneCompletionTimeout: FiniteDuration,
     protected val whenDoneContext: ExecutionContext,
     partitionThreads: PartitionedExecutionContext,
-    cmap: collection.concurrent.Map[ID, delta.Snapshot[WS]])
-  extends MonotonicReplayProcessor[ID, EVT, WS, Unit](
-    whenDoneCompletionTimeout, HzMonotonicReplayProcessor.makeStore(cmap, imap, stateCodec))
-  with ConcurrentMapReplayProcessing[ID, EVT, WS, Unit] {
+    cmap: collection.concurrent.Map[ID, delta.Snapshot[S]])
+  extends MonotonicReplayProcessor[ID, EVT, S, Unit](
+    whenDoneCompletionTimeout, HzMonotonicReplayProcessor.makeStore(cmap, imap))
+  with ConcurrentMapReplayProcessing[ID, EVT, S, Unit] {
 
   def this(
-      imap: IMap[ID, EntryState[RS, EVT]],
-      stateCodec: Codec[RS, WS],
+      imap: IMap[ID, EntryState[S, EVT]],
       whenDoneCompletionTimeout: FiniteDuration,
       whenDoneContext: ExecutionContext,
       failureReporter: Throwable => Unit,
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
-      cmap: collection.concurrent.Map[ID, delta.Snapshot[WS]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[WS]]) =
-    this(imap, stateCodec, whenDoneCompletionTimeout, whenDoneContext,
+      cmap: collection.concurrent.Map[ID, delta.Snapshot[S]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[S]]) =
+    this(imap, whenDoneCompletionTimeout, whenDoneContext,
       PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor")),
       cmap)
 
@@ -63,9 +58,9 @@ abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, WS >: Null, RS](
 
   protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[Unit] = {
       implicit def ec = whenDoneContext
-    val updater = EntryStateUpdater[ID, EVT, RS](imap) _
+    val updater = EntryStateUpdater[ID, EVT, S](imap) _
     val persisted = snapshots.collect {
-      case (id, snapshot) => updater(id, snapshot.map(stateCodec.decode))
+      case (id, snapshot) => updater(id, snapshot)
     }
     Future.sequence(persisted).map(_ => ())
   }

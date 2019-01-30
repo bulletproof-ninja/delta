@@ -30,7 +30,7 @@ trait EventSourceConsumer[ID, EVT] {
   protected type ReplayResult
 
   type ES = EventSource[ID, _ >: EVT]
-  type TXN = Transaction[ID, _ >: EVT]
+  protected type TXN = Transaction[ID, _ >: EVT]
 
   /** Transaction selector. */
   protected def selector(es: ES): es.Selector
@@ -142,7 +142,7 @@ trait EventSourceConsumer[ID, EVT] {
     replayProcessingDone.flatMap { replayResult =>
       val liveProcessor = this.liveProcessor(es, replayResult)
       val liveSubscription = es.subscribe(selector.toComplete)(liveProcessor)
-      // close window of opportunity, for a potential race condition, by re-querying anything since start
+      // close window of opportunity for potential race condition, by re-querying anything since start
       val windowQuery = es.querySince(maxEventSourceTickAtStart - maxTickSkew, selector) _
       StreamPromise
         .foreach(windowQuery)(liveProcessor)

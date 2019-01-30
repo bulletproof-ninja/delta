@@ -2,6 +2,7 @@ package sampler.aggr.emp
 
 import sampler.MyDate
 import sampler.aggr.DomainEvent
+import scala.{ SerialVersionUID => version }
 
 trait EmpEventHandler {
   type Return
@@ -17,7 +18,7 @@ sealed abstract class EmpEvent extends DomainEvent {
   type Callback = EmpEventHandler
 }
 
-@SerialVersionUID(1)
+@version(1)
 case class EmployeeRegistered(
   name: String,
   soch: String,
@@ -26,10 +27,10 @@ case class EmployeeRegistered(
   title: String)
     extends EmpEvent { def dispatch(handler: EmpEventHandler): handler.Return = handler.on(this) }
 
-@SerialVersionUID(1)
+@version(1)
 case class EmployeeSalaryChange(newSalary: Int)
   extends EmpEvent { def dispatch(handler: EmpEventHandler): handler.Return = handler.on(this) }
 
-@SerialVersionUID(1)
+@version(1)
 case class EmployeeTitleChange(newTitle: String)
   extends EmpEvent { def dispatch(handler: EmpEventHandler): handler.Return = handler.on(this) }

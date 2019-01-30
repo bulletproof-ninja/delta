@@ -13,7 +13,7 @@ trait JsonCodec
 
   private val IsoDate = """(\d{4})-(\d{2})-(\d{2})""".r
 
-  private val EmployeeRegisteredCodec = new Codec[EmployeeRegistered, JSON] {
+  private val EmployeeRegisteredCodecV1 = new Codec[EmployeeRegistered, JSON] {
     def encode(evt: EmployeeRegistered): String = s"""{
       "name": "${evt.name}",
       "dob": "${evt.dob.toString}",
@@ -32,22 +32,22 @@ trait JsonCodec
     }
   }
 
-  def on(evt: EmployeeRegistered): String = EmployeeRegisteredCodec.encode(evt)
-  def onEmployeeRegistered(version: Byte, json: String): EmployeeRegistered = version match {
-    case 1 => EmployeeRegisteredCodec.decode(json)
+  def on(evt: EmployeeRegistered): String = EmployeeRegisteredCodecV1.encode(evt)
+  def onEmployeeRegistered(encoded: Encoded): EmployeeRegistered = encoded.version match {
+    case 1 => EmployeeRegisteredCodecV1.decode(encoded.data)
   }
   def on(evt: EmployeeSalaryChange): String = s"""{
     "salary": ${evt.newSalary}
   }"""
-  def onEmployeeSalaryChange(version: Byte, json: String): EmployeeSalaryChange = version match {
-    case 1 => new EmployeeSalaryChange(newSalary = json.field("salary").toInt)
+  def onEmployeeSalaryChange(encoded: Encoded): EmployeeSalaryChange = encoded.version match {
+    case 1 => new EmployeeSalaryChange(newSalary = encoded.data.field("salary").toInt)
   }
 
   def on(evt: EmployeeTitleChange): String = s"""{
     "title": "${evt.newTitle}"
   }"""
-  def onEmployeeTitleChange(version: Byte, json: String): EmployeeTitleChange = version match {
-    case 1 => new EmployeeTitleChange(newTitle = json.field("title"))
+  def onEmployeeTitleChange(encoded: Encoded): EmployeeTitleChange = encoded.version match {
+    case 1 => new EmployeeTitleChange(newTitle = encoded.data.field("title"))
   }
 
 }

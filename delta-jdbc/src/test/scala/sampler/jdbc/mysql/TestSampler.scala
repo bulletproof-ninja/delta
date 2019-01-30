@@ -5,12 +5,12 @@ import org.junit._
 
 import com.mysql.jdbc.jdbc2.optional.MysqlConnectionPoolDataSource
 
-import sampler.{ JSON, JsonDomainEventCodec }
+import sampler.{ JSON, JsonDomainEventFormat }
 import sampler.aggr.DomainEvent
 import delta.jdbc._
 import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
-import delta.util.LocalPublisher
+import delta.util.LocalHub
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
 import delta.Publishing
@@ -20,7 +20,7 @@ object TestSampler {
   val ds = {
     val ds = new MysqlConnectionPoolDataSource
     ds.setUser("root")
-    ds setUrl s"jdbc:mysql://localhost/$db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&autoReconnect=true"
+    ds setUrl s"jdbc:mysql://localhost/$db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&autoReconnect=true&useSSL=false"
     ds
   }
   @AfterClass
@@ -40,7 +40,10 @@ final class TestSampler extends sampler.TestSampler {
   override lazy val es = {
     val sql = new MySQLDialect[Int, DomainEvent, JSON]
     new JdbcEventStore(sql, RandomDelayExecutionContext) with Publishing[Int, DomainEvent] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, DomainEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(s"txn-$ch")
+      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
+      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       protected def dataSource = TestSampler.ds
     }.ensureSchema()
   }

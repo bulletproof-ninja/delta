@@ -4,9 +4,10 @@ import scala.concurrent.Future
 
 trait SnapshotStore[K, T] {
   type Snapshot = delta.Snapshot[T]
-  def read(key: K): Future[Option[Snapshot]]
+  def read(key: K): Future[Option[delta.Snapshot[T]]]
   def write(key: K, snapshot: Snapshot): Future[Unit]
 }
+
 private[delta] object SnapshotStore {
   private[this] val UnitFuture = Future.successful(())
   private[this] val NoneFuture = Future successful None

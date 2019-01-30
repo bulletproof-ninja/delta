@@ -16,14 +16,15 @@ package object college {
 
   implicit def intId(id: IntId[_]): Int = id.int
 
-  implicit object CollegeEventCodec
-      extends EventCodec[CollegeEvent, Array[Byte]]
-      with NoVersioning[CollegeEvent, Array[Byte]] {
+  implicit object CollegeEventFormat
+      extends EventFormat[CollegeEvent, Array[Byte]] {
 
+    def getVersion(cls: EventClass) = NoVersion
     def getName(cls: EventClass): String = cls.getName
 
     def encode(evt: CollegeEvent): Array[Byte] = JavaSerializer.encode(evt)
-    def decode(channel: String, name: String, data: Array[Byte]) = JavaSerializer.decode(data).asInstanceOf[CollegeEvent]
+    def decode(encoded: Encoded) =
+      JavaSerializer.decode(encoded.data).asInstanceOf[CollegeEvent]
   }
 
 }

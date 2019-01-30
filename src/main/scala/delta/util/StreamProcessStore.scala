@@ -14,13 +14,6 @@ trait StreamProcessStore[K, S] extends SnapshotStore[K, S] {
   def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit]
 
   /**
-    * Snapshot update.
-    * @param snapshot The snapshot, content, revision, and tick
-    * @param contentUpdated `true` if snapshot content was updated, `false` if only revision and/or tick
-    */
-  final case class Update(snapshot: Snapshot, contentUpdated: Boolean)
-
-  /**
     *  Tick watermark. This is a best-effort
     *  watermark, usually either the highest
     *  or last processed. Combined with a
@@ -30,16 +23,18 @@ trait StreamProcessStore[K, S] extends SnapshotStore[K, S] {
     */
   def tickWatermark: Option[Long]
 
+  type SnapshotUpdate = delta.util.SnapshotUpdate[S]
+
   /**
     * Update/Insert.
     * @param key The key to update
     * @param updateThunk The update function. Return `None` if no insert/update is desired
-    * @param updateThunkEC Execution context for running the update function
-    * @return The result of the `updateThunk`
+    * @param updateThunkEC Execution context for running the update thunk
+    * @return The result of the `updateThunk` function
     */
   def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
-      implicit updateThunkEC: ExecutionContext): Future[(Option[Update], R)]
+      implicit updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)]
 
 }
 
@@ -59,14 +54,15 @@ trait NonBlockingRecursiveUpsert[K, V] {
       key: K, existing: Option[Snapshot],
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
       writeIfExpected: (K, Option[Snapshot], Snapshot) => Future[Either[ConflictingSnapshot, ContentUpdated]])(
-      implicit updateThunkEC: ExecutionContext): Future[(Option[Update], R)] = {
+      implicit updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
     updateThunk(existing).flatMap {
-      case (result, payload) =>
+        case (result, payload) =>
+        // If no result OR exact same content, revision, and tick
         if (result.isEmpty || result == existing) Future successful None -> payload
         else {
           val Some(newSnapshot) = result // Known nonEmpty
           writeIfExpected(key, existing, newSnapshot) flatMap {
-            case Right(contentUpdated) => Future successful Some(Update(newSnapshot, contentUpdated)) -> payload
+            case Right(contentUpdated) => Future successful Some(SnapshotUpdate(/*key,*/ newSnapshot, contentUpdated)) -> payload
             case Left(conflict) => upsertRecursive(key, Some(conflict), updateThunk, writeIfExpected)
           }
         }
@@ -95,7 +91,7 @@ trait BlockingRecursiveUpsert[K, V] {
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
       updateThunkTimeout: FiniteDuration,
       writeIfExpected: (K, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated])(
-      implicit updateThunkEC: ExecutionContext): (Option[Update], R) = {
+      implicit updateThunkEC: ExecutionContext): (Option[SnapshotUpdate], R) = {
 
     val updated = Future(updateThunk(existing)).flatMap(identity)
     blocking(updated.await(updateThunkTimeout)) match {
@@ -104,7 +100,7 @@ trait BlockingRecursiveUpsert[K, V] {
         else {
           val Some(newSnapshot) = result // Known nonEmpty
           writeIfExpected(key, existing, newSnapshot) match {
-            case Right(contentUpdated) => Some(Update(newSnapshot, contentUpdated)) -> payload
+            case Right(contentUpdated) => Some(SnapshotUpdate(/*key,*/ newSnapshot, contentUpdated)) -> payload
             case Left(conflict) => upsertRecursive(key, Some(conflict), updateThunk, updateThunkTimeout, writeIfExpected)
           }
         }
@@ -137,17 +133,17 @@ trait NonBlockingCASWrites[K, V] extends NonBlockingRecursiveUpsert[K, V] {
 
   def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
-      implicit updateThunkEC: ExecutionContext): Future[(Option[Update], R)] = {
+      implicit updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
 
       // Write snapshot, if current expectation holds.
       def writeIfExpected(key: K, expected: Option[Snapshot], snapshot: Snapshot): Future[Either[ConflictingSnapshot, ContentUpdated]] = {
         val contentUpdated = !expected.exists(_.contentEquals(snapshot))
         if (contentUpdated) {
-          val writeConflict = expected match {
+          val potentialWriteConflict = expected match {
             case Some(expected) => writeReplacement(key, expected, snapshot)
             case _ => writeIfAbsent(key, snapshot)
           }
-          writeConflict.map(_.toLeft(right = contentUpdated))
+          potentialWriteConflict.map(_.toLeft(right = true))
         } else {
           refresh(key, snapshot.revision, snapshot.tick).map(_ => Right(false))
         }
@@ -186,7 +182,7 @@ trait BlockingCASWrites[K, V, Conn] extends BlockingRecursiveUpsert[K, V] {
 
   def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
-      implicit updateThunkEC: ExecutionContext): Future[(Option[Update], R)] = {
+      implicit updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
 
       // Write snapshot, if current expectation holds.
       def writeIfExpected(conn: Conn)(key: K, expected: Option[Snapshot], snapshot: Snapshot): Either[ConflictingSnapshot, ContentUpdated] = {
@@ -212,28 +208,38 @@ trait BlockingCASWrites[K, V, Conn] extends BlockingRecursiveUpsert[K, V] {
   }
 
 }
-
-class StreamProcessStoreAdapter[Ka, Va, Kb, Vb](
-    underlying: StreamProcessStore[Kb, Vb],
+class SnapshotStoreAdapter[Ka, Va, Kb, Vb](
+    underlying: SnapshotStore[Kb, Vb],
     keyAdapter: scuff.Codec[Ka, Kb],
     valueAdapter: scuff.Codec[Va, Vb])
-  extends StreamProcessStore[Ka, Va] {
+  extends SnapshotStore[Ka, Va] {
 
   import scuff.concurrent.Threads.PiggyBack
 
   @inline
-  private def ~>(k: Ka): Kb = keyAdapter encode k
+  protected final def ~>(k: Ka): Kb = keyAdapter encode k
   @inline
-  private def <~(k: Kb): Ka = keyAdapter decode k
+  protected final def ~>(s: Snapshot): delta.Snapshot[Vb] = s.map(valueAdapter.encode)
   @inline
-  private def ~>(s: Snapshot): delta.Snapshot[Vb] = s.map(valueAdapter.encode)
-  @inline
-  private def <~(s: delta.Snapshot[Vb]): Snapshot = s.map(valueAdapter.decode)
+  protected final def <~(s: delta.Snapshot[Vb]): Snapshot = s.map(valueAdapter.decode)
 
   def read(key: Ka): Future[Option[Snapshot]] =
     underlying.read(this ~> key).map(_.map(this.<~))(PiggyBack)
   def write(key: Ka, snapshot: Snapshot): Future[Unit] =
     underlying.write(this ~> key, this ~> snapshot)
+}
+
+class StreamProcessStoreAdapter[Ka, Va, Kb, Vb](
+    underlying: StreamProcessStore[Kb, Vb],
+    keyAdapter: scuff.Codec[Ka, Kb],
+    valueAdapter: scuff.Codec[Va, Vb])
+  extends SnapshotStoreAdapter[Ka, Va, Kb, Vb](underlying, keyAdapter, valueAdapter)
+  with StreamProcessStore[Ka, Va] {
+
+  import scuff.concurrent.Threads.PiggyBack
+
+  @inline
+  private def <~(k: Kb): Ka = keyAdapter decode k
 
   def readBatch(keys: Iterable[Ka]): Future[Map[Ka, Snapshot]] =
     underlying.readBatch(keys.map(this.~>)).map { map =>
@@ -260,13 +266,14 @@ class StreamProcessStoreAdapter[Ka, Va, Kb, Vb](
   def tickWatermark: Option[Long] = underlying.tickWatermark
 
   def upsert[R](key: Ka)(updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
-      implicit updateThunkEC: ExecutionContext): Future[(Option[Update], R)] = {
-    val foo = underlying.upsert[R](this ~> key) { snapshotB =>
+      implicit updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
+    val result = underlying.upsert[R](this ~> key) { snapshotB =>
       val snapshotA = snapshotB.map(this.<~)
       updateThunk(snapshotA).map(t => t._1.map(this.~>) -> t._2)
     }
-    foo.map {
-      case (opt, r) => opt.map(upd => Update(this <~ upd.snapshot, upd.contentUpdated)) -> r
+    result.map {
+      case (optUpd, r) =>
+        optUpd.map(upd => SnapshotUpdate(/*key,*/ this <~ upd.snapshot, upd.contentUpdated)) -> r
     }
   }
 }

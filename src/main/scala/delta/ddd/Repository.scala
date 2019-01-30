@@ -38,7 +38,7 @@ sealed trait Updates[ID, E] {
   type UM[_]
 
   protected def update[R](
-      expectedRevision: Revision, id: ID,
+      expectedRevision: Option[Int], id: ID,
       metadata:    Map[String, String],
       updateThunk: (E, Int) => Future[UT[R]]): Future[UM[R]]
 
@@ -52,10 +52,10 @@ sealed trait Updates[ID, E] {
     * @return New revision, or [[delta.ddd.UnknownIdException]] if unknown id.
     */
   final def update[R](
-      id: ID, expectedRevision: Revision = Revision.Latest, metadata: Map[String, String] = Map.empty)(
+      id: ID, expectedRevision: Option[Int] = None, metadata: Map[String, String] = Map.empty)(
       updateThunk: (E, Int) => Future[UT[R]]): Future[UM[R]] = {
     val proxy = (entity: E, revision: Int) => {
-      expectedRevision.validate(revision)
+      expectedRevision.filter(_ > revision).foreach(expected => throw new IllegalStateException(s"Expected revision $expected, for $id, is higher than actual revision of $revision"))
       updateThunk(entity, revision)
     }
     update(expectedRevision, id, metadata, proxy)
@@ -72,7 +72,7 @@ sealed trait Updates[ID, E] {
   final def update[R](
       id: ID, metadata: Map[String, String])(
       updateThunk: (E, Int) => Future[UT[R]]): Future[UM[R]] =
-    update(id, Revision.Latest, metadata)(updateThunk)
+    update(id, None, metadata)(updateThunk)
 
 }
 

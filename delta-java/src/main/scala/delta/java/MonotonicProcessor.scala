@@ -9,11 +9,8 @@ import java.util.Optional
 
 /** Monotonic processor. */
 abstract class MonotonicProcessor[ID, EVT, S >: Null](
-    processStore: StreamProcessStore[ID, S],
-    evtClass: Class[_ <: EVT])
-  extends delta.util.MonotonicProcessor[ID, EVT, S](
-    processStore)(
-    ClassTag(evtClass))
+    protected val processStore: StreamProcessStore[ID, S])
+  extends delta.util.MonotonicProcessor[ID, EVT, S]
   with LiveProcessor[ID, EVT]
 
 /** Monotonic replay processor. */
@@ -29,11 +26,9 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null](
 
 /** Monotonic processor with join state. */
 abstract class JoinStateProcessor[ID, EVT, S >: Null, JS >: Null <: S](
-    processStore: StreamProcessStore[ID, S],
-    evtClass: Class[_ <: EVT])
-  extends MonotonicProcessor[ID, EVT, S](
-    processStore, evtClass)
-  with delta.util.JoinStateProcessor[ID, EVT, S, JS]
+    processStore: StreamProcessStore[ID, S])
+  extends MonotonicProcessor[ID, EVT, S](processStore)
+  with delta.util.MonotonicJoinState[ID, EVT, S, JS]
 
 /** Monotonic replay processor with join state. */
 abstract class JoinStateReplayProcessor[ID, EVT, S >: Null, JS >: Null <: S](
@@ -42,10 +37,10 @@ abstract class JoinStateReplayProcessor[ID, EVT, S >: Null, JS >: Null <: S](
     evtClass: Class[_ <: EVT])
   extends MonotonicReplayProcessor[ID, EVT, S](
     processStore, completionTimeout, completionUnit, evtClass)
-  with delta.util.JoinStateProcessor[ID, EVT, S, JS] {
+  with delta.util.MonotonicJoinState[ID, EVT, S, JS] {
 
-  protected def preprocess(streamId: ID, streamRevision: Int, tick: Long, evt: EVT): Map[ID, Processor] = {
-    preprocessEvent(streamId, streamRevision, tick, evt) match {
+  protected def join(streamId: ID, streamRevision: Int, tick: Long, evt: EVT, metadata: Map[String, String]): Map[ID, Processor] = {
+    joinEvent(streamId, streamRevision, tick, evt, metadata) match {
       case null => Map.empty
       case jmap => jmap.entrySet.iterator.asScala.foldLeft(Map.empty[ID, Processor]) {
         case (map, entry) => map.updated(entry.getKey, entry.getValue)
@@ -54,10 +49,10 @@ abstract class JoinStateReplayProcessor[ID, EVT, S >: Null, JS >: Null <: S](
   }
 
   protected final def Processor(process: java.util.function.Function[Optional[JS], JS]): Processor = {
-    val adapter = (state: Option[JS]) => process.apply(Optional.ofNullable(state.orNull))
+    val adapter = (state: Option[JS]) => process(Optional.ofNullable(state.orNull))
     new Processor(adapter)
   }
 
-  protected def preprocessEvent(streamId: ID, streamRevision: Int, tick: Long, evt: EVT): java.util.Map[ID, Processor]
+  protected def joinEvent(streamId: ID, streamRevision: Int, tick: Long, evt: EVT, metadata: Map[String, String]): java.util.Map[ID, Processor]
 
 }

@@ -4,6 +4,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
 import delta.{ EventStore, SnapshotStore, Ticker }
+import delta.Transaction.Channel
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
 
@@ -11,11 +12,10 @@ import scuff.concurrent.StreamPromise
   * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
   * @tparam ESID Event store id type
   * @tparam EVT Repository event type
-  * @tparam CH Channel type
   * @tparam S Repository state type
   * @tparam RID Repository id type
   * @param channel The channel
-  * @param newMutator StateMutator constructor
+  * @param newState Wrap state
   * @param snapshots Snapshot store. Defaults to no-op.
   * @param assumeCurrentSnapshots Can snapshots from the snapshot store
   * be assumed to be current? I.e. are the snapshots available to all
@@ -27,8 +27,8 @@ import scuff.concurrent.StreamPromise
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param ticker Ticker implementation
   */
-class EventStoreRepository[ESID, EVT, CH, S >: Null, RID](
-    channel: String,
+class EventStoreRepository[ESID, EVT, S >: Null, RID](
+    channel: Channel,
     newState: S => State[S, EVT],
     snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
     assumeCurrentSnapshots: Boolean = false)(
@@ -52,7 +52,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID](
       expectedRevision: Option[Int],
       replayer: StreamConsumer[TXN, Any] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
     case class Builder(applyEventsAfter: Int, state: State[S, EVT], concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
-    val initBuilder = Builder(snapshot.map(_.revision) getOrElse -1, newState(snapshot.map(_.content).orNull))
+    val initBuilder = new Builder(snapshot.map(_.revision) getOrElse -1, newState(snapshot.map(_.content).orNull))
     val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
     val futureBuilt = StreamPromise.fold(initBuilder, replayer) {
       case (b, txn) =>
@@ -126,7 +126,7 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID](
     * specific aggregate.
     * Can be used for monitoring and reporting.
     */
-  protected def onUpdateCollision(id: RID, revision: Int, channel: String): Unit = ()
+  protected def onUpdateCollision(id: RID, revision: Int, channel: Channel): Unit = ()
 
   private def loadAndUpdate(
       id: RID, expectedRevision: Option[Int], metadata: Map[String, String],
@@ -155,9 +155,9 @@ class EventStoreRepository[ESID, EVT, CH, S >: Null, RID](
   }
 
   protected def update[_](
-      expectedRevision: Revision, id: RID,
+      expectedRevision: Option[Int], id: RID,
       metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
-    loadAndUpdate(id, expectedRevision.value, metadata, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
+    loadAndUpdate(id, expectedRevision, metadata, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
   } catch {
     case NonFatal(th) => Future failed th
   }

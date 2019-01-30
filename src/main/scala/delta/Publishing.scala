@@ -4,22 +4,35 @@ import scala.concurrent.Future
 import scuff.Subscription
 
 /**
-  * Enable pub/sub of transactions.
-  */
+ * Enable pub/sub of transactions.
+ */
 trait Publishing[ID, EVT]
   extends EventStore[ID, EVT] {
 
-  protected def publisher: Publisher[ID, EVT]
+  protected type Namespace = MessageHub.Namespace
+  protected def Namespace(str: String) = MessageHub.Namespace(str)
+  protected def toNamespace(ch: Channel): Namespace
+  protected def txnHub: MessageHub[TXN]
+  protected def txnChannels: Set[Channel]
 
   abstract final override def commit(
-      channel: String, stream: ID, revision: Int, tick: Long,
+      channel: Channel, stream: ID, revision: Int, tick: Long,
       events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     val txn = super.commit(channel, stream, revision, tick, events, metadata)
-    publisher.publish(txn)
+    txnHub.publish(toNamespace(channel), txn)
     txn
   }
 
-  override def subscribe[U](selector: CompleteSelector)(callback: TXN => U): Subscription =
-    publisher.subscribe(selector.include, callback, selector.channelSubset)
+  override def subscribe[U](selector: CompleteSelector)(callback: TXN => U): Subscription = {
+    val pfCallback = new PartialFunction[TXN, U] {
+      def isDefinedAt(txn: TXN) = true
+      def apply(txn: TXN) = callback(txn)
+    }
+    val channels = {
+      val channelSubset = selector.channelSubset
+      if (channelSubset.isEmpty) txnChannels else channelSubset
+    }
+    txnHub.subscribe[U](channels.map(toNamespace))(pfCallback)
+  }
 
 }

@@ -10,7 +10,7 @@ import delta.EventStore
 import delta.jdbc._
 import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
-import delta.util.LocalPublisher
+import delta.util.LocalHub
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
 import delta.Publishing
@@ -20,7 +20,7 @@ object TestCollege {
   val ds = {
     val ds = new MysqlDataSource
     ds.setUser("root")
-    ds setUrl s"jdbc:mysql://localhost/$db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&autoReconnect=true"
+    ds setUrl s"jdbc:mysql://localhost/$db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&autoReconnect=true&useSSL=false"
     ds
   }
   @AfterClass
@@ -50,7 +50,9 @@ class TestCollege extends college.TestCollege {
     val sql = new MySQLDialect[Int, CollegeEvent, Array[Byte]]
     new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
       sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
-      val publisher = new LocalPublisher[Int, CollegeEvent](RandomDelayExecutionContext)
+      def toNamespace(ch: Channel) = Namespace(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       protected def dataSource = ds
     }.ensureSchema()
   }

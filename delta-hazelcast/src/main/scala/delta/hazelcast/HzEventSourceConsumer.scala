@@ -2,7 +2,6 @@ package delta.hazelcast
 
 import delta.util.EventSourceConsumer
 import com.hazelcast.core.IMap
-import scuff.Codec
 import scala.concurrent._
 import scala.concurrent.duration._
 import scuff.concurrent.PartitionedExecutionContext
@@ -18,10 +17,9 @@ import delta.Snapshot
  * @tparam WS The working state type
  * @tparam RS The resting state type
  */
-abstract class HzEventSourceConsumer[ID, EVT: ClassTag, WS >: Null, RS >: Null](
-    protected val imap: IMap[ID, EntryState[RS, EVT]],
-    stateCodec: Codec[RS, WS],
-    reducer: EventReducer[WS, EVT],
+abstract class HzEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
+    protected val imap: IMap[ID, EntryState[S, EVT]],
+    reducer: EventReducer[S, EVT],
     protected val tickWatermark: Option[Long],
     replayProcessingCompletionTimeout: FiniteDuration,
     scheduler: ScheduledExecutorService)
@@ -47,8 +45,8 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, WS >: Null, RS >: Null](
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newReplayMap: collection.concurrent.Map[ID, Snapshot[WS]] =
-    new java.util.concurrent.ConcurrentHashMap[ID, Snapshot[WS]].asScala
+  protected def newReplayMap: collection.concurrent.Map[ID, Snapshot[S]] =
+    new java.util.concurrent.ConcurrentHashMap[ID, Snapshot[S]].asScala
 
   /**
     * Called at startup, when replay processing of
@@ -73,21 +71,20 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, WS >: Null, RS >: Null](
 
   private[this] val reduce = EventReducer.process(reducer) _
   protected def replayProcessor(es: ES) =
-    new HzMonotonicReplayProcessor[ID, EVT, WS, RS](
+    new HzMonotonicReplayProcessor[ID, EVT, S](
       imap,
-      stateCodec,
       replayProcessingCompletionTimeout,
       executionContext,
       newPartitionedExecutionContext,
       newReplayMap) {
-    def process(txn: TXN, currState: Option[WS]): WS = reduce(currState, txn.events)
+    def process(txn: TXN, currState: Option[S]): S = reduce(currState, txn.events)
   }
 
-  protected def missingRevisionsReplayDelay: FiniteDuration = 1111.milliseconds
+  protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis
 
   protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => _ = {
-    new HzMonotonicProcessor[ID, EVT, WS, RS](
-      es, imap, stateCodec, reducer, reportFailure,
+    new HzMonotonicProcessor[ID, EVT, S](
+      es, imap, reducer, reportFailure,
       scheduler, missingRevisionsReplayDelay)
   }
 

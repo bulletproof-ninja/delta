@@ -3,7 +3,7 @@ package delta.util
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
 
-import delta.ddd.{ DuplicateIdException, Repository, Revision, UnknownIdException }
+import delta.ddd.{ DuplicateIdException, Repository, UnknownIdException }
 import scuff.concurrent.{ Threads }
 import delta.ddd.ImmutableEntity
 
@@ -31,7 +31,7 @@ class ConcurrentMapRepository[K, V <: AnyRef](
     }
   }
 
-  private def tryUpdate[R](id: K, expectedRevision: Revision, metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] = {
+  private def tryUpdate[R](id: K, expectedRevision: Option[Int], metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] = {
     map.get(id) match {
       case None => Future failed new UnknownIdException(id)
       case Some(oldE @ (ar, rev)) =>
@@ -47,7 +47,7 @@ class ConcurrentMapRepository[K, V <: AnyRef](
   }
 
   def update[_](
-      expectedRevision: Revision, id: K,
+      expectedRevision: Option[Int], id: K,
       metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] =
     Future(tryUpdate(id, expectedRevision, metadata, updateThunk)).flatMap(identity)
 

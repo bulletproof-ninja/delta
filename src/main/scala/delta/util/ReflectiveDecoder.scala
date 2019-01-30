@@ -2,64 +2,83 @@ package delta.util
 
 import scala.reflect.{ ClassTag, classTag }
 import java.lang.reflect.Method
-import delta.EventCodec
+import delta.EventFormat
 import scala.compat.Platform
-import delta.NoVersioning
 import java.util.{ HashMap => JMap }
 import scala.reflect.NameTransformer
+import java.lang.reflect.InvocationTargetException
+import delta.Transaction
+
+object ReflectiveDecoder {
+  sealed trait DecoderMethodMatch
+  case object MatchOnReturnType extends DecoderMethodMatch
+  case object MatchOnMethodName extends DecoderMethodMatch
+
+  def matchOnMethodName = MatchOnMethodName
+  def matchOnReturnType = MatchOnReturnType
+}
 
 /**
-  * Will look for event decode methods, which must match
-  * the following signature:
-  *
-  *  - For versioned events (default), the method must have two
-  *    arguments, 1. `Byte`, 2. `SF` (the encoding format)
-  * - For [[delta.util.NoVersioning]] events, the method must take a single
-  *   argument, `SF`.
-  *
-  * This is a convenience trait to allow encoding and decoding of events
-  * to be in the same file, without the having to rely on symmetric traits.
-  * Encoder methods and decoder methods are matched upon instantiation, thus
-  * fail-fast runtime failure at startup.
-  */
-abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (channel: Option[String])
-  extends EventCodec[EVT, SF] {
+ * Will look for event decoder methods, which must match
+ * the supplied decoder signature, i.e. a single argument method
+ * taking [[delta.EventFormat.Encoded]] instance and returning
+ * an event.
+ *
+ * This is a convenience trait to allow encoding and decoding of events
+ * to be in the same file, without the having to rely on symmetric traits.
+ * Encoder methods and decoder methods are matched upon instantiation, thus
+ * fail-fast runtime failure at startup.
+ */
+abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (
+    decoderMatch: ReflectiveDecoder.DecoderMethodMatch,
+    exclusiveChannel: Option[Transaction.Channel])
+  extends EventFormat[EVT, SF] {
 
-  protected def this() = this(None)
-  protected def this(channel: String) = this(Option(channel))
+  import ReflectiveDecoder._
 
-  /**
-    * Is method name == event name?
-    *
-    * If `true` then it's possible to have multiple
-    * methods decode to the same event. This is helpful
-    * when using deprecated events that are upgraded to
-    * new event type.
-    * If `false` then method name is ignored, but return
-    * type defines which event the method decodes.
-    */
-  protected def isMethodNameEventName: Boolean = false
-  private def eventName(method: Method): String =
-    if (isMethodNameEventName) NameTransformer decode method.getName
-    else this name method.getReturnType.asInstanceOf[Class[EVT]]
+  protected def this() =
+    this(ReflectiveDecoder.MatchOnReturnType, None)
+  protected def this(exclusiveChannel: Transaction.Channel) =
+    this(ReflectiveDecoder.MatchOnReturnType, Option(exclusiveChannel))
+  protected def this(decoderSig: ReflectiveDecoder.DecoderMethodMatch) =
+    this(decoderSig, None)
+  protected def this(decoderSig: ReflectiveDecoder.DecoderMethodMatch, exclusiveChannel: Transaction.Channel) =
+    this(decoderSig, Option(exclusiveChannel))
 
-  private def decoder(evtName: String, data: SF, version: Byte = NoVersioning.NoVersion): EVT = {
-    val isVersioned = version != NoVersioning.NoVersion
-    decoderMethods.get(evtName) match {
-      case null =>
-        val versionArg = if (isVersioned) "version: Byte, " else ""
-        val methodName = if (isMethodNameEventName) evtName else "someMethodName"
-        val returnType = encoderEvents.get(evtName).map(_.getSimpleName) getOrElse s"_ <: ${classTag[EVT].runtimeClass.getSimpleName}"
-        val signature = s"def $methodName(${versionArg}data: ${classTag[SF].runtimeClass.getName}): $returnType"
-        val message = s"""No decoding method found for event "$evtName". Must match the following signature: $signature"""
-        throw new IllegalStateException(message)
-      case method => {
-        if (isVersioned) method.invoke(this, Byte box version, data)
-        else method.invoke(this, data)
-      }.asInstanceOf[EVT]
+  private[this] val getEventName: (Method => String) = {
+    decoderMatch match {
+      case MatchOnMethodName => (method) => NameTransformer decode method.getName
+      case MatchOnReturnType => (method) => signature(method.getReturnType.asInstanceOf[Class[EVT]]).name
     }
   }
-  private def encoderEvents =
+
+  private final class Decoder(method: Method) {
+    def apply(encoded: Encoded): EVT = {
+      try method.invoke(ReflectiveDecoder.this, encoded).asInstanceOf[EVT] catch {
+        case ite: InvocationTargetException => ite.getCause match {
+          case th: Throwable => throw th
+          case _ => throw ite
+        }
+        case t: Throwable => throw t
+
+      }
+    }
+    override def toString() = method.toString()
+  }
+
+  private def tryDecode(encoded: Encoded): EVT = {
+    decoders.get(encoded.name) match {
+      case null =>
+        val methodName = if (decoderMatch == MatchOnMethodName) s"`${encoded.name}`" else "decodeMethod"
+        val returnType = encoderEvents.get(encoded.name).map(_.getSimpleName) getOrElse s"_ <: ${classTag[EVT].runtimeClass.getSimpleName}"
+        val arg = classOf[Encoded].getSimpleName
+        val signature = s"def $methodName($arg): $returnType"
+        val message = s"""No decoding method found for event "${encoded.name}". Expected signature: $signature"""
+        throw new IllegalStateException(message)
+      case decoder => decoder(encoded)
+    }
+  }
+  private def encoderEvents: Map[String, EventClass] =
     getClass.getMethods.flatMap { m =>
       val EvtClass = classTag[EVT].runtimeClass
       val FmtClass = classTag[SF].runtimeClass
@@ -69,25 +88,20 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
         EvtClass != argTypes(0) &&
         FmtClass.isAssignableFrom(m.getReturnType)) {
         val evtType = argTypes(0).asInstanceOf[Class[EVT]]
-        Some(this.name(evtType) -> evtType)
+        Some(signature(evtType).name -> evtType)
       } else None
     }.toMap
 
-  private lazy val decoderMethods: JMap[String, Method] = {
-    val noVersion = this.isInstanceOf[NoVersioning[_, _]]
-    val argCount = if (noVersion) 1 else 2
-    val ByteClass = classOf[Byte]
+  private lazy val decoders: JMap[String, Decoder] = {
     val EvtClass = classTag[EVT].runtimeClass
-    val FmtClass = classTag[SF].runtimeClass
-    val decoderMethodsWithName = getClass.getMethods.filter { m =>
-      val argTypes = m.getParameterTypes
-      argTypes.length == argCount &&
-        argTypes(argCount - 1).isAssignableFrom(FmtClass) &&
-        (noVersion || argTypes(0) == ByteClass) &&
+    val decoderMethodsWithName: Seq[(String, Method)] = getClass.getMethods.filter { m =>
+      val parmTypes = m.getParameterTypes
+      parmTypes.length == 1 &&
+        classOf[Encoded].isAssignableFrom(parmTypes(0)) &&
         EvtClass.isAssignableFrom(m.getReturnType)
-    }.map(m => eventName(m) -> m)
+    }.map(m => getEventName(m) -> m)
     // When using return type, there can be more than one decoder. Verify there's not.
-    if (!isMethodNameEventName) {
+    if (decoderMatch == MatchOnReturnType) {
       decoderMethodsWithName.groupBy(_._1).toSeq.filter(_._2.size > 1).headOption.foreach {
         case (evtName, methods) =>
           val nlIndent = Platform.EOL + "\t"
@@ -96,32 +110,33 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
             s"""Event "$evtName" has ambiguous decoding by the following methods:$methodsString""")
       }
     }
-    val decoderMethodsByName = decoderMethodsWithName.foldLeft(new JMap[String, Method]) {
-      case (map, (name, method)) => map.put(name, method); map
+    val decodersByName = decoderMethodsWithName.foldLeft(new JMap[String, Decoder]) {
+      case (map, (name, method)) => map.put(name, new Decoder(method)); map
     }
-    assert(decoderMethodsByName.size == decoderMethodsWithName.size)
-    val missingDecoders = encoderEvents.keys.filterNot(decoderMethodsByName.containsKey)
+
+    val missingDecoders = encoderEvents.keys.filterNot(decodersByName.containsKey)
     if (missingDecoders.nonEmpty) {
       val missing = missingDecoders.mkString("[", ", ", "]")
-      throw new IllegalStateException(s"No decoder methods found in ${getClass} for events $missing")
+      val methodName = if (decoderMatch == MatchOnMethodName) "`<event-name>`" else "decodeMethod"
+      val returnType = s"${classTag[EVT].runtimeClass.getSimpleName}"
+      val arg = classOf[Encoded].getSimpleName
+      val signature = s"def $methodName($arg): $returnType"
+      throw new IllegalStateException(s"No decoder methods found in ${getClass} for events $missing. Expected signature: $signature")
     }
-    decoderMethodsByName
+    decodersByName
   }
 
-  private[this] val channelOrNull = channel.orNull
+  private[this] val channelOrNull: Channel = exclusiveChannel getOrElse null.asInstanceOf[Channel]
   @inline
-  private def verifyChannel(channel: String, event: String): Unit = {
-    if (channelOrNull != null && channelOrNull != channel) {
-      throw new IllegalStateException(s"${classOf[ReflectiveDecoder[_, _]].getName} instance ${getClass.getName}, dedicated to events from ${channelOrNull}, is being asked to decode event '$event' from channel '$channel'")
+  private def verifyChannel(encoded: Encoded): Unit = {
+    if (channelOrNull != null && channelOrNull != encoded.channel) {
+      throw new IllegalStateException(s"${classOf[ReflectiveDecoder[_, _]].getName} instance ${getClass.getName}, dedicated to events from ${channelOrNull}, is being asked to decode event '${encoded.name}' from channel '${encoded.channel}'")
     }
   }
-  def decode(channel: String, name: String, version: Byte, data: SF): EVT = {
-    verifyChannel(channel, name)
-    decoder(name, data, version)
-  }
-  def decode(channel: String, name: String, data: SF) = {
-    verifyChannel(channel, name)
-    decoder(name, data)
+
+  def decode(encoded: Encoded): EVT = {
+    verifyChannel(encoded)
+    tryDecode(encoded)
   }
 
 }

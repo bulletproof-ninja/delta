@@ -10,11 +10,10 @@ final class State[S >: Null, EVT] private[ddd] (reducer: EventReducer[S, EVT], p
 
   @inline
   private[ddd] final def mutate(evt: EVT): Unit = reduce(evt)
-  private[this] var _applied = List.empty[EVT]
-  private[ddd] final def appliedEvents = _applied match {
-    case one @ _ :: Nil => one
-    case more => more.reverse
-  }
+  private[this] var _applied: List[EVT] = Nil
+  private[ddd] final def appliedEvents =
+    if (_applied.isEmpty || _applied.tail.isEmpty) _applied
+    else _applied.reverse
 
   @inline
   private def reduce(evt: EVT): Unit = {

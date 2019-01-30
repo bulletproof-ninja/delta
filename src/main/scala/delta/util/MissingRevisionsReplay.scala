@@ -17,8 +17,8 @@ trait MissingRevisionsReplay[ID, EVT] {
 
   private[this] val outstandingReplays = new TrieMap[ID, (Range, ScheduledFuture[_])]
   protected def onMissingRevisions(
-      es: EventSource[ID, _ >: EVT], scheduler: ScheduledExecutorService, reportFailure: Throwable => Unit)(
-      id: ID, missing: Range, replayDelay: FiniteDuration)(replayProcess: Transaction[ID, _ >: EVT] => _): Unit = {
+      es: EventSource[ID, _ >: EVT], replayDelay: FiniteDuration, scheduler: ScheduledExecutorService, reportFailure: Throwable => Unit)(
+      id: ID, missing: Range)(replayProcess: Transaction[ID, _ >: EVT] => _): Unit = {
     val missingAdjusted: Option[Range] = outstandingReplays.lookup(id) match {
       case null => Some(missing)
       case existing @ (outstandingReplay, schedule) =>
@@ -34,13 +34,13 @@ trait MissingRevisionsReplay[ID, EVT] {
         }
     }
     missingAdjusted.foreach {
-      scheduleRevisionsReplay(id, _, es, scheduler, replayDelay, replayProcess, reportFailure)
+      scheduleRevisionsReplay(id, _, es, scheduler, replayDelay, reportFailure, replayProcess)
     }
   }
 
   private type TXN = Transaction[ID, _ >: EVT]
 
-  private def scheduleRevisionsReplay(id: ID, missing: Range, es: EventSource[ID, _ >: EVT], scheduler: ScheduledExecutorService, replayDelay: FiniteDuration, replayProcess: TXN => _, reportFailure: Throwable => Unit): Unit = {
+  private def scheduleRevisionsReplay(id: ID, missing: Range, es: EventSource[ID, _ >: EVT], scheduler: ScheduledExecutorService, replayDelay: FiniteDuration, reportFailure: Throwable => Unit, replayProcess: TXN => _): Unit = {
     val replayConsumer = new StreamConsumer[TXN, Unit] {
       def onNext(txn: TXN) = replayProcess(txn)
       def onError(th: Throwable) = {

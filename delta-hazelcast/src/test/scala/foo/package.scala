@@ -1,17 +1,16 @@
-import delta.EventCodec
-import delta.NoVersioning
+import delta.EventFormat
 import scuff.JavaSerializer
 
 package object foo {
-  implicit object BinaryEventCodec
-    extends EventCodec[MyEvent, Array[Byte]]
-    with NoVersioning[MyEvent, Array[Byte]] {
+  implicit object BinaryEventFormat
+    extends EventFormat[MyEvent, Array[Byte]] {
 
+    protected def getVersion(cls: EventClass) = NoVersion
     protected def getName(cls: EventClass): String = cls.getName
 
     def encode(evt: MyEvent): Array[Byte] = JavaSerializer.encode(evt)
-    def decode(channel: String, name: String, data: Array[Byte]): MyEvent =
-      JavaSerializer.decode(data).asInstanceOf[MyEvent]
+    def decode(encoded: Encoded): MyEvent =
+      JavaSerializer.decode(encoded.data).asInstanceOf[MyEvent]
 
   }
 }
