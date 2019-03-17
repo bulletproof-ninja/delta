@@ -36,7 +36,7 @@ private abstract class EventStoreProxy[ID, EVT](
     case Everything => evtStore.Everything
     case ChannelSelector(channels) => evtStore.ChannelSelector(channels)
     case EventSelector(events) => evtStore.EventSelector(events)
-    case StreamSelector(stream, channel) => evtStore.StreamSelector.apply(stream, channel)
+    case SingleStreamSelector(stream, channel) => evtStore.SingleStreamSelector.apply(stream, channel)
   }
 
   def currRevision(stream: ID) = evtStore.currRevision(stream)
@@ -45,11 +45,11 @@ private abstract class EventStoreProxy[ID, EVT](
     evtStore.query(selector)(callback)
   def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, U]): Unit =
     evtStore.querySince(sinceTick, selector)(callback)
-  def replayStream[E >: EVT, U](stream: ID)(callback: StreamConsumer[Transaction[ID, E], U]): Unit =
+  def replayStream[U](stream: ID)(callback: StreamConsumer[TXN, U]): Unit =
     evtStore.replayStream(stream)(callback)
-  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction[ID, E], U]): Unit =
+  def replayStreamFrom[U](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, U]): Unit =
     evtStore.replayStreamFrom(stream, fromRevision)(callback)
-  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction[ID, E], U]): Unit =
+  def replayStreamRange[U](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, U]): Unit =
     evtStore.replayStreamRange(stream, revisionRange)(callback)
 
   def commit(channel: Channel, stream: ID, revision: Int, tick: Long,

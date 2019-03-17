@@ -84,13 +84,13 @@ abstract class TransientEventStore[ID, EVT, SF](
     }
   }
 
-  def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit = withCallback(callback) {
+  def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit = withCallback(callback) {
     val txns = txnMap.getOrElse(stream, Vector.empty)
     txns.map(_.toTransaction).foreach(callback.onNext)
   }
-  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit =
+  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit =
     replayStreamRange(stream, fromRevision to Int.MaxValue)(callback)
-  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: collection.immutable.Range)(callback: StreamReplayConsumer[E, U]): Unit = withCallback(callback) {
+  def replayStreamRange[R](stream: ID, revisionRange: collection.immutable.Range)(callback: StreamConsumer[TXN, R]): Unit = withCallback(callback) {
     val txns = txnMap.getOrElse(stream, Vector.empty)
     val sliced = revisionRange.last match {
       case Int.MaxValue => txns.drop(revisionRange.head)

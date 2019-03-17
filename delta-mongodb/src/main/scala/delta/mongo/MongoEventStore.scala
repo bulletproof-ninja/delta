@@ -119,18 +119,18 @@ class MongoEventStore[ID: Codec, EVT](
     }(Threads.PiggyBack) // map revision on the same thread
   }
 
-  def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit = {
+  def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit = {
     queryWith(new Document("_id.stream", stream), callback, OrderByRevision)
   }
 
-  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit = {
+  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit = {
     val filter = new Document("_id.stream", stream)
     if (fromRevision > 0) {
       filter.append("_id.rev", new Document("$gte", fromRevision))
     }
     queryWith(filter, callback, OrderByRevision)
   }
-  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: collection.immutable.Range)(callback: StreamReplayConsumer[E, U]): Unit = {
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, R]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val filter = new Document("_id.stream", stream)
     val from = revisionRange.head

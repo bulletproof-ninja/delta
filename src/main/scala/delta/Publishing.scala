@@ -23,15 +23,18 @@ trait Publishing[ID, EVT]
     txn
   }
 
-  override def subscribe[U](selector: CompleteSelector)(callback: TXN => U): Subscription = {
+  override def subscribe[U](selector: StreamsSelector)(callback: TXN => U): Subscription = {
+
     val pfCallback = new PartialFunction[TXN, U] {
       def isDefinedAt(txn: TXN) = true
       def apply(txn: TXN) = callback(txn)
     }
+
     val channels = {
       val channelSubset = selector.channelSubset
       if (channelSubset.isEmpty) txnChannels else channelSubset
     }
+
     txnHub.subscribe[U](channels.map(toNamespace))(pfCallback)
   }
 

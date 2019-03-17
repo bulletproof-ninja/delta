@@ -165,7 +165,7 @@ class JdbcEventStore[ID, EVT, SF](
     }
   }
 
-  def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit =
+  def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit =
     FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamFull(stream) {
@@ -176,7 +176,7 @@ class JdbcEventStore[ID, EVT, SF](
         }
       }
     }
-  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: Range)(callback: StreamReplayConsumer[E, U]): Unit =
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, R]): Unit =
     FutureWith(callback) {
       forQuery { implicit conn =>
         dialect.selectStreamRange(stream, revisionRange) {
@@ -187,7 +187,7 @@ class JdbcEventStore[ID, EVT, SF](
         }
       }
     }
-  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit =
+  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit =
     if (fromRevision == 0) replayStream(stream)(callback)
     else FutureWith(callback) {
       forQuery { implicit conn =>
@@ -207,7 +207,7 @@ class JdbcEventStore[ID, EVT, SF](
           case Everything => dialect.selectTransactions() _
           case ChannelSelector(channels) => dialect.selectTransactionsByChannels(channels) _
           case EventSelector(byChannel) => dialect.selectTransactionsByEvents(byChannel) _
-          case StreamSelector(id, _) => dialect.selectStreamFull(id) _
+          case SingleStreamSelector(id, _) => dialect.selectStreamFull(id) _
         }
         select {
           case (rs, col) =>
@@ -228,7 +228,7 @@ class JdbcEventStore[ID, EVT, SF](
             (None, (callback.onNext _), dialect.selectTransactionsByChannels(channels, sinceTick) _)
           case EventSelector(byChannel) =>
             (None, (callback.onNext _), dialect.selectTransactionsByEvents(byChannel, sinceTick) _)
-          case StreamSelector(id, _) =>
+          case SingleStreamSelector(id, _) =>
             val onNext = (txn: TXN) => if (txn.tick >= sinceTick) callback.onNext(txn)
             (Some(id), onNext, dialect.selectStreamFull(id) _)
         }

@@ -299,7 +299,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
-  def replayStream[E >: EVT, U](stream: ID)(callback: StreamReplayConsumer[E, U]): Unit = {
+  def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit = {
     val stm = ReplayStream(stream)
     queryAsync(Some(stream), callback, stm)
   }
@@ -309,7 +309,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, fromRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
   }
-  def replayStreamFrom[E >: EVT, U](stream: ID, fromRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit = {
+  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit = {
     if (fromRevision == 0) {
       replayStream(stream)(callback)
     } else {
@@ -323,7 +323,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, toRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
   }
-  override def replayStreamTo[E >: EVT, U](stream: ID, toRevision: Int)(callback: StreamReplayConsumer[E, U]): Unit = {
+  override def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[TXN, R]): Unit = {
     val stm = ReplayStreamTo(stream, toRevision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -342,7 +342,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ps.bind(ct[ID].writeAs(id), first, last)
     }
   }
-  def replayStreamRange[E >: EVT, U](stream: ID, revisionRange: Range)(callback: StreamReplayConsumer[E, U]): Unit = {
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, R]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val from = revisionRange.head
     val to = revisionRange.last
@@ -477,7 +477,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
             evtTypes.toSeq.map(replayByEvent curried ch)
         }
       }
-      case StreamSelector(id, _) => Left(id -> ReplayStream(id))
+      case SingleStreamSelector(id, _) => Left(id -> ReplayStream(id))
     }
   }
 
