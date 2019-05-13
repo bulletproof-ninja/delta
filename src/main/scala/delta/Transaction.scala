@@ -17,12 +17,12 @@ final case class Transaction[+ID, +EVT](
     Transaction.Serialization.readObject[ID, EVT](inp) {
       case (tick, ch, id, rev, metadata, events) =>
         val surgeon = new scuff.reflect.Surgeon(this)
-        surgeon.set('tick, tick)
-        surgeon.set('channel, ch)
-        surgeon.set('stream, id)
-        surgeon.set('revision, rev)
-        surgeon.set('metadata, metadata)
-        surgeon.set('events, events)
+        surgeon.tick = tick
+        surgeon.channel = ch
+        surgeon.stream = id
+        surgeon.revision = rev
+        surgeon.metadata = metadata
+        surgeon.events = events
         this
     }
   }

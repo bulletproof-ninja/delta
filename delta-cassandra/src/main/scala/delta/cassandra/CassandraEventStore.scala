@@ -12,7 +12,7 @@ import scala.util.control.NonFatal
 
 import com.datastax.driver.core._
 
-import scuff.{ Memoizer, StreamConsumer}
+import scuff.{ Memoizer, StreamConsumer }
 import scuff.concurrent._
 import delta.{ EventFormat, EventStore }
 import delta.Transaction.Channel
@@ -20,7 +20,7 @@ import delta.Transaction.Channel
 private[cassandra] object CassandraEventStore {
 
   private def ensureTable[ID: ColumnType, SF: ColumnType](
-    session: Session, keyspace: String, table: String, replication: Map[String, Any]): Unit = {
+      session: Session, keyspace: String, table: String, replication: Map[String, Any]): Unit = {
     val replicationStr = replication.map {
       case (key, str: CharSequence) => s"'$key':'$str'"
       case (key, cls: Class[_]) => s"'$key':'${cls.getName}'"
@@ -51,10 +51,10 @@ private[cassandra] object CassandraEventStore {
   private val TxnColumnsIdx = Columns(TxnColumns.indexOf(_))
 
   private case class Columns(
-    stream_id: Int, revision: Int,
-    tick: Int, channel: Int,
-    event_names: Int, event_versions: Int, event_data: Int,
-    metadata: Int)
+      stream_id: Int, revision: Int,
+      tick: Int, channel: Int,
+      event_names: Int, event_versions: Int, event_data: Int,
+      metadata: Int)
   private object Columns {
     def apply(colIdx: String => Int): Columns = {
       new Columns(
@@ -77,16 +77,19 @@ trait TableDescriptor {
 }
 
 /**
-  * Cassandra event store implementation.
-  * WARNING: Not tested to any appreciable degree.
-  * @param exeCtx The internal execution context
-  * @param session The Cassandra session (connection pool)
-  * @param td The table descriptor
-  */
+ * Cassandra event store implementation.
+ * WARNING: Not tested to any appreciable degree.
+ * @param exeCtx The internal execution context
+ * @param session The Cassandra session (connection pool)
+ * @param td The table descriptor
+ */
 class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
-  session: Session,
-  td: TableDescriptor)(implicit exeCtx: ExecutionContext, evtFmt: EventFormat[EVT, SF])
-    extends EventStore[ID, EVT] {
+    session: Session, td: TableDescriptor,
+    evtFmt: EventFormat[EVT, SF],
+    exeCtx: ExecutionContext)
+  extends EventStore[ID, EVT] {
+
+  private implicit def ec = exeCtx
 
   import CassandraEventStore._
 
@@ -400,8 +403,8 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
   protected def insert(
-    channel: Channel, stream: ID, revision: Int, tick: Long,
-    events: List[EVT], metadata: Map[String, String])(
+      channel: Channel, stream: ID, revision: Int, tick: Long,
+      events: List[EVT], metadata: Map[String, String])(
       handler: ResultSet => TXN): Future[TXN] = {
     if (revision == 0) {
       val stm = RecordFirstRevision(stream, channel, tick, events, metadata)
@@ -415,8 +418,8 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
 
   def commit(
-    channel: Channel, stream: ID, revision: Int, tick: Long,
-    events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
+      channel: Channel, stream: ID, revision: Int, tick: Long,
+      events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     insert(channel, stream, revision, tick, events, metadata) { rs =>
       if (rs.wasApplied) {
         Transaction(tick, channel, stream, revision, metadata, events)

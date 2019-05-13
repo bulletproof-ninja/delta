@@ -13,7 +13,8 @@ import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalHub
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
-import delta.Publishing
+import delta.MessageHubPublishing
+import scuff.jdbc.ConnectionSource
 
 object TestSampler {
   val db = "delta_testing_sampler"
@@ -39,12 +40,15 @@ final class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     val sql = new MySQLDialect[Int, DomainEvent, JSON]
-    new JdbcEventStore(sql, RandomDelayExecutionContext) with Publishing[Int, DomainEvent] with DataSourceConnection {
-      def toNamespace(ch: Channel) = Namespace(s"txn-$ch")
-      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
-      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+    val cs = new ConnectionSource with DataSourceConnection {
+      def dataSource = TestSampler.ds
+    }
+    new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext) with MessageHubPublishing[Int, DomainEvent] {
+      def toTopic(ch: Channel) = Topic(s"txn-$ch")
+      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
+      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      protected def dataSource = TestSampler.ds
+      val txnCodec = scuff.Codec.noop
     }.ensureSchema()
   }
 

@@ -5,7 +5,7 @@ import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
 import org.bson.{ Document, BsonValue }
-import org.bson.codecs.{ Codec, DecoderContext, EncoderContext }
+import org.bson.codecs.{ Codec => BsonCodec, DecoderContext, EncoderContext }
 import org.bson.codecs.configuration.{ CodecRegistries, CodecRegistry }
 import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
 
@@ -21,12 +21,17 @@ import scala.annotation.varargs
 import com.mongodb.async.client.{ MongoClient, MongoClients }
 import collection.JavaConverters._
 import delta.Transaction.Channel
+import delta.Transaction
+import scala.util.Try
+import scala.util.Success
+import scala.util.Failure
+import org.bson.codecs.configuration.CodecConfigurationException
 
 object MongoEventStore {
   @varargs
   def getCollection(
     ns: MongoNamespace, settings: MongoClientSettings,
-    codecs: Codec[_]*): MongoCollection[Document] = {
+    codecs: BsonCodec[_]*): MongoCollection[Document] = {
     val client = MongoClients.create(settings)
     if (codecs.isEmpty) getCollection(ns, settings, client, settings.getCodecRegistry)
     else getCollection(ns, settings, client, CodecRegistries.fromCodecs(codecs: _*))
@@ -34,7 +39,7 @@ object MongoEventStore {
   @varargs
   def getCollection(
     ns: MongoNamespace, settings: MongoClientSettings, client: MongoClient,
-    codecs: Codec[_]*): MongoCollection[Document] = {
+    codecs: BsonCodec[_]*): MongoCollection[Document] = {
     if (codecs.isEmpty) getCollection(ns, settings, client, settings.getCodecRegistry)
     else getCollection(ns, settings, client, CodecRegistries.fromCodecs(codecs: _*))
   }
@@ -57,7 +62,7 @@ object MongoEventStore {
 }
 
 /**
-  * Stores events, using this format:
+  * Stores events, by default using this format:
   * {{{
   *   {
   *     _id: { // Indexed
@@ -74,40 +79,52 @@ object MongoEventStore {
   *   }
   * }}}
   */
-class MongoEventStore[ID: Codec, EVT](
-  dbColl: MongoCollection[Document])(implicit evtFmt: EventFormat[EVT, BsonValue])
+class MongoEventStore[ID: BsonCodec, EVT](
+  docCollection: MongoCollection[Document],
+  evtFmt: EventFormat[EVT, BsonValue],
+  overrideTransactionCodec: BsonCodec[Transaction[ID, EVT]])
     extends delta.EventStore[ID, EVT] {
 
-  protected val store = {
-    val txnCodec = new TransactionCodec(
-      dbColl.getCodecRegistry.get(classOf[BsonValue]).ensuring(_ != null, "No BsonValue codec found!"))
-    val registry = CodecRegistries.fromRegistries(
-      CodecRegistries.fromCodecs(
-        implicitly[Codec[ID]],
-        txnCodec),
-      dbColl.getCodecRegistry)
+  def this(docCollection: MongoCollection[Document], evtFmt: EventFormat[EVT, BsonValue]) =
+    this(docCollection, evtFmt, null)
 
-    val store = dbColl.withCodecRegistry(registry).withDocumentClass(classOf[TXN])
+  protected val txnCollection: MongoCollection[TXN] = {
+    val txnCodec = Option(overrideTransactionCodec) getOrElse new DefaultTransactionCodec(
+      docCollection.getCodecRegistry.get(classOf[BsonValue])
+        .ensuring(_ != null, "No BsonValue codec found in codec registry!"))
+    val registry = Try(docCollection.getCodecRegistry.get(classOf[TXN])) match {
+      case Success(_) =>
+        docCollection.getCodecRegistry
+      case Failure(_: CodecConfigurationException) =>
+        CodecRegistries.fromRegistries(
+          CodecRegistries.fromCodecs(
+            implicitly[BsonCodec[ID]],
+            txnCodec),
+          docCollection.getCodecRegistry)
+      case Failure(cause) => throw cause
+    }
+
+    val txnCollection = docCollection.withCodecRegistry(registry).withDocumentClass(classOf[TXN])
     withBlockingCallback[String]() {
-      store.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _)
+      txnCollection.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _)
     }
     withBlockingCallback[String]() {
-      store.createIndex(new Document("tick", 1), _)
+      txnCollection.createIndex(new Document("tick", 1), _)
     }
     withBlockingCallback[String]() {
-      store.createIndex(new Document("channel", 1), _)
+      txnCollection.createIndex(new Document("channel", 1), _)
     }
     withBlockingCallback[String]() {
-      store.createIndex(new Document("events.name", 1), _)
+      txnCollection.createIndex(new Document("events.name", 1), _)
     }
-    store
+    txnCollection
   }
 
   private[this] val OrderByRevision = new Document("_id.rev", 1)
 
   def currRevision(stream: ID): Future[Option[Int]] = {
     withFutureCallback[Document] { callback =>
-      store.find(new Document("_id.stream", stream), classOf[Document])
+      txnCollection.find(new Document("_id.stream", stream), classOf[Document])
         .projection(new Document("_id.rev", true))
         .sort(new Document("_id.rev", -1))
         .limit(1)
@@ -151,12 +168,12 @@ class MongoEventStore[ID: Codec, EVT](
     events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
     val txn = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
-      store.insertOne(txn, callback)
+      txnCollection.insertOne(txn, callback)
     }.map(_ => txn)(Threads.PiggyBack)
     insertFuture.recoverWith {
       case e: MongoWriteException if e.getError.getCategory == ErrorCategory.DUPLICATE_KEY =>
         withFutureCallback[TXN] { callback =>
-          store.find(new Document("_id.stream", stream).append("_id.rev", revision))
+          txnCollection.find(new Document("_id.stream", stream).append("_id.rev", revision))
             .limit(1)
             .first(callback)
         }.map(conflicting => throw new DuplicateRevisionException(conflicting.get))(Threads.PiggyBack)
@@ -173,17 +190,74 @@ class MongoEventStore[ID: Codec, EVT](
         else callback.onDone()
       }
     }
-    store.find(filter).sort(ordering).forEach(onTxn, onFinish)
+    txnCollection.find(filter).sort(ordering).forEach(onTxn, onFinish)
   }
 
-  private class TransactionCodec(bsonCodec: Codec[BsonValue])
-      extends Codec[TXN] {
+  def maxTick(): Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
+
+  private def getFirst[T](name: String, reverse: Boolean): Future[Option[T]] = {
+    withFutureCallback[Document] { callback =>
+      txnCollection.find(new Document, classOf[Document])
+        .projection(new Document(name, true).append("_id", false))
+        .sort(new Document(name, if (reverse) -1 else 1))
+        .limit(1)
+        .first(callback)
+    }.map { optDoc =>
+      optDoc.map(_.get(name).asInstanceOf[T])
+    }(Threads.PiggyBack) // map first on same thread
+  }
+
+  private def toJList[T](tr: Traversable[T]): java.util.List[T] = {
+    tr.foldLeft(new java.util.ArrayList[T](8)) {
+      case (list, t) =>
+        list add t
+        list
+    }
+  }
+
+  private def toDoc(streamFilter: Selector, docFilter: Document = new Document): Document = {
+    streamFilter match {
+      case Everything => // Ignore
+      case ChannelSelector(channels) =>
+        docFilter.append("channel", new Document("$in", toJList(channels)))
+      case EventSelector(byChannel) =>
+        val matchByChannel = byChannel.toSeq.map {
+          case (ch, eventTypes) =>
+            val matcher = new Document("channel", ch)
+            val evtNames = eventTypes.map(evtFmt.signature(_).name)
+            matcher.append("events.name", new Document("$in", toJList(evtNames)))
+        }
+        if (matchByChannel.size == 1) {
+          import collection.JavaConverters._
+          matchByChannel.head.asScala.foreach { entry =>
+            docFilter.append(entry._1, entry._2)
+          }
+        } else {
+          docFilter.append("$or", toJList(matchByChannel))
+        }
+      case SingleStreamSelector(id, _) =>
+        docFilter.append("_id.stream", id)
+    }
+    docFilter
+  }
+
+  def query[U](streamFilter: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
+    queryWith(toDoc(streamFilter), callback)
+  }
+
+  def querySince[U](sinceTick: Long, streamFilter: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
+    val docFilter = new Document("tick", new Document("$gte", sinceTick))
+    queryWith(toDoc(streamFilter, docFilter), callback)
+  }
+
+  private class DefaultTransactionCodec(bsonCodec: BsonCodec[BsonValue])
+      extends BsonCodec[TXN] {
 
     import org.bson.{ BsonReader, BsonType, BsonWriter }
     implicit def tag2class[T](tag: ClassTag[T]): Class[T] =
       tag.runtimeClass.asInstanceOf[Class[T]]
     def getEncoderClass = classOf[TXN]
-    private[this] val idCodec = implicitly[Codec[ID]]
+    private[this] val idCodec = implicitly[BsonCodec[ID]]
 
     private def writeDocument(writer: BsonWriter, name: String = null)(thunk: => Unit): Unit = {
       if (name != null) writer.writeStartDocument(name) else writer.writeStartDocument()
@@ -298,63 +372,6 @@ class MongoEventStore[ID: Codec, EVT](
       Transaction(tick, channel, id, rev, metadata, events)
     }
 
-  }
-
-  def maxTick(): Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
-
-  private def getFirst[T](name: String, reverse: Boolean): Future[Option[T]] = {
-    withFutureCallback[Document] { callback =>
-      store.find(new Document, classOf[Document])
-        .projection(new Document(name, true).append("_id", false))
-        .sort(new Document(name, if (reverse) -1 else 1))
-        .limit(1)
-        .first(callback)
-    }.map { optDoc =>
-      optDoc.map(_.get(name).asInstanceOf[T])
-    }(Threads.PiggyBack) // map first on same thread
-  }
-
-  private def toJList[T](tr: Traversable[T]): java.util.List[T] = {
-    tr.foldLeft(new java.util.ArrayList[T](8)) {
-      case (list, t) =>
-        list add t
-        list
-    }
-  }
-
-  private def toDoc(streamFilter: Selector, docFilter: Document = new Document): Document = {
-    streamFilter match {
-      case Everything => // Ignore
-      case ChannelSelector(channels) =>
-        docFilter.append("channel", new Document("$in", toJList(channels)))
-      case EventSelector(byChannel) =>
-        val matchByChannel = byChannel.toSeq.map {
-          case (ch, eventTypes) =>
-            val matcher = new Document("channel", ch)
-            val evtNames = eventTypes.map(evtFmt.signature(_).name)
-            matcher.append("events.name", new Document("$in", toJList(evtNames)))
-        }
-        if (matchByChannel.size == 1) {
-          import collection.JavaConverters._
-          matchByChannel.head.asScala.foreach { entry =>
-            docFilter.append(entry._1, entry._2)
-          }
-        } else {
-          docFilter.append("$or", toJList(matchByChannel))
-        }
-      case StreamSelector(id, _) =>
-        docFilter.append("_id.stream", id)
-    }
-    docFilter
-  }
-
-  def query[U](streamFilter: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
-    queryWith(toDoc(streamFilter), callback)
-  }
-
-  def querySince[U](sinceTick: Long, streamFilter: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
-    val docFilter = new Document("tick", new Document("$gte", sinceTick))
-    queryWith(toDoc(streamFilter, docFilter), callback)
   }
 
 }

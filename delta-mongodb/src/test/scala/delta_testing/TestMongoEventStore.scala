@@ -8,7 +8,7 @@ import delta.util._
 import delta.ddd._
 import delta.testing._
 import delta.EventFormat
-import delta.Publishing
+import delta.MessageHubPublishing
 import org.bson.BsonValue
 import org.bson.BsonString
 import org.bson.BsonInt32
@@ -38,7 +38,7 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   import org.bson.Document
   import delta.mongo._
 
-  implicit object MongoDBAggrEventCtx
+  object MongoDBAggrEventFmt
       extends ReflectiveDecoder[AggrEvent, BsonValue]
       with EventFormat[AggrEvent, BsonValue]
       with AggrEventHandler {
@@ -69,12 +69,13 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   def setup(): Unit = {
     val result = deleteAll()
     assertTrue(result.wasAcknowledged)
-    es = new MongoEventStore[String, AggrEvent](coll) with Publishing[String, AggrEvent] {
-      def toNamespace(ch: Channel) = Namespace(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+    es = new MongoEventStore[String, AggrEvent](coll, MongoDBAggrEventFmt) with MessageHubPublishing[String, AggrEvent] {
+      def toTopic(ch: Channel) = Topic(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txnCodec = scuff.Codec.noop
     }
-    repo = new EntityRepository(TheOneAggr)(es)
+    repo = new EntityRepository(TheOneAggr, ec)(es, ticker)
   }
   private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>

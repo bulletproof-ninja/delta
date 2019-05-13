@@ -9,6 +9,10 @@ import java.io.ByteArrayInputStream
 import java.sql.PreparedStatement
 
 package jdbc {
+  object VarBinaryColumn extends VarBinaryColumn("") {
+    def apply(maxLen: Int) = new VarBinaryColumn(maxLen)
+    def apply(len: String) = new VarBinaryColumn(len)
+  }
   class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
     def this(maxLen: Int) = this(maxLen.toString)
     val typeName = len match {
@@ -16,6 +20,10 @@ package jdbc {
       case _ => s"VARBINARY($len)"
     }
     def readFrom(row: ResultSet, col: Int) = row.getBytes(col)
+  }
+  object VarCharColumn extends VarCharColumn("") {
+    def apply(maxLen: Int) = new VarCharColumn(maxLen)
+    def apply(len: String) = new VarCharColumn(len)
   }
   class VarCharColumn(len: String = "") extends ColumnType[String] {
     def this(maxLen: Int) = this(maxLen.toString)
@@ -79,6 +87,14 @@ package object jdbc {
     def typeName = "INT"
     def readFrom(row: ResultSet, col: Int) = row.getInt(col)
   }
+  implicit object ShortColumn extends ColumnType[Short] {
+    def typeName = "SMALLINT"
+    def readFrom(row: ResultSet, col: Int) = row.getShort(col)
+  }
+  implicit object ByteColumn extends ColumnType[Byte] {
+    def typeName = "TINYINT"
+    def readFrom(row: ResultSet, col: Int) = row.getByte(col)
+  }
   implicit object BigIntegerColumn extends ColumnType[BigInteger] {
     def typeName = "NUMERIC"
     def readFrom(row: ResultSet, col: Int): BigInteger = row.getBigDecimal(col).toBigInteger
@@ -96,6 +112,11 @@ package object jdbc {
     def readFrom(row: ResultSet, col: Int): Unit = ()
     override def writeAs(unit: Unit) = Zero
   }
+  implicit object NullColumn extends ColumnType[Null] {
+    def typeName = "CHAR"
+    def readFrom(row: ResultSet, col: Int): Null = null
+  }
+
   implicit def JavaEnumColumn[T <: java.lang.Enum[T]: ClassTag] =
     new ColumnType[T] with conv.JavaEnumType[T] {
       def typeName = "VARCHAR(255)"
@@ -115,8 +136,10 @@ package object jdbc {
   }
 
   private[jdbc] implicit class DeltaPrep(private val ps: PreparedStatement) extends AnyVal {
-    def setValue[T: ColumnType](colIdx: Int, value: T): Unit = ps.setObject(colIdx, implicitly[ColumnType[T]] writeAs value)
-    def setChannel(colIdx: Int, ch: Transaction.Channel): Unit = ps.setString(colIdx, ch.toString)
+    def setValue[T: ColumnType](colIdx: Int, value: T): Unit =
+      ps.setObject(colIdx, implicitly[ColumnType[T]] writeAs value)
+    def setChannel(colIdx: Int, ch: Transaction.Channel): Unit =
+      ps.setString(colIdx, ch.toString)
   }
   private[jdbc] implicit class DeltaRes(private val rs: ResultSet) extends AnyVal {
     def getValue[T: ColumnType](colIdx: Int): T = implicitly[ColumnType[T]].readFrom(rs, colIdx)

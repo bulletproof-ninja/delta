@@ -5,10 +5,6 @@ import scala.annotation.implicitNotFound
 
 /**
  * Type class for event encoding/decoding.
- * Expects versioned events by default.
- * Optionally add [[delta.NoVersioning]]
- * if events are unique and will never
- * change (unlikely).
  * @tparam EVT Event type
  * @tparam SF Serialization format
  */
@@ -73,21 +69,19 @@ object EventFormat {
 
     /**
      * Version, *if* version is supported, i.e. not `NoVersion`.
-     * @throws IllegalStateException if version is unsupported
+     * @throws [[java.lang.IllegalStateException]] if version is unsupported
      */
     @throws[IllegalStateException]
     def version: Byte =
       if (_version != NoVersion) _version
       else throw new IllegalStateException(s"Versioning not supported for event '$name'")
 
-    def map[NF](conv: SF => NF): Encoded[NF] = new Encoded[NF](name, _version, conv(data), channel, metadata)
-
   }
 }
 
 class EventFormatAdapter[EVT, A, B](
-    adapter: Codec[B, A])(
-    implicit evtFmt: EventFormat[EVT, B])
+    adapter: Codec[B, A],
+    evtFmt: EventFormat[EVT, B])
   extends EventFormat[EVT, A] {
 
   protected def getName(cls: EventClass) = (evtFmt signature cls).name
@@ -96,7 +90,7 @@ class EventFormatAdapter[EVT, A, B](
   def encode(evt: EVT): A = adapter encode evtFmt.encode(evt)
   def decode(encoded: Encoded): EVT = {
     evtFmt decode
-      encoded.map(adapter.decode)
+      encoded.mapData(adapter.decode)
   }
 
 }

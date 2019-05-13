@@ -13,7 +13,7 @@ import com.mongodb.client.model.UpdateOptions
 import com.mongodb.client.result.UpdateResult
 
 import delta.SnapshotStore
-import delta.util.Exceptions
+import delta.process.Exceptions
 import scuff.Codec
 
 class MongoSnapshotStore[K: ClassTag, V](

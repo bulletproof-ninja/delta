@@ -4,4 +4,4 @@ import delta.Transaction
 import scala.concurrent.Future
 
 trait LiveProcessor[ID, EVT]
-  extends (Transaction[ID, _ >: EVT] => Future[Unit])
+  extends (Transaction[ID, _ >: EVT] => Future[Any])

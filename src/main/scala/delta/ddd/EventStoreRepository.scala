@@ -3,38 +3,43 @@ package delta.ddd
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
-import delta.{ EventStore, SnapshotStore, Ticker }
+import delta.{ EventStore, SnapshotStore }
 import delta.Transaction.Channel
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
+import delta.Ticker
 
 /**
-  * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
-  * @tparam ESID Event store id type
-  * @tparam EVT Repository event type
-  * @tparam S Repository state type
-  * @tparam RID Repository id type
-  * @param channel The channel
-  * @param newState Wrap state
-  * @param snapshots Snapshot store. Defaults to no-op.
-  * @param assumeCurrentSnapshots Can snapshots from the snapshot store
-  * be assumed to be current? I.e. are the snapshots available to all
-  * running processes, or isolated to this process, and if the latter,
-  * is this process exclusively snapshotting the available ids?
-  * NOTE: This is a performance switch. Regardless of setting, it will
-  * not affect correctness.
-  * @param es The event store implementation
-  * @param exeCtx ExecutionContext for basic Future transformations
-  * @param ticker Ticker implementation
-  */
+ * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
+ * @tparam ESID Event store id type
+ * @tparam EVT Repository event type
+ * @tparam S Repository state type
+ * @tparam RID Repository id type
+ * @param channel The channel
+ * @param newState Wrap state
+ * @param snapshots Snapshot store. Defaults to no-op.
+ * @param assumeCurrentSnapshots Can snapshots from the snapshot store
+ * be assumed to be current? I.e. are the snapshots available to all
+ * running processes, or isolated to this process, and if the latter,
+ * is this process exclusively snapshotting the available ids?
+ * NOTE: This is a performance switch. Regardless of setting, it will
+ * not affect correctness.
+ * @param es The event store implementation
+ * @param exeCtx ExecutionContext for basic Future transformations
+ * @param ticker Ticker implementation
+ */
 class EventStoreRepository[ESID, EVT, S >: Null, RID](
     channel: Channel,
     newState: S => State[S, EVT],
+    exeCtx: ExecutionContext,
     snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
     assumeCurrentSnapshots: Boolean = false)(
-    es: EventStore[ESID, _ >: EVT])(
-    implicit idConv: RID => ESID, exeCtx: ExecutionContext, ticker: Ticker)
+    es: EventStore[ESID, _ >: EVT], ticker: Ticker)(
+    implicit
+    idConv: RID => ESID)
   extends Repository[RID, (S, List[EVT])] with ImmutableEntity[(S, List[EVT])] {
+
+  @inline implicit private def ec = exeCtx
 
   private type Snapshot = delta.Snapshot[S]
 
@@ -73,7 +78,13 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
   }
 
   private def loadLatest(id: RID, snapshot: Future[Option[Snapshot]], assumeSnapshotCurrent: Boolean, expectedRevision: Option[Int]): Future[(Snapshot, List[EVT])] = {
-    val futureState: Future[Option[(Snapshot, List[EVT])]] = snapshot.flatMap { maybeSnapshot =>
+    // Failed snapshot read should not prevent loading. Report and continue...
+    val recoveredSnapshot = snapshot recover {
+      case NonFatal(th) =>
+        exeCtx reportFailure th
+        None
+    }
+    val futureState: Future[Option[(Snapshot, List[EVT])]] = recoveredSnapshot.flatMap { maybeSnapshot =>
       maybeSnapshot match {
         case Some(snapshot) =>
           if (assumeSnapshotCurrent && expectedRevision.forall(_ <= snapshot.revision)) {
@@ -93,24 +104,33 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
     case (snapshot, _) => snapshot.content -> Nil -> snapshot.revision
   }
 
-  def insert(id: RID, stEvt: RepoType, metadata: Map[String, String]): Future[RID] = stEvt match {
-    case (state, events) =>
-      if (events.isEmpty) {
-        Future failed new IllegalStateException(s"Nothing to insert, $id has no events.")
-      } else {
-        val tick = ticker.nextTick()
-        val committedRevision = eventStore.commit(channel, id, 0, tick, events, metadata).map(_.revision) recover {
-          case eventStore.DuplicateRevisionException(conflict) =>
-            if (conflict.events == events) { // Idempotent insert
-              conflict.revision
-            } else {
-              throw new DuplicateIdException(id)
+  def insert(newId: => RID, stEvt: RepoType, metadata: Map[String, String]): Future[RID] =
+    insertImpl(newId, newId, ticker.nextTick(), stEvt, metadata)
+
+  private def insertImpl(
+      id: RID, generateId: => RID, tick: Long,
+      stEvt: RepoType, metadata: Map[String, String],
+      retries: Int = 256): Future[RID] =
+    stEvt match {
+      case (state, events) =>
+        if (events.isEmpty) {
+          Future failed new IllegalStateException(s"Nothing to insert, $id has no events.")
+        } else {
+          val committedId: Future[RID] =
+            eventStore.commit(channel, id, 0, tick, events, metadata).map(_ => id) recoverWith {
+              case eventStore.DuplicateRevisionException(conflict) =>
+                if (conflict.events == events) { // Idempotent insert
+                  Future successful id
+                } else {
+                  val newId = generateId
+                  if (newId == id || retries == 0) Future failed new DuplicateIdException(id)
+                  else insertImpl(newId, generateId, tick, stEvt, metadata, retries - 1)
+                }
             }
+          committedId.foreach(_ => snapshots.write(id, new Snapshot(state, 0, tick)))
+          committedId
         }
-        committedRevision.foreach(rev => snapshots.write(id, new Snapshot(state, rev, tick)))
-        committedRevision.map(_ => id)
-      }
-  }
+    }
 
   private def recordUpdate(id: RID, state: S, newRevision: Int, events: List[EVT], metadata: Map[String, String], tick: Long): Future[Int] = {
     val committedRevision = eventStore.commit(channel, id, newRevision, tick, events, metadata).map(_.revision)
@@ -119,13 +139,16 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
   }
 
   /**
-    * Notification on every concurrent update collision.
-    * This happens when two aggregates are attempted to
-    * be updated concurrently. Should be exceedingly rare,
-    * unless there is unusually high contention on a
-    * specific aggregate.
-    * Can be used for monitoring and reporting.
-    */
+   * Notification on every concurrent update collision.
+   * This happens when two or more concurrent processes
+   * attempt to update the same revision.
+   * Should be rare, unless there is unusually high contention
+   * on a specific stream, or if clients are offline and
+   * working off stale data.
+   * This does not affect correctness, as conflicts will be
+   * retried until resolved.
+   * Can be used for monitoring and reporting.
+   */
   protected def onUpdateCollision(id: RID, revision: Int, channel: Channel): Unit = ()
 
   private def loadAndUpdate(

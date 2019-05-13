@@ -2,34 +2,36 @@ package delta.java
 
 import delta.EventStore
 import delta.MessageHub
-import delta.Publishing
+import delta.MessageHubPublishing
 import scuff.StreamConsumer
 import delta.Transaction, Transaction.Channel
 import scala.concurrent.Future
 
-trait PublishingEventStore[ID, EVT] extends EventStore[ID, EVT] with Publishing[ID, EVT]
+trait PublishingEventStore[ID, EVT] extends EventStore[ID, EVT] with MessageHubPublishing[ID, EVT]
 
 object PublishingEventStore {
 
-  def withPublishing[ID, EVT](
+  def withPublishing[ID, EVT, M](
       eventStore: EventStore[ID, EVT],
-      txnHub: MessageHub[Transaction[ID, EVT]],
+      txnHub: MessageHub { type MsgType = M },
       txnChannels: Set[String],
-      channelToNamespace: java.util.function.Function[String, String]): PublishingEventStore[ID, EVT] = {
+      txnCodec: scuff.Codec[Transaction[ID, EVT], M],
+      channelToTopic: java.util.function.Function[String, String]): PublishingEventStore[ID, EVT] = {
     val typedChannels = txnChannels.map(Channel(_))
-    new EventStoreProxy(eventStore, txnHub, typedChannels, channelToNamespace) with PublishingEventStore[ID, EVT]
+    new EventStoreProxy(eventStore, txnHub, typedChannels, txnCodec, channelToTopic) with PublishingEventStore[ID, EVT]
   }
 }
 
-private abstract class EventStoreProxy[ID, EVT](
+private abstract class EventStoreProxy[ID, EVT, M](
     evtStore: EventStore[ID, EVT],
-    protected val txnHub: MessageHub[Transaction[ID, EVT]],
+    protected val txnHub: MessageHub { type MsgType = M },
     protected val txnChannels: Set[Channel],
-    ch2ns: java.util.function.Function[String, String])
+    protected val txnCodec: scuff.Codec[Transaction[ID, EVT], M],
+    ch2tp: java.util.function.Function[String, String])
   extends EventStore[ID, EVT] {
-  publishing: Publishing[ID, EVT] =>
+  publishing: MessageHubPublishing[ID, EVT] =>
 
-  protected def toNamespace(ch: Channel) = Namespace(ch2ns(ch.toString))
+  protected def toTopic(ch: Channel) = Topic(ch2tp(ch.toString))
 
   import language.implicitConversions
   implicit private def adapt(selector: this.Selector): evtStore.Selector = selector match {

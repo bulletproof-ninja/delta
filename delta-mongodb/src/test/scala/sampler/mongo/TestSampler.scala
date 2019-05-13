@@ -5,7 +5,7 @@ import com.mongodb.MongoNamespace
 import delta.mongo.MongoEventStore
 import delta.testing.RandomDelayExecutionContext
 import sampler.aggr.DomainEvent
-import delta.Publishing
+import delta.MessageHubPublishing
 import delta.util.LocalHub
 
 import org.junit._, Assert._
@@ -17,11 +17,11 @@ class TestSampler extends sampler.TestSampler {
     val settings = com.mongodb.MongoClientSettings.builder().build()
     val ns = new MongoNamespace("unit-testing", "event-store")
     val txnCollection = MongoEventStore.getCollection(ns, settings)
-      implicit def evtCdc = BsonDomainEventFormat
-    new MongoEventStore[Int, DomainEvent](txnCollection) with Publishing[Int, DomainEvent] {
-      def toNamespace(ch: Channel) = Namespace(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+    new MongoEventStore[Int, DomainEvent](txnCollection, BsonDomainEventFormat) with MessageHubPublishing[Int, DomainEvent] {
+      def toTopic(ch: Channel) = Topic(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txnCodec = scuff.Codec.noop
     }
   }
 

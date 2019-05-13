@@ -8,17 +8,24 @@ import scuff.concurrent.{ Threads }
 import delta.ddd.ImmutableEntity
 
 /**
-  * Repository backed by concurrent map.
-  * Mostly useful for testing.
-  */
+ * Repository backed by concurrent map.
+ * Mostly useful for testing.
+ */
 class ConcurrentMapRepository[K, V <: AnyRef](
     map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
   extends Repository[K, V] with ImmutableEntity[V] {
 
-  def insert(id: K, entity: V, metadata: Map[String, String]): Future[K] = Future {
+  def insert(id: => K, entity: V, metadata: Map[String, String]): Future[K] = Future {
+    insertImpl(id, id, entity, metadata)
+  }
+
+  private def insertImpl(id: K, generateId: => K, entity: V, metadata: Map[String, String]): K = {
     map.putIfAbsent(id, entity -> 0) match {
       case None => id
-      case _ => throw new DuplicateIdException(id)
+      case _ =>
+        val newId = generateId
+        if (newId == id) throw new DuplicateIdException(id)
+        else insertImpl(newId, generateId, entity, metadata)
     }
   }
 

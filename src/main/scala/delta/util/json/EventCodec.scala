@@ -3,27 +3,35 @@ package delta.util.json
 import delta.EventFormat, EventFormat.Encoded
 import delta.Transaction
 import scuff.Codec
-import scuff.Numbers
+import scuff.json._, JsVal._
 
 /**
  * Generic event/JSON codec, leveraging any existing `EventFormat` instance.
  * NOTE: While this class requires `channel` and `metadata` per instance, and
  * is thus meant to be created *per* transaction, it's only necessary if the
- * supplied `EventFormat` any of those. Otherwise it's fine to re-use an instance.
+ * supplied `EventFormat` need any of those. Otherwise it's fine to re-use an instance.
  */
-class EventCodec[EVT](evtFmt: EventFormat[EVT, JSON])(channel: Transaction.Channel, metadata: Map[String, String])
+class EventCodec[EVT, EF](evtFmt: EventFormat[EVT, EF])(
+    channel: Transaction.Channel, metadata: Map[String, String])(
+    implicit
+    toJson: EF => JSON, fromJson: JSON => EF)
   extends Codec[EVT, JSON] {
 
-  private[this] val NamePrefix = s"""{"$nameField":""""
-  private[this] val VersionPrefix = s"""","$versionField":"""
-  private[this] val DataPrefix = s""","$dataField":"""
+  def this(evtFmt: EventFormat[EVT, EF], jsonCodec: Codec[EF, JSON])(channel: Transaction.Channel, metadata: Map[String, String]) =
+    this(evtFmt)(channel, metadata)(jsonCodec.encode, jsonCodec.decode)
+
+  def this(jsonCodec: Codec[EF, JSON])(
+      channel: Transaction.Channel, metadata: Map[String, String])(
+      implicit
+      evtFmt: EventFormat[EVT, EF]) =
+    this(evtFmt)(channel, metadata)(jsonCodec.encode, jsonCodec.decode)
 
   protected def nameField: String = "event"
   protected def versionField: String = "version"
   protected def dataField: String = "data"
 
   def encode(evt: EVT): JSON = {
-    val evtData = evtFmt encode evt
+    val evtData: JSON = evtFmt encode evt
     (evtFmt signature evt) match {
       case EventFormat.EventSig(evtName, EventFormat.NoVersion) =>
         s"""{"$nameField":"$evtName","$dataField":$evtData}"""
@@ -32,16 +40,14 @@ class EventCodec[EVT](evtFmt: EventFormat[EVT, JSON])(channel: Transaction.Chann
     }
   }
   def decode(json: JSON): EVT = {
-    val (evtVersion, versionPadding, nameEndIdx) =
-      json.indexOf(VersionPrefix, 6) match {
-        case -1 =>
-          (evtFmt.NoVersion, 1, json.indexOf(DataPrefix, 6) - 1)
-        case idx =>
-          val ver = Numbers.parseUnsafeInt(json, idx + VersionPrefix.length)(stop = Comma)
-          (ver.toByte, VersionPrefix.length + numLength(ver), idx)
-      }
-    val evtName = json.substring(NamePrefix.length, nameEndIdx)
-    val evtData = json.substring(nameEndIdx + versionPadding + DataPrefix.length, json.length-1)
-    evtFmt decode new Encoded(evtName, evtVersion, evtData, channel, metadata)
+    val jsObj = (JsVal parse json).asObj
+    val evtName = jsObj(nameField).asStr.value
+    val evtVersion = jsObj(versionField) match {
+      case JsNum(num) => num.byteValue
+      case JsUndefined => EventFormat.NoVersion
+      case _ => ???
+    }
+    val evtData = jsObj(dataField)
+    evtFmt decode new Encoded[EF](evtName, evtVersion, evtData.toJson, channel, metadata)
   }
 }

@@ -14,13 +14,24 @@ private[jdbc] object Dialect {
     sqlEx.isInstanceOf[SQLIntegrityConstraintViolationException] ||
       Option(sqlEx.getSQLState).exists(_ startsWith "23")
   }
+
+  def executeDDL(conn: Connection, ddl: String): Unit = {
+    val stm = conn.createStatement()
+    try stm.execute(ddl) catch {
+      case cause: SQLException =>
+        throw new SQLException(s"Failed to execute DDL: $ddl", cause.getSQLState, cause.getErrorCode, cause)
+    } finally stm.close()
+  }
+
 }
 
 protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     final val schema: Option[String]) {
 
+  import Dialect.executeDDL
+
   protected type Channel = delta.Transaction.Channel
-  
+
   private[jdbc] def idType = implicitly[ColumnType[ID]]
   private[jdbc] def sfType = implicitly[ColumnType[SF]]
 
@@ -35,11 +46,6 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
   protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
   protected def byteDataType = "TINYINT"
-
-  protected def executeDDL(conn: Connection, ddl: String): Unit = {
-    val stm = conn.createStatement()
-    try stm.execute(ddl) finally stm.close()
-  }
 
   protected def schemaDDL(name: String): String = s"CREATE SCHEMA IF NOT EXISTS $name"
   def createSchema(conn: Connection): Unit = schema.foreach(schema => executeDDL(conn, schemaDDL(schema)))

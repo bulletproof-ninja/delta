@@ -16,7 +16,7 @@ package object college {
 
   implicit def intId(id: IntId[_]): Int = id.int
 
-  implicit object CollegeEventFormat
+  object CollegeEventFormat
       extends EventFormat[CollegeEvent, Array[Byte]] {
 
     def getVersion(cls: EventClass) = NoVersion

@@ -2,7 +2,8 @@ package delta.util.json
 
 import scuff.Codec
 import delta.Snapshot
-import delta.util.SnapshotUpdate
+import delta.process.SnapshotUpdate
+import scuff.json._
 
 object SnapshotUpdateCodec {
   def apply[T](snapshotJsonCodec: Codec[Snapshot[T], String]): Codec[SnapshotUpdate[T], String] =
@@ -24,34 +25,44 @@ class SnapshotUpdateCodec[T](snapshotJsonCodec: Codec[Snapshot[T], String])
     this(new SnapshotCodec(contentJsonCodec, contentFieldName))
 
   protected def contentUpdatedField: String = "contentUpdated"
-  protected def snapshotField: String = "snapshot"
-  private[this] val contentUpdatedValueIndex = /* start brace */ 1 + /* quote */ 1 + contentUpdatedField.length() + /* quote */ 1 + /* colon */ 1
 
   def encode(update: SnapshotUpdate[T]): String = {
-    val snapshotJson: String = (snapshotJsonCodec.encode(update.snapshot): String).trim
-    s"""{"$contentUpdatedField":${update.contentUpdated},"$snapshotField":$snapshotJson}"""
+    val snapshotJson = new java.lang.StringBuilder(snapshotJsonCodec.encode(update.snapshot).trim)
+    snapshotJson.charAt(0) match {
+      case '{' => snapshotJson.insert(1, s""""$contentUpdatedField":${update.contentUpdated},""")
+      case '[' => snapshotJson.insert(1, s"""${update.contentUpdated},""")
+      case _ => sys.error(s"Cannot work with snapshot encoding: $snapshotJson")
+    }
+    snapshotJson.toString
   }
 
   def decode(json: String): SnapshotUpdate[T] = {
-    new SnapshotUpdate(snapshot(json), contentUpdated(json))
-  }
+    val ast = (JsVal parse json)
+    val (contentUpdated, snapshot) = ast match {
 
-  /** Extract contentUpdated. */
-  def contentUpdated(json: String): Boolean = json.charAt(contentUpdatedValueIndex) == 't'
+      case obj: JsObj =>
+        val contentUpdated = obj(contentUpdatedField).asBool.value
+        contentUpdated -> {
+          snapshotJsonCodec match {
+            case codec: SnapshotCodec[T] => codec decode obj
+            case _ =>
+              val removeLength = 1 + contentUpdatedField.length + 3 + (if (contentUpdated) 4 else 5) + 1
+              val reassembled = "{" concat json.substring(removeLength, json.length)
+              snapshotJsonCodec decode reassembled
+          }
+        }
 
-  /** Extract snapshot. */
-  def snapshot(json: String): Snapshot[T] = {
-    val offset =
-      contentUpdatedValueIndex +
-        (if (contentUpdated(json)) 4 else 5) +
-        1 + 1 + snapshotField.length + 1 + 1
-    snapshotJsonCodec decode json.substring(offset, json.length - 1)
-  }
+      case arr: JsArr =>
+        val contentUpdated = arr(0).asBool.value
+        contentUpdated -> {
+          val removeLength = 1 + (if (contentUpdated) 4 else 5) + 1
+          val reassembled = "[" concat json.substring(removeLength, json.length)
+          snapshotJsonCodec decode reassembled
+        }
 
-  /** Extract snapshot content. */
-  def snapshotContent(json: String): T = snapshotJsonCodec match {
-    case codec: SnapshotCodec[T] => codec.content(json)
-    case _ => this.snapshot(json).content
+      case _ => sys.error(s"Cannot decode snapshot update: $json")
+    }
+    new SnapshotUpdate(snapshot, contentUpdated)
   }
 
 }

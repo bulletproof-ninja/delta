@@ -8,7 +8,7 @@ import scala.util.{ Failure, Success, Try }
 import delta.{ EventFormat, EventStore }
 import scuff.StreamConsumer
 import scuff.concurrent.Threads
-import scuff.jdbc.ConnectionProvider
+import scuff.jdbc.ConnectionSource
 
 private object JdbcEventStore {
   lazy val DefaultThreadPool = {
@@ -18,20 +18,22 @@ private object JdbcEventStore {
   }
   final class RawEvent[SF](name: String, version: Byte, data: SF) {
     def decode[EVT](channel: delta.Transaction.Channel, metadata: Map[String, String])(
-        implicit evtFmt: EventFormat[EVT, SF]): EVT =
-          evtFmt.decode(name, version, data, channel, metadata)
+        implicit
+        evtFmt: EventFormat[EVT, SF]): EVT =
+      evtFmt.decode(name, version, data, channel, metadata)
   }
 }
 
 class JdbcEventStore[ID, EVT, SF](
-  dialect: Dialect[ID, EVT, SF],
-  blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)(
-    implicit evtFmt: EventFormat[EVT, SF])
-    extends EventStore[ID, EVT] {
-  cp: ConnectionProvider =>
+    evtFmt: EventFormat[EVT, SF],
+    dialect: Dialect[ID, EVT, SF], cs: ConnectionSource,
+    blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)
+  extends EventStore[ID, EVT] {
+
+  @inline implicit private def ef = evtFmt
 
   def ensureSchema(): this.type = {
-    forUpdate { conn =>
+    cs.forUpdate { conn =>
       dialect.createSchema(conn)
       dialect.createStreamTable(conn)
       dialect.createChannelIndex(conn)
@@ -45,7 +47,8 @@ class JdbcEventStore[ID, EVT, SF](
   }
 
   private def selectRevision(stream: ID, revision: Int)(
-    implicit conn: Connection): Option[TXN] = {
+      implicit
+      conn: Connection): Option[TXN] = {
     var dupe: Option[TXN] = None
     dialect.selectStreamRevision(stream, revision) {
       case (rs, col) =>
@@ -63,12 +66,12 @@ class JdbcEventStore[ID, EVT, SF](
   }
 
   def commit(
-    channel: Channel, stream: ID, revision: Int, tick: Long,
-    events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN] = {
+      channel: Channel, stream: ID, revision: Int, tick: Long,
+      events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN] = {
     require(revision >= 0, "Must be non-negative revision, was: " + revision)
     require(events.nonEmpty, "Must have at least one event")
     Future {
-      forUpdate { implicit conn =>
+      cs.forUpdate { implicit conn =>
         try {
           if (revision == 0) dialect.insertStream(stream, channel)
           dialect.insertTransaction(stream, revision, tick)
@@ -88,13 +91,13 @@ class JdbcEventStore[ID, EVT, SF](
   }
 
   def currRevision(stream: ID): Future[Option[Int]] = Future {
-    forQuery { implicit conn =>
+    cs.forQuery { implicit conn =>
       dialect.selectMaxRevision(stream)
     }
   }(blockingJdbcCtx)
 
   def maxTick(): Future[Option[Long]] = Future {
-    forQuery(dialect.selectMaxTick(_))
+    cs.forQuery(dialect.selectMaxTick(_))
   }(blockingJdbcCtx)
 
   private def nextTransactionKey(rs: ResultSet, col: dialect.Columns): Option[(ID, Int)] = {
@@ -118,7 +121,7 @@ class JdbcEventStore[ID, EVT, SF](
 
   @annotation.tailrec
   private def processTransactions(singleStream: Boolean, onNext: TXN => Unit)(
-    stream: ID, revision: Int, rs: ResultSet, col: dialect.Columns): Unit = {
+      stream: ID, revision: Int, rs: ResultSet, col: dialect.Columns): Unit = {
     import JdbcEventStore.RawEvent
     val channel = rs.getChannel(col.channel)
     val tick = rs.getLong(col.tick)
@@ -167,7 +170,7 @@ class JdbcEventStore[ID, EVT, SF](
 
   def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit =
     FutureWith(callback) {
-      forQuery { implicit conn =>
+      cs.forQuery { implicit conn =>
         dialect.selectStreamFull(stream) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
@@ -178,7 +181,7 @@ class JdbcEventStore[ID, EVT, SF](
     }
   def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, R]): Unit =
     FutureWith(callback) {
-      forQuery { implicit conn =>
+      cs.forQuery { implicit conn =>
         dialect.selectStreamRange(stream, revisionRange) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
@@ -190,7 +193,7 @@ class JdbcEventStore[ID, EVT, SF](
   def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit =
     if (fromRevision == 0) replayStream(stream)(callback)
     else FutureWith(callback) {
-      forQuery { implicit conn =>
+      cs.forQuery { implicit conn =>
         dialect.selectStreamRange(stream, fromRevision to Int.MaxValue) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
@@ -202,7 +205,7 @@ class JdbcEventStore[ID, EVT, SF](
 
   def query[U](selector: Selector)(callback: StreamConsumer[TXN, U]): Unit =
     FutureWith(callback) {
-      forQuery { implicit conn =>
+      cs.forQuery { implicit conn =>
         val select = selector match {
           case Everything => dialect.selectTransactions() _
           case ChannelSelector(channels) => dialect.selectTransactionsByChannels(channels) _
@@ -220,7 +223,7 @@ class JdbcEventStore[ID, EVT, SF](
     }
   def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, U]): Unit =
     FutureWith(callback) {
-      forQuery { implicit conn =>
+      cs.forQuery { implicit conn =>
         val (singleStream, onNext, select) = selector match {
           case Everything =>
             (None, (callback.onNext _), dialect.selectTransactions(sinceTick) _)

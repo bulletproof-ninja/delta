@@ -5,7 +5,7 @@ import java.util.Map.Entry
 import com.hazelcast.map.AbstractEntryProcessor
 
 import delta.Snapshot
-import delta.util.Exceptions
+import delta.process.Exceptions
 
 /**
  * Internal class used by [[delta.hazelcast.IMapSnapshotStore]].

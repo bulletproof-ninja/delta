@@ -1,4 +1,4 @@
-package delta.util
+package delta.process
 
 import scala.concurrent.duration.FiniteDuration
 import scuff.concurrent.PartitionedExecutionContext
@@ -10,12 +10,14 @@ import scala.concurrent.ExecutionContext
 abstract class DefaultMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
     store: StreamProcessStore[ID, S],
     whenDoneCompletionTimeout: FiniteDuration,
-    protected val whenDoneContext: ExecutionContext,
+    protected val persistContext: ExecutionContext,
     writeBatchSize: Int,
     partitionThreads: PartitionedExecutionContext,
     cmap: collection.concurrent.Map[ID, delta.Snapshot[S]])
-  extends MonotonicReplayProcessor[ID, EVT, S, Unit](whenDoneCompletionTimeout, new ConcurrentMapStore(cmap)(store.read))
-  with ConcurrentMapReplayProcessing[ID, EVT, S, Unit] {
+  extends MonotonicReplayProcessor[ID, EVT, S, Unit](
+      whenDoneCompletionTimeout,
+      new ConcurrentMapStore(cmap, store.tickWatermark)(store.read))
+  with ConcurrentMapReplayPersistence[ID, EVT, S, Unit] {
 
   def this(
       store: StreamProcessStore[ID, S],
@@ -29,10 +31,10 @@ abstract class DefaultMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
       PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-replay-processor")),
       cmap)
 
-  protected def processingContext(id: ID) = partitionThreads.singleThread(id.hashCode)
+  protected def processContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
-    partitionThreads.shutdown().map(_ => cmap)(whenDoneContext)
+    partitionThreads.shutdown().map(_ => cmap)(persistContext)
 
   protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[Unit] = {
     val iter = snapshots.iterator
@@ -49,7 +51,7 @@ abstract class DefaultMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
         writes += processStore.writeBatch(batch)
       }
     }
-      implicit def ec = whenDoneContext
+      implicit def ec = persistContext
     Future.sequence(writes).map(_ => ())
   }
 

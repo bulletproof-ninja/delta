@@ -32,13 +32,17 @@ object TestMongoStreamProcessStore {
 
   implicit val ec = RandomDelayExecutionContext
 
+  val snapshotVersion = 1: Short
   @volatile var coll: MongoCollection[Document] = _
   @volatile private var client: MongoClient = _
 
   @BeforeClass
   def setupClass(): Unit = {
     client = MongoClients.create()
-    coll = client.getDatabase("test_snapshot_store").getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_"))
+    coll =
+      client
+      .getDatabase("test_snapshot_store")
+      .getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_") + "_" + snapshotVersion)
     withBlockingCallback[Void]()(coll.drop(_))
   }
   @AfterClass
@@ -50,6 +54,7 @@ object TestMongoStreamProcessStore {
 
 //@Ignore // For some reason fails in setupClass
 class TestMongoStreamProcessStore extends TestStreamProcessStore {
+
   import TestMongoStreamProcessStore._
   implicit def exeCtx = ec
   val strCdc = new scuff.Codec[String, Document] {

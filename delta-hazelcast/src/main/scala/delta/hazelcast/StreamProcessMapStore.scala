@@ -13,7 +13,7 @@ import java.util.Properties
 import com.hazelcast.logging.ILogger
 import scala.concurrent.Future
 import scala.collection.mutable.ArrayBuffer
-import delta.util.StreamProcessStore
+import delta.process.StreamProcessStore
 
 /**
   * Hazelcast `MapStore` implementation, using

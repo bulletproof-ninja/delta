@@ -8,7 +8,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 
 import scuff._
 import java.util.concurrent.atomic.AtomicLong
-import delta.util.{ StreamProcessStore, BlockingCASWrites }
+import delta.process.{ StreamProcessStore, BlockingCASWrites }
 
 /**
   * Binary Redis implementation of [[delta.util.StreamProcessStore]]

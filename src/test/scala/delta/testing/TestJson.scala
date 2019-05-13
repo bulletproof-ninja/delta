@@ -19,7 +19,7 @@ class TestJson {
     }
     val testEvt = eventCodec encode "ABC"
     assertEquals("ABC", eventCodec decode testEvt)
-    val md = Map("one" -> "1", "prison" -> "\\\"escape \\uffbb\\\"", "time" -> LocalDateTime.now.toString)
+    val md = Map("one" -> "1", "time" -> LocalDateTime.now.toString)
     val events = List("foo", "BAR", "", "baZZ")
     val txn = new Transaction(45623423423L, Channel("cHAnnel"), UUID.randomUUID(), 123, md, events)
 
@@ -31,7 +31,7 @@ class TestJson {
   @Test
   def transaction2() = {
     val eventCodec = Codec.fromString(_.toInt)
-    val md = Map("one" -> "1", "prison" -> "\\\"escape \\uffbb\\\"", "time" -> LocalDateTime.now.toString)
+    val md = Map("one" -> "1", "time" -> LocalDateTime.now.toString)
     val events = List(1, 2, 3, Int.MaxValue)
     val txn = new Transaction(Long.MinValue, Channel(""), UUID.randomUUID(), Int.MaxValue, md, events)
 
@@ -55,7 +55,7 @@ class TestJson {
     val txnCodec = new TransactionCodec(UUIDCodec, eventCodec)
     val codec = Tuple2Codec(UUIDCodec, txnCodec)
     val txn = Transaction.apply(23424, Transaction.Channel("Hello"), uuid, 45, Map.empty, 4 :: 3 :: 2 :: 1 :: Nil)
-    val tupleJson = codec encode uuid -> txn
+    val tupleJson = codec.encode(uuid -> txn)
     println(tupleJson)
     val (uuid2, txn2) = codec decode tupleJson
     assertEquals(uuid, uuid2)

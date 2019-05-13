@@ -5,7 +5,7 @@ import scala.concurrent.{ Future, Promise }
 import com.hazelcast.core.{ EntryEvent, ExecutionCallback, IMap }
 import com.hazelcast.map.listener.{ EntryAddedListener, EntryUpdatedListener }
 
-import delta.util.ReadModel
+import delta.read._
 import scuff.Subscription
 import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.duration._
@@ -16,16 +16,17 @@ class IMapEntryStateReadModel[ID, S, EVT](
     imap: IMap[ID, EntryState[S, EVT]],
     protected val scheduler: ScheduledExecutorService,
     failureReporter: (Throwable) => Unit,
-    protected val defaultLookupTimeout: FiniteDuration = 5555.millis)
-  extends ReadModel[ID, S] {
+    defaultReadTimeout: FiniteDuration = DefaultReadTimeout)
+  extends BasicReadModel[ID, S]
+  with SubscriptionSupport[ID, S] {
 
   private type EntryState = delta.hazelcast.EntryState[S, EVT]
 
   protected def reportFailure(th: Throwable) = failureReporter(th)
 
-  protected def readSnapshot(id: ID)(
+  def readLatest(id: ID)(
       implicit
-      ec: ExecutionContext): Future[Option[Snapshot]] = {
+      ec: ExecutionContext): Future[Snapshot] = {
     val promise = Promise[Option[Snapshot]]
     val callback = new ExecutionCallback[EntryState] {
       def onResponse(response: EntryState): Unit = {
@@ -34,9 +35,19 @@ class IMapEntryStateReadModel[ID, S, EVT](
       }
       def onFailure(t: Throwable): Unit = promise failure t
     }
-    imap.getAsync(id).andThen(callback, new Executor { def execute(r: Runnable) = ec execute r }) 
-    promise.future
+    imap.getAsync(id).andThen(callback, new Executor { def execute(r: Runnable) = ec execute r })
+    promise.future.flatMap {
+      verify(id, _)
+    }
   }
+
+  def readMinTick(id: ID, minTick: Long)(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] = readMinTick(id, minTick, defaultReadTimeout)
+
+  def readMinRevision(id: ID, minRevision: Int)(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] = readMinRevision(id, minRevision, defaultReadTimeout)
 
   protected def subscribe(id: ID)(pf: PartialFunction[SnapshotUpdate, Unit]): Subscription = {
     val entryListener = new EntryAddedListener[ID, EntryState] with EntryUpdatedListener[ID, EntryState] {

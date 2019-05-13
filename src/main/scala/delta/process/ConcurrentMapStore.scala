@@ -1,39 +1,47 @@
-package delta.util
+package delta.process
 
-import scala.collection.{ Map, JavaConverters }
-import JavaConverters._
+import collection.Map
+import collection.JavaConverters._
 import scala.concurrent.Future
 import scala.util.Try
 import scala.util.control.NonFatal
-
 import scuff.concurrent.Threads
 
 /**
-  * Implementation that stores snapshots in a [[scala.collection.concurrent.Map]].
-  * Useful when doing replay processing of past events, as a fast in-memory store.
-  * If the backing map is either empty or incomplete (this would be expected, to
-  * save both memory and load time), provide a fallback lookup mechanism for keys
-  * not found.
-  * NOTE: This implementation IS NOT a two-way cache. There's no mechanism
-  * to write through.
-  * @param cmap The concurrent map implementation
-  * @param lookupFallback Persistent store fallback
-  */
+ * [[delta.process.StreamProcessStore]] implementation that stores snapshots in a
+ * [[scala.collection.concurrent.Map]].
+ * Useful when doing replay processing of past events, as a fast local memory store.
+ * If the backing map is either empty or incomplete (this would be expected, to
+ * save both memory and load time), provide a fallback lookup mechanism for keys
+ * not found.
+ * NOTE: This implementation IS NOT a two-way cache. There's no mechanism
+ * to write through.
+ * @param cmap The concurrent map implementation
+ * @param lookupFallback Persistent store fallback
+ */
 final class ConcurrentMapStore[K, V](
     cmap: collection.concurrent.Map[K, delta.Snapshot[V]],
-    val tickWatermark: Option[Long] = None)(
+    val tickWatermark: Option[Long])(
     readFallback: K => Future[Option[delta.Snapshot[V]]])
   extends StreamProcessStore[K, V] with NonBlockingCASWrites[K, V] {
 
   def this(
-      cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
-      readFallback: K => Future[Option[delta.Snapshot[V]]]) =
-    this(cmap.asScala)(readFallback)
+      cmap: collection.concurrent.Map[K, delta.Snapshot[V]],
+      backingStore: StreamProcessStore[K, V]) =
+    this(cmap, backingStore.tickWatermark)(
+      backingStore.read)
+
   def this(
-      maxTick: Long,
+      cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
+      backingStore: StreamProcessStore[K, V]) =
+    this(cmap.asScala, backingStore.tickWatermark)(
+      backingStore.read)
+
+  def this(
+      maxTick: Option[java.lang.Long],
       cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
       readFallback: K => Future[Option[delta.Snapshot[V]]]) =
-    this(cmap.asScala, Some(maxTick))(readFallback)
+    this(cmap.asScala, maxTick.map(_.longValue))(readFallback)
 
   private[this] val unknownKeys = new collection.concurrent.TrieMap[K, Unit]
 

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <title>API Preview</title>
+    </head>
+    <body>
+    <script src="https://api.apiary.io/seeds/embed.js"></script>
+    <script>
+    var embed = new Apiary.Embed({
+    apiBlueprint: `FORMAT: 1A
+HOST: https://not.yet.known/api
+
+# EBenezer
+
+This document describes HTTP API of the *Employee Benefits Portal* application.
+
+## Required headers
+
+All requests described in this document *must* contain the following headers:
+
+- &#96;Authorization: Bearer &lt;ebToken&gt;&#96;, where &#96;ebToken&#96; is the token received from
+the single-sign-on SAML service.
+
+These headers will not repeated in the specific endpoints.
+
+## Group Top Level Entities
+
+All top level entities have a revision number associated with them,
+starting from &#96;0&#96; when first created. This number is always available
+through the response header &#96;ETag&#96;.
+
+All &#96;GET&#96; requests must include header &#96;Accept: application/json&#96;, and when
+a certain revision is expected (e.g. after an update), should include header
+&#96;If-Match: W/&quot;2&quot;&#96;, where &#96;2&#96; represents the expected/minimum revision. This
+handles any potential _eventual consistency_ race conditions in a transparent
+manner.
+
+Alternatively, and preferably, any &#96;GET&#96; URL can be accessed in Javascript
+through the
+[EventSource API](https://developer.mozilla.org/docs/Web/API/EventSource),
+which will stream the current revision and any subsequent updates.
+
+### Employee [/employee]
+
+#### Sign up [POST /employee/sign-up{?v}]
+
+Add employee to the EBenezer system. This will generate a new &#96;id&#96;.
+
+- Parameters
+    - v (1, optional) - Data structure version. Always assumes latest if omitted (but please don&#39;t omit).
+
+- Request (application/json)
+    - Attributes (AddEmployee v1)
+
+- Response 201
+    Success.
+    - Headers
+
+            ETag: &quot;0&quot;
+            Location: /employee/{id}
+
+- Response 303
+    Employee already signed up.
+    - Headers
+
+            Location: /employee/{id}
+
+
+#### Lookup id [GET /employee{?email,employeeId}]
+
+Not sure if this is needed, depends on authentication.
+
+- Parameters
+    - email (optional) - Lookup by employee email address
+    - employeeId (optional) - Lookup by external employee id
+
+- Response 200 (application/json)
+    Found.
+    - Attributes
+        - id: b43f6a11
+
+- Response 404
+
+
+#### Retrieve employee profile [GET /employee/{id}]
+
+Retrieve employee profile information.
+
+- Request
+    - Headers
+
+            Accept: application/json
+
+- Response 200 (application/json)
+    - Attributes (Employee)
+
+#### Retrieve payroll [GET /employee/{id}/payroll]
+
+Retrieve employee payroll information.
+
+- Request
+    - Headers
+
+            Accept: application/json
+
+- Response 200 (application/json)
+    - Attributes (Payroll)
+
+#### Retrieve goal prioritizer [GET /employee/{id}/goal-prioritizer]
+
+- Request
+    - Headers
+
+            Accept: application/json
+
+- Response 200 (application/json)
+    - Attributes (GoalPrioritizerStatus)
+
+
+#### Retrieve life events [GET /employee/{id}/life-events]
+
+- Request
+    - Headers
+
+            Accept: application/json
+
+- Response 200 (application/json)
+    - Attributes (LifeEvents)
+
+
+## Data Structures
+
+### GoalPrioritizerStatus (object)
+- cards (array)
+    - (object)
+        - id
+        - location (CardLocation)
+        - quantifiable (boolean)
+        - goalType (GoalType)
+        - benefitTypes (array[BenefitType])
+
+
+### LifeEvents (array)
+- (object)
+    - foo (number)
+
+### BaseEmployeeData v1 (object)
+- dob: &#96;1980-11-11&#96; (string) - Date of birth
+- annualHouseholdIncome: 125000 (number)
+- monthlyExpenses: 5000 (number)
+- medicalPlan (MedicalPlanSelection)
+
+### AddEmployee v1 (object)
+- Include BaseEmployeeData v1
+
+### MedicalPlanSelection (enum)
+- declined
+- undecided
+- A
+- B
+
+### Employee (object)
+- email: &#96;hank@seic.com&#96; (string)
+- Include BaseEmployeeData v1
+
+### Payroll (object)
+- grossEarnings (number)
+- takeHomePay (number)
+- taxes (object)
+    - fedIncomeTax (number)
+    - medicareTax (number)
+    - medicareSurTax (number)
+    - stateIncomeTax (number)
+    - upperProvidIncomeTax (number)
+    - upperProvidLocalSvcTax (number)
+    - suiSdiTax (number)
+- other (object)
+    - disabilityInsurance (number)
+    - lifeInsurance (number)
+
+### CardLocation (enum)
+- tray
+- discarded
+- wantToLater
+- wantToNow
+- haveToNow
+- haveToLater
+
+### GoalType (enum)
+- retirement
+- emergency-fund
+- education
+- large-purchase
+- invest-extra-cash
+- legacy
+- philanthropy
+
+### BenefitGroup (enum)
+- healthWellness
+- assistancePrograms
+- savingInvesting
+
+### BenefitType (enum)
+- educationAssistance
+- counselingReferalServices
+- adoption
+- travelAssistance
+- dental
+- disabilityInsurance
+- flexSpending
+- lifeInsurance
+- medical
+- prescription
+- telemedicine
+- vision
+- wellnessProgram
+- cap
+- eip
+- espp
+`,
+    });
+    </script>
+    </body>
+    </html>

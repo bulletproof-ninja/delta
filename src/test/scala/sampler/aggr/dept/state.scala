@@ -1,7 +1,7 @@
 package sampler.aggr.dept
 
 import sampler._
-import delta.EventReducer
+import delta.Projector
 
 case class DeptState(
     name: String,
@@ -28,7 +28,7 @@ private class StateHandler(state: DeptState = null)
 
 }
 
-object DeptAssembler extends EventReducer[DeptState, DeptEvent] {
+object DeptAssembler extends Projector[DeptState, DeptEvent] {
   def init(evt: DeptEvent): DeptState = new StateHandler().dispatch(evt)
   def next(state: DeptState, evt: DeptEvent): DeptState = new StateHandler(state).dispatch(evt)
 }

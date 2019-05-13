@@ -6,13 +6,14 @@ ext {
     getScalaFull = [
         '2.11': '2.11.12',
         '2.12': '2.12.8',
-        '2.13': '2.13.0-M5'
+        '2.13': '2.13.0-RC1'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '1.12.1'
-    vScalaTest = '3.0.4'
+    vScuff = '4.2.0'
+    vScalaTest = '3.0.6'
+    vScalaJava8Compat = '0.9.0'
 }
 
 if (version == '') {
@@ -34,12 +35,8 @@ allprojects {
     apply plugin: 'maven-publish'
     apply plugin: 'com.jfrog.bintray'
 
-    sourceCompatibility = 1.7
-    if (vScala == '2.11') {
-        targetCompatibility = 1.7
-    } else {
-        targetCompatibility = 1.8
-    }
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
 
     version = rootProject.version
 
@@ -48,9 +45,10 @@ allprojects {
         jcenter()
     }
     dependencies {
-        compileOnly "org.scala-lang:scala-reflect:$vScalaFull"
+        compile "org.scala-lang:scala-reflect:$vScalaFull"
         testCompile "org.scala-lang:scala-reflect:$vScalaFull"
-        testCompile "junit:junit:4.+"
+        testCompile "junit:junit:4.12"
+        testCompile "org.slf4j:slf4j-simple:1.7.26"
     }
 
 	tasks.withType(Jar) {
@@ -95,7 +93,7 @@ allprojects {
     bintray {
         user = System.properties.bintrayUser ?: "dryrun"
         key = System.properties.bintrayKey ?: "dryrun"
-        dryRun = (user == "dryrun" || key == "dryrun" || version.startsWith('SNAPSHOT'))
+        dryRun = (user == "dryrun" || key == "dryrun" || version.contains('SNAPSHOT'))
         publish = !dryRun
         override = true
         publications = ['maven']
@@ -132,25 +130,36 @@ wrapper {
 
 project(':delta-cassandra') {
     dependencies {
-        compile "com.datastax.cassandra:cassandra-driver-core:3.5.1"
+        compile "com.datastax.cassandra:cassandra-driver-core:3.6.0"
     }
 }
+
 project(':delta-jdbc') {
     dependencies {
-        testCompile "com.h2database:h2:1.4.+"
-        testCompile "org.apache.derby:derby:10.12.+"
+        testCompile "com.h2database:h2:1.4.199"
+        testCompile "org.apache.derby:derby:10.12.1.1"
         testCompile "mysql:mysql-connector-java:5.1.46"
         testCompile "org.postgresql:postgresql:42.2.4"
     }
 }
+
 project(':delta-hazelcast') {
     dependencies {
         compile "com.hazelcast:hazelcast:3.11.1"
     }
 }
+
 project(':delta-redis') {
     dependencies {
-        compile "redis.clients:jedis:2.9.0"
+        compile "redis.clients:jedis:3.0.1"
+    }
+}
+
+if (vScala != '2.11') {
+    project(':delta-java') {
+        dependencies {
+            testCompile project(":delta-jdbc")
+        }
     }
 }
 
@@ -158,18 +167,9 @@ project(':delta-redis') {
 if (vScala != '2.13') {
     project(':delta-mongodb') {
         dependencies {
-            compile "org.mongodb:mongodb-driver-async:3.8.0"
-            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.4.0"
-        }
-    }
-}
-
-if (vScala != '2.11') {
-    project(':delta-java') {
-        sourceCompatibility = 1.8
-        targetCompatibility = 1.8
-        dependencies {
-            testCompile project(":delta-jdbc")
+            compile "org.mongodb:mongodb-driver-async:3.10.1"
+            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.6.0"
+            // compile "org.mongodb:mongodb-driver-reactivestreams:1.11.0"
         }
     }
 }

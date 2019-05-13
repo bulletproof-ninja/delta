@@ -14,6 +14,7 @@ import com.mongodb.async.SingleResultCallback
 import java.util.UUID
 import org.bson._
 import org.bson.types.Decimal128
+import scala.collection.JavaConverters._
 
 package object mongo {
 
@@ -63,17 +64,41 @@ package object mongo {
     }
   }
 
-  implicit def toBson(int: Int): BsonValue = new BsonInt32(int)
-  implicit def toBson(long: Long): BsonValue = new BsonInt64(long)
-  implicit def toBson(bool: Boolean): BsonValue = if (bool) BsonBoolean.TRUE else BsonBoolean.FALSE
+  implicit def toBson(bytes: Array[Byte]): BsonValue = if (bytes == null) BsonNull.VALUE else new BsonBinary(bytes)
+  implicit def toBson(int: Int): BsonInt32 = new BsonInt32(int)
+  implicit def toBson(long: Long): BsonInt64 = new BsonInt64(long)
+  implicit def toBson(bool: Boolean): BsonBoolean = if (bool) BsonBoolean.TRUE else BsonBoolean.FALSE
   implicit def toBson(str: String): BsonValue = if (str == null) BsonNull.VALUE else new BsonString(str)
   implicit def toBson(dbl: Double): BsonValue = new BsonDouble(dbl)
+  implicit def toBson(flt: Float): BsonValue = new BsonDouble(flt)
   implicit def toBson(bd: BigDecimal): BsonValue = if (bd == null) BsonNull.VALUE else toBson(bd.underlying)
   implicit def toBson(bd: java.math.BigDecimal): BsonValue = if (bd == null) BsonNull.VALUE else new BsonDecimal128(new Decimal128(bd))
-  implicit def toBson(seq: collection.Seq[BsonValue]): BsonValue = if (seq == null) BsonNull.VALUE else {
-    import collection.JavaConverters._
-    new BsonArray(seq.asJava)
-  }
+  implicit def toBson[B](iter: Iterable[B])(implicit toBsonValue: B => BsonValue): BsonValue =
+    if (iter == null) BsonNull.VALUE
+    else iter.foldLeft(new BsonArray) {
+      case (arr, bv) =>
+        arr.add(bv)
+        arr
+    }
+  implicit def fromBsonToInt(bson: BsonValue): Int = bson.asInt32
+  implicit def fromBsonToInt(bson: BsonInt32): Int = bson.getValue
+  implicit def fromBsonToLong(bson: BsonValue): Long = bson.asInt64
+  implicit def fromBsonToLong(bson: BsonInt64): Long = bson.getValue
+  implicit def fromBsonToString(bson: BsonValue): String = bson.asString
+  implicit def fromBsonToString(bson: BsonString): String = bson.getValue
+  implicit def fromBsonToBoolean(bson: BsonValue): Boolean = bson.asBoolean
+  implicit def fromBsonToBoolean(bson: BsonBoolean): Boolean = bson.getValue
+  implicit def fromBsonToIterable[T](bson: BsonValue)(implicit toT: BsonValue => T): Iterable[T] = fromBsonToIterable[T](bson.asArray)
+  implicit def fromBsonToIterable[T](bson: BsonArray)(implicit toT: BsonValue => T): Iterable[T] =
+    bson.getValues.asScala.map(toT)
+  implicit def fromBsonToDouble(bson: BsonValue): Double = bson.asDouble
+  implicit def fromBsonToDouble(bson: BsonDouble): Double = bson.getValue
+  implicit def fromBsonToFloat(bson: BsonValue): Float = bson.asDouble
+  implicit def fromBsonToFloat(bson: BsonDouble): Float = bson.getValue.asInstanceOf[Float]
+  implicit def fromBsonToByteArray(bson: BsonValue): Array[Byte] = bson.asBinary
+  implicit def fromBsonToByteArray(bson: BsonBinary): Array[Byte] = bson.getData
+  implicit def fromBsonToBigDecimal(bson: BsonValue): BigDecimal = bson.asDecimal128
+  implicit def fromBsonToBigDecimal(bson: BsonDecimal128): BigDecimal = BigDecimal(bson.getValue.bigDecimalValue)
 
   def withFutureCallback[R](
       thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {

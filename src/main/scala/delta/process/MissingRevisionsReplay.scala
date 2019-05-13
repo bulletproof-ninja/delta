@@ -1,4 +1,4 @@
-package delta.util
+package delta.process
 
 import scuff.concurrent._
 import scala.collection.concurrent.TrieMap
@@ -16,10 +16,10 @@ import delta.Transaction
 trait MissingRevisionsReplay[ID, EVT] {
 
   private[this] val outstandingReplays = new TrieMap[ID, (Range, ScheduledFuture[_])]
-  protected def onMissingRevisions(
+  protected def replayMissingRevisions(
       es: EventSource[ID, _ >: EVT], replayDelay: FiniteDuration, scheduler: ScheduledExecutorService, reportFailure: Throwable => Unit)(
       id: ID, missing: Range)(replayProcess: Transaction[ID, _ >: EVT] => _): Unit = {
-    val missingAdjusted: Option[Range] = outstandingReplays.lookup(id) match {
+    val missingAdjusted: Option[Range] = outstandingReplays.getOrElse(id, null) match {
       case null => Some(missing)
       case existing @ (outstandingReplay, schedule) =>
         if (missing == outstandingReplay) {
@@ -48,7 +48,7 @@ trait MissingRevisionsReplay[ID, EVT] {
         onDone()
       }
       def onDone() = {
-        outstandingReplays.lookup(id) match {
+        outstandingReplays.getOrElse(id, null) match {
           case value @ (range, _) if range == missing =>
             outstandingReplays.remove(id, value)
           case _ => // Already removed

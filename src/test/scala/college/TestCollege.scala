@@ -8,17 +8,21 @@ import delta.util._
 import college.student._
 import college.semester._
 
-import scuff.ScuffRandom
+import scuff._
 import scuff.concurrent._
 import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
 
 import language.implicitConversions
 import scala.collection.concurrent.TrieMap
-import delta.Publishing
+import delta.MessageHubPublishing
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Success
 import scala.util.Failure
+import delta.process.MonotonicReplayProcessor
+import delta.process.MonotonicJoinState
+import delta.process.SnapshotUpdate
+import delta.process.ConcurrentMapStore
 
 // FIXME: Something's not right with the test case. Code coverage is incomplete.
 class TestCollege {
@@ -27,14 +31,15 @@ class TestCollege {
 
   lazy val eventStore: EventStore[Int, CollegeEvent] =
     new TransientEventStore[Int, CollegeEvent, Array[Byte]](
-      RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] {
-      def toNamespace(ch: Channel) = MessageHub.Namespace(ch.toString)
-      val txnHub = new LocalHub[TXN](txn => toNamespace(txn.channel), RandomDelayExecutionContext)
+      RandomDelayExecutionContext, CollegeEventFormat) with MessageHubPublishing[Int, CollegeEvent] {
+      def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
+      val txnHub = new LocalHub[TXN](txn => toTopic(txn.channel), RandomDelayExecutionContext)
       val txnChannels = Set(Student.channel, Semester.channel)
+      val txnCodec = Codec.noop
     }
 
   implicit def ec = RandomDelayExecutionContext
-  implicit lazy val ticker = LamportTicker(eventStore)
+  lazy val ticker = LamportTicker(eventStore)
 
   type TXN = eventStore.TXN
 
@@ -43,12 +48,12 @@ class TestCollege {
 
   @Before
   def setup(): Unit = {
-    StudentRepository = new EntityRepository(Student)(eventStore)
-    SemesterRepository = new EntityRepository(Semester)(eventStore)
+    StudentRepository = new EntityRepository(Student, ec)(eventStore, ticker)
+    SemesterRepository = new EntityRepository(Semester, ec)(eventStore, ticker)
   }
 
   private def randomName(): String = (
-    rand.nextInRange('A' to 'Z') +: (1 to rand.nextInRange(2 to 12)).map(_ => rand.nextInRange('a' to 'z'))).mkString
+    rand.nextBetween('A', 'Z' + 1) +: (1 to rand.nextBetween(2, 13)).map(_ => rand.nextBetween('a', 'z' + 1))).mkString
 
   // Count not exact, since we can potentially generate id clashes
   private def addStudents(approx: Int): Seq[Student.Id] = {
@@ -65,7 +70,7 @@ class TestCollege {
   private def addSemesters(approx: Int): Seq[Semester.Id] = {
     val ids =
       for (_ <- 1 to approx) yield {
-        val name = randomName() + " " + (100 + rand.nextInRange(1 to 9))
+        val name = randomName() + " " + (100 + rand.nextBetween(1, 10))
         val id = new Semester.Id(rand.nextInt)
         val cls = Semester(CreateClass(name))
         SemesterRepository.insert(id, cls).map(_ => id)
@@ -77,12 +82,12 @@ class TestCollege {
     val studentIds = addStudents(studentCount)
     val semesterIds = addSemesters(semesterCount)
       def randomSemester: Semester.Id = {
-        val idx = rand.nextInRange(0 until semesterIds.size)
+        val idx = rand.nextBetween(0, semesterIds.size)
         semesterIds(idx)
       }
 
     val futureEnrollments = studentIds.flatMap { studentId =>
-      val semesters = (1 to rand.nextInRange(1 to 10)).map(_ => randomSemester).distinct
+      val semesters = (1 to rand.nextBetween(1, 11)).map(_ => randomSemester).distinct
       semesters.map { semesterId =>
         SemesterRepository.update(semesterId) {
           case (semester, _) =>
@@ -175,16 +180,16 @@ class TestCollege {
       override val toString = s"${id.int}:$rev"
     }
     sealed abstract class Model
-    case class StudentModel(enrolled: Set[SemesterRev]) extends Model
+    case class StudentModel(enrolled: Set[SemesterRev] = Set.empty) extends Model
     case class SemesterModel(students: Set[Student.Id] = Set.empty) extends Model
 
     class ModelBuilder(memMap: TrieMap[Int, delta.Snapshot[Model]])
       extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Unit](
         10.seconds,
-        new ConcurrentMapStore(memMap)(_ => Future successful None))
-      with MonotonicJoinState[Int, SemesterEvent, Model, StudentModel] {
+        new ConcurrentMapStore(memMap, None)(_ => Future successful None))
+      with MonotonicJoinState[Int, SemesterEvent, Model] {
 
-      protected def join(semesterId: Int, semesterRev: Int, tick: Long, evt: SemesterEvent, md: Map[String, String]): Map[Int, Processor] =
+      protected def join(semesterId: Int, semesterRev: Int, tick: Long, md: Map[String, String], streamState: Option[Model])(evt: SemesterEvent): Map[Int, Processor] =
         preprocessJoin(semesterId, semesterRev, evt)
 
       private def preprocessJoin(semesterId: Int, semesterRev: Int, evt: SemesterEvent): Map[Int, Processor] = {
@@ -208,7 +213,7 @@ class TestCollege {
           case Failure(th) => th.printStackTrace(System.err)
         }
       }
-      protected def processingContext(id: Int) = streamPartitions.singleThread(id)
+      protected def processContext(id: Int) = streamPartitions.singleThread(id)
       override protected def onSnapshotUpdate(id: Int, update: SnapshotUpdate) = update match {
         case SnapshotUpdate(Snapshot(StudentModel(enrolled), _, _), true) =>
           println(s"Student $id is currently enrolled in: $enrolled")
@@ -223,19 +228,14 @@ class TestCollege {
         case (model, _) => model
       }
 
-      private def studentEnrolled(semester: SemesterRev)(model: Option[StudentModel]): StudentModel =
-        model match {
-          case Some(model @ StudentModel(enrolled)) => model.copy(enrolled = enrolled + semester)
-          case None => new StudentModel(Set(semester))
-          case _ => sys.error("Should never happen")
-        }
-      private def studentCancelled(semester: SemesterRev)(model: Option[StudentModel]): StudentModel =
-        model match {
-          case Some(model @ StudentModel(enrolled)) => model.copy(enrolled = enrolled - semester)
-          case None => sys.error("Out of order processing")
-          case _ => sys.error("Should never happen")
-        }
-
+      private def studentEnrolled(semester: SemesterRev)(model: Option[Model]): StudentModel = {
+        val student = model collectOrElse new StudentModel
+        student.copy(enrolled = student.enrolled + semester)
+      }
+      private def studentCancelled(semester: SemesterRev)(model: Option[Model]): StudentModel = {
+        val student = model.collectAs[StudentModel] getOrElse sys.error("Out of order processing")
+        student.copy(enrolled = student.enrolled - semester)
+      }
     }
 
     val (_, semesterIds) = populate(200, 30)

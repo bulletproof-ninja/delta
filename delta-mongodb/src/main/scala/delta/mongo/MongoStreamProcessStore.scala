@@ -15,7 +15,7 @@ import com.mongodb.client.model.UpdateOptions
 import com.mongodb.client.result.UpdateResult
 
 import delta.Snapshot
-import delta.util.{ StreamProcessStore, NonBlockingCASWrites }
+import delta.process.{ StreamProcessStore, NonBlockingCASWrites }
 import scuff.Codec
 import scuff.concurrent._
 

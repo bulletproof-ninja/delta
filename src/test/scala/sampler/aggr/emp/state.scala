@@ -1,7 +1,7 @@
 package sampler.aggr.emp
 
 import sampler._
-import delta.EventReducer
+import delta.Projector
 
 case class EmpState(
     name: String,
@@ -30,7 +30,7 @@ private class StateHandler(state: EmpState = null)
 
 }
 
-object EmpAssembler extends EventReducer[EmpState, EmpEvent] {
+object EmpAssembler extends Projector[EmpState, EmpEvent] {
   def init(evt: EmpEvent) = new StateHandler().dispatch(evt)
   def next(state: EmpState, evt: EmpEvent) = new StateHandler(state).dispatch(evt)
 }

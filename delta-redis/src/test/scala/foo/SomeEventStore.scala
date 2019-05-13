@@ -4,16 +4,21 @@ import delta.util.TransientEventStore
 import scala.concurrent.ExecutionContext
 import redis.clients.jedis.JedisShardInfo
 
-import delta.Publishing
+import delta.MessageHubPublishing
 import delta.redis.RedisMessageHub
 import delta.Transaction.Channel
+import java.util.concurrent.ArrayBlockingQueue
+import scuff.JavaSerializer
 
 class SomeEventStore(ec: ExecutionContext, jedisInfo: JedisShardInfo)
-  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec)
-  with Publishing[Int, MyEvent] {
+  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)
+  with MessageHubPublishing[Int, MyEvent] {
 
-  protected def toNamespace(ch: Channel) = Namespace(s"${this.getClass}:$ch")
-  protected val txnHub = new RedisMessageHub[TXN](jedisInfo, ec)
+  protected def toTopic(ch: Channel) = Topic(s"${this.getClass}:$ch")
+  private val maxConnections = Runtime.getRuntime.availableProcessors * 2
+  private val buffer = new ArrayBlockingQueue[Any](2048)
+  protected val txnHub = new RedisMessageHub(jedisInfo, maxConnections, ec, buffer, 3)
   protected val txnChannels = Set(Channel("txn"))
+  protected val txnCodec = JavaSerializer[TXN]
 
 }

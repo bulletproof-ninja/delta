@@ -49,7 +49,7 @@ package object sampler {
 
   implicit def id2int(id: Id[_]) = id.int
 
-  implicit object JsonDomainEventFormat
+  object JsonDomainEventFormat
     extends ReflectiveDecoder[DomainEvent, JSON]
     with AbstractEventFormat[JSON]
     with aggr.emp.JsonCodec

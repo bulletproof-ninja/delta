@@ -1,4 +1,4 @@
-package delta.util
+package delta.process
 
 import scuff.concurrent._
 import scala.reflect.ClassTag
@@ -25,10 +25,10 @@ abstract class DefaultMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
     this(es, store, replayMissingRevisionsDelay, scheduler,
       PartitionedExecutionContext(processingThreads, reportFailure, Threads.factory(s"default-replay-processor")))
 
-  protected def processingContext(id: ID) = partitionThreads.singleThread(id.hashCode)
+  protected def processContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 
-  private[this] val replay = onMissingRevisions(es, replayMissingRevisionsDelay, scheduler, partitionThreads.reportFailure) _
+  private[this] val replay = replayMissingRevisions(es, replayMissingRevisionsDelay, scheduler, partitionThreads.reportFailure) _
 
-  protected def onMissingRevisions(id: ID, missing: Range): Unit = replay(id, missing)(apply)
+  protected def onMissingRevisions(id: ID, missing: Range): Unit = replay(id, missing)(this)
 
 }

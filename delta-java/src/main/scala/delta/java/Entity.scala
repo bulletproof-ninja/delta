@@ -2,8 +2,8 @@ package delta.java
 
 import collection.JavaConverters._
 
-abstract class Entity[ID, T, S >: Null, EVT](name: String, reducer: delta.EventReducer[S, EVT])
-  extends delta.ddd.Entity[S, EVT](name, reducer) {
+abstract class Entity[ID, T, S >: Null, EVT](name: String, projector: delta.Projector[S, EVT])
+  extends delta.ddd.Entity[S, EVT](name, projector) {
 
   type Id = ID
   type Type = Object

@@ -11,7 +11,7 @@ import delta.mongo._
 import delta.EventFormatAdapter
 import scuff.Codec
 import delta.util.LocalHub
-import delta.Publishing
+import delta.MessageHubPublishing
 import org.bson.BsonValue
 import com.mongodb._
 import org.bson.BsonBinary
@@ -51,13 +51,14 @@ class TestCollege extends college.TestCollege {
     def decode(bson: BsonValue): Array[Byte] = bson.asBinary().getData
   }
 
-  implicit def EvtCodec = new EventFormatAdapter(BinaryDocCodec)
+  def EvtFormat = new EventFormatAdapter(BinaryDocCodec, CollegeEventFormat)
 
   override lazy val eventStore: EventStore[Int, CollegeEvent] = {
-    new MongoEventStore[Int, CollegeEvent](coll) with Publishing[Int, CollegeEvent] {
-      def toNamespace(ch: Channel) = Namespace(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+    new MongoEventStore[Int, CollegeEvent](coll, EvtFormat) with MessageHubPublishing[Int, CollegeEvent] {
+      def toTopic(ch: Channel) = Topic(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txnCodec = scuff.Codec.noop
     }
   }
 

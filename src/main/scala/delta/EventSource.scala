@@ -39,7 +39,7 @@ trait EventSource[ID, EVT] {
   /** Subscribe to selected transactions, if publishing. */
   def subscribe[U](
       selector: StreamsSelector)(
-      callback: TXN => U): Subscription = sys.error("Publishing not enabled!")
+      callback: TXN => U): Subscription = sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageHubPublishing[_, _]].getName}")
 
   type CEVT = Class[_ <: EVT]
 
@@ -71,6 +71,7 @@ trait EventSource[ID, EVT] {
     def channelSubset: Set[Channel] = Set.empty
     def include(txn: TXN) = true
   }
+  @varargs
   def ChannelSelector(one: Channel, others: Channel*): StreamsSelector =
     new ChannelSelector((one +: others).toSet)
   def ChannelSelector(channels: Seq[Channel]): StreamsSelector =
@@ -86,16 +87,24 @@ trait EventSource[ID, EVT] {
     new EventSelector(Map((chEvt :: more.toList): _*))
   def EventSelector(byChannel: java.util.Map[Channel, java.util.Set[CEVT]]): Selector = {
     import collection.JavaConverters._
-    new EventSelector(byChannel.asScala.toMap.mapValues(_.asScala.toSet).toMap)
+    new EventSelector(byChannel.asScala.map(e => e._1 -> e._2.asScala.toSet).toMap)
   }
   /**
     * Only transactions containing the provided events.
     * This means broken, incomplete, streams. Should only
     * be used if necessary, i.e. on data sets so large that
     * it would otherwise take too long to process.
-    * NOTE: Steps should be taken to ensure that the stream
-    * revision number is still current, since this is no
-    * longer guaranteed.
+    *
+    * NOTE:
+    *
+    *   * Steps should be taken to ensure that the stream
+    *     revision number is still current, since this cannot
+    *     be guaranteed when consuming incomplete streams.
+    *   * Transactions will still contain all events
+    *     for that transaction, not just those selected. Only
+    *     transactions not including the selected events at all
+    *     will be excluded.
+    *
     */
   case class EventSelector private[EventSource] (byChannel: Map[Channel, Set[CEVT]])
     extends Selector {

@@ -7,12 +7,12 @@ import scala.concurrent.{ Future, ExecutionContext }
 import java.util.stream._
 import java.util.Spliterators
 import java.util.Spliterator
-import delta.util.StreamProcessStore
+import delta.process.StreamProcessStore
 import delta.Snapshot
 import java.util.function.Consumer
-import scala.util.Try
 import scala.util.Failure
-import java.util.function.BiConsumer
+import scala.util.control.NoStackTrace
+import scala.util.Try
 
 object ScalaHelp {
 
@@ -27,7 +27,7 @@ object ScalaHelp {
   def asJava[T](iter: Iterable[T]): java.lang.Iterable[T] = iter.asJava
 
   /** Turn Java `Map` into Scala immutable `Map`. */
-  def asScala[K, V](map: java.util.Map[K, V]): immutable.Map[K, V] = map.asScala.toMap
+  def asScala[K, V](map: java.util.Map[K, _ <: V]): immutable.Map[K, V] = map.asScala.toMap
   /** Turn Java `Iterable` into Scala `Iterable`. */
   def asScala[T](iter: java.lang.Iterable[T]): Iterable[T] = iter.asScala
   /** Turn Java `Optional` into Scala `Option`. */
@@ -35,6 +35,11 @@ object ScalaHelp {
 
   def tuple[A, B](a: A, b: B): (A, B) = a -> b
   def tuple[A, B, C](a: A, b: B, c: C): (A, B, C) = (a, b, c)
+
+  def filter[T](opt: Option[_ >: T], tc: Class[T]): Option[T] = opt.filter(v => tc isInstance v).asInstanceOf[Option[T]]
+
+  def Map[K, V]() = collection.immutable.Map.empty[K, V]
+  def Map[K, V](key: K, value: V) = collection.immutable.Map(key -> value)
 
   /** var-args to Scala `Seq`. */
   @annotation.varargs
@@ -110,9 +115,9 @@ object ScalaHelp {
   def transpose[T](futures: Stream[Future[T]], exeCtx: ExecutionContext): Future[Stream[T]] =
     transpose[T, T](futures, exeCtx, identity)
   /**
-    * Transpose `Stream` of `Future`s into `Future` of `Stream`s,
-    * while mapping the stream content to a different type.
-    */
+   * Transpose `Stream` of `Future`s into `Future` of `Stream`s,
+   * while mapping the stream content to a different type.
+   */
   def transpose[T, R](futures: Stream[Future[T]], exeCtx: ExecutionContext, map: T => R): Future[Stream[R]] = {
       implicit def ec = exeCtx
     (Future sequence futures.iterator.asScala).map { iter =>
@@ -121,19 +126,22 @@ object ScalaHelp {
   }
 
   /**
-    * Transpose `Stream` of `Future`s into `Future` of `Stream`s,
-    * while reducing the stream content to a single instance.
-    */
+   * Transpose `Stream` of `Future`s into `Future` of `Stream`s,
+   * while reducing the stream content to a single instance.
+   */
   def transposeAndReduce[T, R](
       futures: Stream[Future[T]], exeCtx: ExecutionContext,
-      default: R, reducer: (R, T) => R): Future[R] = {
+      default: R, projector: (R, T) => R): Future[R] = {
       implicit def ec = exeCtx
     (Future sequence futures.iterator.asScala).map { iter =>
-      iter.foldLeft(default)(reducer)
+      iter.foldLeft(default)(projector)
     }
   }
 
-  def writeToStore[K, V](snapshots: java.util.Map[K, Snapshot[V]], batchSize: Int, store: StreamProcessStore[K, V])(implicit ec: ExecutionContext): Future[Void] = {
+  def writeToStore[K, V](
+      snapshots: java.util.Map[K, Snapshot[V]],
+      batchSize: Int,
+      store: StreamProcessStore[K, V])(implicit ec: ExecutionContext): Future[Void] = {
     require(batchSize > 0, s"Must have positive batch size, not $batchSize")
     val futures: Iterator[Future[Unit]] =
       if (batchSize == 1) {
@@ -146,11 +154,9 @@ object ScalaHelp {
     (Future sequence futures).map(_ => null: Void)
   }
 
-  def reportFailure[R](message: String, reporter: BiConsumer[String, Throwable]): PartialFunction[Try[R], Unit] = {
-    case Failure(th) => reporter.accept(message, th)
-  }
-  def reportFailure[R](reporter: Consumer[Throwable]): PartialFunction[Try[R], Unit] = {
-    case Failure(th) => reporter.accept(th)
-  }
+  def adapt[T](report: Consumer[T]): T => Unit = t => report.accept(t)
 
+  def reportFailure[T](errorMessage: String, failureReporter: Consumer[Throwable]): PartialFunction[Try[T], Unit] = {
+    case Failure(th) => failureReporter accept new RuntimeException(errorMessage, th) with NoStackTrace
+  }
 }

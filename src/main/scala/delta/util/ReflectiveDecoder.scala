@@ -3,7 +3,6 @@ package delta.util
 import scala.reflect.{ ClassTag, classTag }
 import java.lang.reflect.Method
 import delta.EventFormat
-import scala.compat.Platform
 import java.util.{ HashMap => JMap }
 import scala.reflect.NameTransformer
 import java.lang.reflect.InvocationTargetException
@@ -94,7 +93,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
 
   private lazy val decoders: JMap[String, Decoder] = {
     val EvtClass = classTag[EVT].runtimeClass
-    val decoderMethodsWithName: Seq[(String, Method)] = getClass.getMethods.filter { m =>
+    val decoderMethodsWithName: List[(String, Method)] = getClass.getMethods.toList.filter { m =>
       val parmTypes = m.getParameterTypes
       parmTypes.length == 1 &&
         classOf[Encoded].isAssignableFrom(parmTypes(0)) &&
@@ -104,7 +103,7 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
     if (decoderMatch == MatchOnReturnType) {
       decoderMethodsWithName.groupBy(_._1).toSeq.filter(_._2.size > 1).headOption.foreach {
         case (evtName, methods) =>
-          val nlIndent = Platform.EOL + "\t"
+          val nlIndent = "\n\t"
           val methodsString = methods.mkString(nlIndent, nlIndent, "")
           throw new IllegalStateException(
             s"""Event "$evtName" has ambiguous decoding by the following methods:$methodsString""")

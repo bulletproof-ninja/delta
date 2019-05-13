@@ -17,6 +17,7 @@ import delta._
 import delta.ddd._
 import delta.util._
 import scala.{ SerialVersionUID => version }
+import delta.process.ConcurrentMapStore
 
 trait AggrEventHandler {
   type Return
@@ -32,7 +33,7 @@ case class ChangeStatus(newStatus: String)
 
 case class AggrState(status: String, numbers: Set[Int])
 
-object AggrStateAssembler extends EventReducer[AggrState, AggrEvent] {
+object AggrStateAssembler extends Projector[AggrState, AggrEvent] {
   def init(evt: AggrEvent) = new EvtHandler().dispatch(evt)
   def next(s: AggrState, evt: AggrEvent) = new EvtHandler(s).dispatch(evt)
 }
@@ -100,7 +101,7 @@ abstract class AbstractEventStoreRepositoryTest {
       case Success(_) => done.complete(Try(fail("Should have failed as unknown")))
       case Failure(e: UnknownIdException) =>
         assertEquals("Foo", e.id)
-        done.success(Unit)
+        done.success(())
       case Failure(other) => done.failure(other)
     }
   }
@@ -170,7 +171,7 @@ abstract class AbstractEventStoreRepositoryTest {
                           case Success((foo, rev)) =>
                             assertEquals(2, rev)
                             assertEquals("NotNew", foo.aggr.status)
-                            done.success(Unit)
+                            done.success(())
                         }
                     }
                 }
@@ -210,7 +211,7 @@ abstract class AbstractEventStoreRepositoryTest {
             assertTrue(foo.numbers.contains(42))
             assertTrue(foo.numbers.contains(99))
             assertEquals(2, foo.numbers.size)
-            done.success(Unit)
+            done.success(())
         }
     }
   }
@@ -227,7 +228,7 @@ abstract class AbstractEventStoreRepositoryTest {
           case Failure(t) => done.failure(t)
           case Success(idAgain) =>
             assertEquals(id, idAgain)
-            done.success(Unit)
+            done.success(())
         }
     }
   }
@@ -244,7 +245,7 @@ abstract class AbstractEventStoreRepositoryTest {
     insFut.onComplete {
       case f: Failure[_] => done.complete(f)
       case Success(_) =>
-        for (i ← range) {
+        for (i <- range) {
           val runThis = new Runnable {
             def run: Unit = {
               val fut = repo.update(id, Some(0), metadata) {
@@ -284,7 +285,7 @@ abstract class AbstractEventStoreRepositoryTest {
           case Failure(t) => done.failure(t)
           case Success((_, newRevision)) =>
             assertEquals(0, newRevision)
-            done.success(Unit)
+            done.success(())
         }
     }
   }
@@ -328,7 +329,7 @@ object TheOneAggr extends Entity("", AggrStateAssembler) {
 
 class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTest {
 
-  implicit object Codec
+  object EvtFmt
     extends EventFormat[AggrEvent, String] {
 
     def getVersion(cls: EventClass) = NoVersion
@@ -352,13 +353,14 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
   @Before
   def setup(): Unit = {
 
-    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext) with Publishing[String, AggrEvent] {
-      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
-      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
-      val txnHub = new LocalHub[TXN](toNamespace, ec)
+    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext, EvtFmt) with MessageHubPublishing[String, AggrEvent] {
+      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
+      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
+      val txnHub = new LocalHub[TXN](toTopic, ec)
       val txnChannels = Set(TheOneAggr.channel)
+      val txnCodec = Codec.noop
     }
-    repo = new EntityRepository(TheOneAggr)(es)
+    repo = new EntityRepository(TheOneAggr, ec)(es, ticker)
   }
 
 }
@@ -367,7 +369,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
   import ReflectiveDecoder._
 
-  implicit object Codec
+  object EvtFmt
     extends ReflectiveDecoder[AggrEvent, String](MatchOnMethodName)
     with AggrEventHandler
     with EventFormat[AggrEvent, String] {
@@ -401,14 +403,15 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   @Before
   def setup(): Unit = {
     metrics = Nil
-    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext) with Publishing[String, AggrEvent] {
-      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
-      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
-      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+    es = new TransientEventStore[String, AggrEvent, String](RandomDelayExecutionContext, EvtFmt) with MessageHubPublishing[String, AggrEvent] {
+      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
+      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
+      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(TheOneAggr.channel)
+      val txnCodec = Codec.noop
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
-    val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap)(_ => Future successful None)
-    repo = new EntityRepository(TheOneAggr)(es, snapshotStore)
+    val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap, None)(_ => Future successful None)
+    repo = new EntityRepository(TheOneAggr, ec)(es, ticker, snapshotStore)
   }
 }

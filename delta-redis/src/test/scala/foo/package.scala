@@ -2,7 +2,7 @@ import delta.EventFormat
 import scuff.JavaSerializer
 
 package object foo {
-  implicit object BinaryEventFormat
+  object BinaryEventFormat
     extends EventFormat[MyEvent, Array[Byte]] {
 
     protected def getVersion(cls: EventClass) = NoVersion

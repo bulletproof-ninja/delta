@@ -20,7 +20,7 @@ case class Snapshot[+Content](
     }
   }
 
-  def contentEquals(that: Snapshot[_]): Boolean = (this.content.getClass eq that.content.getClass) && {
+  def contentEquals(that: Snapshot[_]): Boolean = (this.content == null && that.content == null) || {
     this.content match {
       case bytes: Array[Byte] => Arrays.equals(bytes, that.content.asInstanceOf[Array[Byte]])
       case _ => this.content == that.content

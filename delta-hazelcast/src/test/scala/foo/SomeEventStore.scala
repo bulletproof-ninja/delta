@@ -3,15 +3,18 @@ package foo
 import delta.util.TransientEventStore
 import scala.concurrent.ExecutionContext
 import com.hazelcast.core.HazelcastInstance
-import delta.Publishing
+import delta.MessageHubPublishing
 import delta.hazelcast.TopicMessageHub
 import delta.Transaction.Channel
+import scuff.Codec
 
 class SomeEventStore(ec: ExecutionContext, hz: HazelcastInstance)
-  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec)
-  with Publishing[Int, MyEvent] {
+  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)
+  with MessageHubPublishing[Int, MyEvent] {
 
-  protected def toNamespace(ch: Channel) = Namespace(s"txn:$ch")
-  protected val txnHub = TopicMessageHub[TXN](hz, ec)
+  protected def toTopic(ch: Channel) = Topic(s"txn:$ch")
+  protected val txnHub = new TopicMessageHub[TXN](hz, ec)
   protected val txnChannels = Set(Channel("one"))
+  protected val txnCodec = Codec.noop
+
 }

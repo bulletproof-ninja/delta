@@ -6,57 +6,58 @@ import scuff.Subscription
 import concurrent.blocking
 import com.hazelcast.core.ITopic
 import delta.MessageHub
-import scuff.Codec
 import com.hazelcast.core.HazelcastInstance
 import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
+import delta.process.SnapshotUpdate
 
 object TopicMessageHub {
-  private def getTopic[PF](hz: HazelcastInstance)(ns: Namespace): ITopic[PF] = hz.getTopic[PF](ns.toString)
 
-  def apply[MSG](
+  private def getITopic[MsgType](
+      hz: HazelcastInstance)(
+      topic: Topic): ITopic[MsgType] = hz.getTopic[MsgType](topic.toString)
+
+  def apply[ID, S](
       hz: HazelcastInstance,
-      publishCtx: ExecutionContext): TopicMessageHub[MSG, MSG] =
-    new TopicMessageHub(hz, publishCtx, Codec.noop[MSG])
+      publishCtx: ExecutionContext): TopicMessageHub[(ID, SnapshotUpdate[S])] =
+    new TopicMessageHub(hz, publishCtx)
 
-  type Namespace = MessageHub.Namespace
+  type Topic = MessageHub.Topic
 }
 
 /**
- * Publishing implementation using a
+ * [[delta.MessageHub]] implementation using a
  * Hazelcast `ITopic`.
  *
- * @param getTopic Return an `ITopic` for namespace.
+ * @param getTopic Return an `ITopic` for topic.
  * @param publishCtx The execution context to publish on
  * @param messageCodec Message translation codec
  */
-class TopicMessageHub[MSG, PF](
-    getTopic: MessageHub.Namespace => ITopic[PF],
-    protected val publishCtx: ExecutionContext,
-    protected val messageCodec: Codec[MSG, PF])
-  extends MessageHub[MSG] {
+class TopicMessageHub[M](
+    getITopic: MessageHub.Topic => ITopic[M],
+    protected val publishCtx: ExecutionContext)
+  extends MessageHub {
 
   def this(
       hz: HazelcastInstance,
-      publishCtx: ExecutionContext,
-      messageCodec: Codec[MSG, PF]) =
-    this(TopicMessageHub.getTopic[PF](hz) _, publishCtx, messageCodec)
+      publishCtx: ExecutionContext) =
+    this(TopicMessageHub.getITopic[M](hz) _, publishCtx)
 
-  type PublishFormat = PF
+  type MsgType = M
 
-  protected def publishImpl(ns: Namespace, msg: PublishFormat) = blocking {
-    getTopic(ns).publish(msg)
+  protected def publishImpl(topic: Topic, msg: MsgType) = blocking {
+    getITopic(topic).publish(msg)
   }
 
-  protected type SubscriptionKey = Namespace
-  protected def subscriptionKeys(nss: Set[Namespace]): Set[SubscriptionKey] = nss
-  protected def subscribeToKey(ns: Namespace)(callback: (Namespace, PF) => Unit): Subscription = {
-    val topic = getTopic(ns)
-    val regId = topic addMessageListener new MessageListener[PF] {
-      def onMessage(msg: Message[PF]): Unit = callback(ns, msg.getMessageObject)
+  protected type SubscriptionKey = Topic
+  protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = topics
+  protected def subscribeToKey(topic: Topic)(callback: (Topic, MsgType) => Unit): Subscription = {
+    val hzTopic = getITopic(topic)
+    val regId = hzTopic addMessageListener new MessageListener[MsgType] {
+      def onMessage(msg: Message[MsgType]): Unit = callback(topic, msg.getMessageObject)
     }
     new Subscription {
-      def cancel(): Unit = try topic.removeMessageListener(regId) catch {
+      def cancel(): Unit = try hzTopic.removeMessageListener(regId) catch {
         case NonFatal(th) => publishCtx.reportFailure(th)
       }
     }

@@ -1,91 +1,102 @@
 package delta.redis
 
-import redis.clients.jedis._
+import java.util.concurrent._
+
 import scala.concurrent._, duration._
-import delta.MessageHub
-import scuff._
-import delta.SubscriptionPooling
-import java.util.concurrent.ScheduledExecutorService
-import scala.concurrent.duration.FiniteDuration
-import scuff.concurrent.ResourcePool
-import scuff.concurrent.Threads
-import scala.util.control.NonFatal
-import redis.clients.jedis.exceptions.JedisConnectionException
 import scala.util.Try
-import scala.util.control.NoStackTrace
+import scala.util.control.{ NoStackTrace, NonFatal }
+
+import delta.{ BufferedRetryPublish, MessageHub, SubscriptionPooling }
+import redis.clients.jedis.{ BinaryJedis, BinaryJedisPubSub, JedisShardInfo }
+import redis.clients.jedis.exceptions.JedisConnectionException
+import scuff.concurrent.{ BoundedResourcePool, FailureTracker, ResourcePool, Threads, UnboundedResourcePool }
+import scuff.Subscription
 
 private object RedisMessageHub {
-  val MaxDelayInterval = 60.seconds
-  val FiveSeconds = 5.seconds
-  val DefaultRetryDelays = new Iterable[FiniteDuration] {
-    def iterator =
-      Iterator(100.millisecond, 1.second, 3.seconds) ++
-        Iterator.iterate(FiveSeconds) { prev =>
-          if (prev >= MaxDelayInterval) prev
-          else prev + FiveSeconds
-        }
+  val DefaultLifecycle = ResourcePool.onEviction[BinaryJedis](_.quit) {
+    case _: JedisConnectionException => true
+    case _ => false
   }
-
 }
 
 /**
  * @param info Redis server information
  * @param channelCodec
  */
-class RedisMessageHub[MSG](
+class RedisMessageHub(
     info: JedisShardInfo,
+    maxConnections: Int,
     protected val publishCtx: ExecutionContext,
-    protected val messageCodec: Codec[MSG, Array[Byte]],
-    protected val cancellationDelay: Option[(ScheduledExecutorService, FiniteDuration)] = None,
-    subscribeRetryDelay: Iterable[FiniteDuration] = RedisMessageHub.DefaultRetryDelays)
-  extends MessageHub[MSG]
-  with SubscriptionPooling[MSG] {
+    publishBuffer: BlockingQueue[Any],
+    publishFailureThreshold: Int,
+    pooledSubscriptionCancellationDelay: Option[(ScheduledExecutorService, FiniteDuration)] = None,
+    failureBackoff: Iterable[FiniteDuration] = MessageHub.DefaultBackoff)(
+    implicit
+    lifecycle: ResourcePool.Lifecycle[BinaryJedis] = RedisMessageHub.DefaultLifecycle)
+  extends MessageHub
+  with SubscriptionPooling
+  with BufferedRetryPublish {
 
   def this(
       info: JedisShardInfo,
+      maxConnections: Int,
       publishCtx: ExecutionContext,
-      publishCodec: Codec[MSG, Array[Byte]]) =
-    this(info, publishCtx, publishCodec, None)
+      publishBuffer: BlockingQueue[Any],
+      publishFailureThreshold: Int) =
+    this(info, maxConnections, publishCtx, publishBuffer, publishFailureThreshold, None)
 
-  def this(
-      info: JedisShardInfo,
-      publishCtx: ExecutionContext) =
-    this(info, publishCtx, JavaSerializer[MSG], None)
+  @inline private def Topic(bytes: Array[Byte]) = MessageHub.Topic(RedisCodec decode bytes)
+  @inline private def toRedisChannel(topic: Topic): Array[Byte] = RedisCodec encode topic.toString
 
-  @inline private def Namespace(bytes: Array[Byte]) = MessageHub.Namespace(RedisCodec decode bytes)
-  @inline private def toRedisChannel(ns: Namespace): Array[Byte] = RedisCodec encode ns.toString
+  protected def cancellationDelay = pooledSubscriptionCancellationDelay
 
-  type PublishFormat = Array[Byte]
+  /** The publish queue. */
+  protected val publishQueue = publishBuffer.asInstanceOf[BlockingQueue[(Topic, MsgType)]]
+  /** The threshold before circuit breaker is tripped. */
+  protected def circuitBreakerThreshold = publishFailureThreshold
+  /** The retry back-off schedule circuit breaker. */
+  protected def publishFailureBackoff = failureBackoff
 
-  protected type SubscriptionKey = Set[Namespace]
-  protected def subscriptionKeys(nss: Set[Namespace]): Set[SubscriptionKey] = Set(nss)
+  type MsgType = Array[Byte]
+
+  protected type SubscriptionKey = Set[Topic]
+  protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = Set(topics)
+
+  protected def unusedConnectionTimeout = 10.minutes
 
   private[this] val jedisPool = {
-    val pool = new ResourcePool(new BinaryJedis(info), 2)
-    val tf = Threads.factory(s"${getClass.getSimpleName} Redis connection pruner")
-    pool.startPruning(10.minutes, _.quit(), Threads.newSingleRunExecutor(tf, publishCtx.reportFailure))
+    val pool = if (maxConnections == Int.MaxValue) {
+      new UnboundedResourcePool(new BinaryJedis(info), 2)
+    } else {
+      new BoundedResourcePool(new BinaryJedis(info), 2, maxConnections)
+    }
+    val exe = pooledSubscriptionCancellationDelay.map(_._1) getOrElse {
+      val tf = Threads.daemonFactory(s"${getClass.getSimpleName} Redis connection evictor")
+      Threads.newSingleRunExecutor(tf, publishCtx.reportFailure)
+    }
+    pool.startEviction(unusedConnectionTimeout, exe)
     pool
   }
 
-  protected def publishImpl(ns: Namespace, msg: Array[Byte]) = {
+  protected def publishImpl(topic: Topic, msg: Array[Byte]) = {
     jedisPool.use { jedis =>
-      blocking(jedis.publish(RedisCodec.encode(ns.toString), msg))
+      blocking(jedis.publish(RedisCodec.encode(topic.toString), msg))
     }
   }
 
-  private val threadGroup = Threads.newThreadGroup(s"${getClass.getName}", daemon = false, publishCtx.reportFailure)
+  private val subscriberThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:subscriber", daemon = false, MessageHub.ThreadGroup, publishCtx.reportFailure)
 
-  protected def subscribeToKey(channels: SubscriptionKey)(callback: (Namespace, PublishFormat) => Unit): Subscription = {
+  protected def subscribeToKey(channels: SubscriptionKey)(callback: (Topic, MsgType) => Unit): Subscription = {
     val jedisSubscriber = new BinaryJedisPubSub {
       override def onMessage(channelBytes: Array[Byte], byteMsg: Array[Byte]): Unit = {
-        callback(Namespace(channelBytes), byteMsg)
+        callback(Topic(channelBytes), byteMsg)
       }
     }
     subscribeToChannels(channels, jedisSubscriber)
   }
 
-  private final class ConnectionException(retryDelay: FiniteDuration, cause: JedisConnectionException)
-    extends RuntimeException(s"Bad connection. Will retry in $retryDelay", cause)
+  private final class ConnectionException(retryDelay: FiniteDuration)
+    extends RuntimeException(s"Bad connection. Will retry in $retryDelay")
     with NoStackTrace
 
   private def subscribeToChannels(
@@ -94,7 +105,7 @@ class RedisMessageHub[MSG](
     val jedis = new BinaryJedis(info)
     val subKey = channels.mkString("|")
     val redisChannels = channels.toSeq.map(toRedisChannel)
-    val subscriberThread = new Thread(threadGroup, s"${getClass.getName}[$subKey]") {
+    val subscriberThread = new Thread(subscriberThreadGroup, s"${getClass.getName}[$subKey]") {
       override def run() = try {
         consumeMessages()
       } catch {
@@ -102,20 +113,21 @@ class RedisMessageHub[MSG](
         case NonFatal(e) => publishCtx.reportFailure(e)
       }
 
-      def consumeMessages() = {
-        var retryDelays: Iterator[FiniteDuration] = null
-        var currDelay: FiniteDuration = RedisMessageHub.FiveSeconds
+      private def consumeMessages() = {
+        val ft = new FailureTracker(2, publishCtx.reportFailure, failureBackoff)
         while (!Thread.currentThread.isInterrupted) {
+          val timeout = ft.timeout()
+          if (timeout.length > 0) {
+            publishCtx reportFailure new ConnectionException(timeout)
+            timeout.unit.sleep(timeout.length)
+          }
           try {
             jedis.connect()
-            retryDelays = null // Connection successful
+            ft.reset() // Connection successful
             jedis.subscribe(jedisSubscriber, redisChannels: _*) // forever blocking call (unless exception)
           } catch {
             case jce: JedisConnectionException =>
-              if (retryDelays == null) retryDelays = subscribeRetryDelay.iterator
-              if (retryDelays.hasNext) currDelay = retryDelays.next
-              publishCtx reportFailure new ConnectionException(currDelay, jce)
-              currDelay.unit.sleep(currDelay.length) // Dedicated thread, ok to block
+              ft reportFailure jce
           } finally {
             Try(jedis.disconnect)
           }

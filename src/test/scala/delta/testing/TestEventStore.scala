@@ -7,6 +7,7 @@ import scuff.io.{ ByteInputStream, ByteOutputStream }
 import scuff.JavaSerializer
 import delta._
 import delta.util.LocalHub
+import scuff.Codec
 
 sealed trait Event
 object Event {
@@ -19,7 +20,7 @@ class TestEventStore {
 
   final val Channel = Transaction.Channel("USER")
 
-  implicit object EvtCodec
+  object EvtFmt
       extends EventFormat[Event, Array[Byte]] {
 
     def getVersion(cls: EventClass) = NoVersion
@@ -32,11 +33,12 @@ class TestEventStore {
   }
 
   private[this] val es = new util.TransientEventStore[Symbol, Event, Array[Byte]](
-      RandomDelayExecutionContext) with Publishing[Symbol, Event] {
-      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
-      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
-      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      RandomDelayExecutionContext, EvtFmt) with MessageHubPublishing[Symbol, Event] {
+      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
+      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
+      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(Channel)
+      val txnCodec = Codec.noop
   }
 
   @Test

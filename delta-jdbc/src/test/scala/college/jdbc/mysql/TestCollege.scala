@@ -13,14 +13,23 @@ import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalHub
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
-import delta.Publishing
+import delta.MessageHubPublishing
+import scuff.jdbc.ConnectionSource
+import college.CollegeEventFormat
 
 object TestCollege {
   val db = "delta_testing_college"
   val ds = {
     val ds = new MysqlDataSource
-    ds.setUser("root")
-    ds setUrl s"jdbc:mysql://localhost/$db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&autoReconnect=true&useSSL=false"
+    ds setUser "root"
+    ds setURL s"jdbc:mysql://localhost/$db"
+    ds setCreateDatabaseIfNotExist true
+    ds setUseUnicode true
+    ds setUseSSL true
+    ds setAutoReconnect true
+    ds setCharacterEncoding "utf-8"
+    ds setRewriteBatchedStatements true
+    ds setContinueBatchOnError false
     ds
   }
   @AfterClass
@@ -48,12 +57,16 @@ class TestCollege extends college.TestCollege {
   override lazy val eventStore: EventStore[Int, CollegeEvent] = {
     implicit def DataColumn = BlobColumn
     val sql = new MySQLDialect[Int, CollegeEvent, Array[Byte]]
+    val cs = new ConnectionSource with DataSourceConnection {
+      val dataSource = ds
+    }
     new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
-      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
-      def toNamespace(ch: Channel) = Namespace(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+      CollegeEventFormat,
+      sql, cs, RandomDelayExecutionContext) with MessageHubPublishing[Int, CollegeEvent] {
+      def toTopic(ch: Channel) = Topic(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      protected def dataSource = ds
+      val txnCodec = scuff.Codec.noop
     }.ensureSchema()
   }
 

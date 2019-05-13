@@ -1,7 +1,7 @@
 package delta.util.json
 
 import scuff.Codec
-import scuff.Numbers
+import scuff.json._, JsVal._
 
 class Tuple2Codec[A, B](a: Codec[A, JSON], b: Codec[B, JSON])
   extends Codec[(A, B), JSON] {
@@ -9,19 +9,13 @@ class Tuple2Codec[A, B](a: Codec[A, JSON], b: Codec[B, JSON])
   def encode(t: (A, B)): JSON = {
     val jsonA = a encode t._1
     val jsonB = b encode t._2
-    s"[$jsonA,$jsonB,${jsonA.length},${jsonB.length}]"
+    s"[$jsonA,$jsonB]"
   }
   def decode(json: JSON): (A, B) = {
-    import Tuple2Codec._
-
-    val idxLenB = json.lastIndexOf(',', json.length - 3) + 1
-    val lenB = Numbers.parseUnsafeInt(json, idxLenB)(EndBracket)
-    val idxLenA = json.lastIndexOf(',', idxLenB - 3) + 1
-    val lenA = Numbers.parseUnsafeInt(json, idxLenA)(Comma)
-
-    val jsonA = json.substring(1, 1 + lenA)
-    val jsonB = json.substring(2 + lenA, 2 + lenA + lenB)
-    (a decode jsonA, b decode jsonB)
+    val JsArr(jsA, jsB) = JsVal parse json
+    val a = this.a decode jsA.toJson
+    val b = this.b decode jsB.toJson
+    a -> b
   }
 }
 

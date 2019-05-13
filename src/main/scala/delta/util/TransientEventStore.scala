@@ -11,7 +11,7 @@ import delta.{ EventFormat, EventStore }
   * Non-persistent implementation, probably only useful for testing.
   */
 abstract class TransientEventStore[ID, EVT, SF](
-  execCtx: ExecutionContext)(implicit evtFmt: EventFormat[EVT, SF])
+  execCtx: ExecutionContext, evtFmt: EventFormat[EVT, SF])
     extends EventStore[ID, EVT] {
 
   private def Txn(id: ID, rev: Int, channel: Channel, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {

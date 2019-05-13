@@ -1,6 +1,6 @@
 package delta.ddd
 
-import delta.EventReducer
+import delta.Projector
 import delta.Transaction.Channel
 
 private[delta] object Entity {
@@ -13,9 +13,9 @@ private[delta] object Entity {
   * Type-class for Entity definition.
   * Only for top-level (aggregate root) entities.
   */
-abstract class Entity[S >: Null, EVT](name: String, reducer: EventReducer[S, EVT]) {
+abstract class Entity[S >: Null, EVT](name: String, projector: Projector[S, EVT]) {
 
-  val channel = Channel(name)
+  val channel: delta.Transaction.Channel = Channel(name)
 
   type Id
   type Type
@@ -23,7 +23,7 @@ abstract class Entity[S >: Null, EVT](name: String, reducer: EventReducer[S, EVT
   type State = delta.ddd.State[S, EVT]
   type Event = EVT
 
-  def newState(initState: S = null): State = new State(reducer, initState)
+  def newState(initState: S = null): State = new State(projector, initState)
 
   private[ddd] def validatedState(entity: Type): State = {
     val s = state(entity)
@@ -36,7 +36,7 @@ abstract class Entity[S >: Null, EVT](name: String, reducer: EventReducer[S, EVT
   /**
     * Initialize entity instance.
     * @param state The internal state
-    * @param mergeEVTs Any potential events to merge
+    * @param mergeEvents Any potential events to merge
     * @return The Entity instance
     */
   protected def init(state: State, mergeEvents: List[Event]): Type

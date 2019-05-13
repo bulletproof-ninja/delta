@@ -5,12 +5,13 @@ import scala.util.{ Failure, Success, Try }
 import org.junit.Assert._
 import org.junit.Test
 
-import delta.{ EventStore, LamportTicker, Publishing }
+import delta.{ EventStore, LamportTicker, MessageHubPublishing }
 import delta.ddd.{ DuplicateIdException, EntityRepository }
 import delta.testing.RandomDelayExecutionContext
 import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 import delta.util.LocalHub
+import scuff.Codec
 
 class TestSampler {
 
@@ -18,18 +19,19 @@ class TestSampler {
 
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
-      RandomDelayExecutionContext) with Publishing[Int, DomainEvent] {
-      def toNamespace(ch: Channel) = Namespace(s"transactions/$ch")
-      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
-      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      RandomDelayExecutionContext, JsonDomainEventFormat) with MessageHubPublishing[Int, DomainEvent] {
+      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
+      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
+      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(Employee.Def.channel, Department.Def.channel)
+      val txnCodec = Codec.noop
     }
 
   implicit def ec = RandomDelayExecutionContext
-  implicit lazy val ticker = LamportTicker(es)
+  lazy val ticker = LamportTicker(es)
 
-  lazy val EmployeeRepo = new EntityRepository(Employee.Def)(es)
-  lazy val DepartmentRepo = new EntityRepository(Department.Def)(es)
+  lazy val EmployeeRepo = new EntityRepository(Employee.Def, ec)(es, ticker)
+  lazy val DepartmentRepo = new EntityRepository(Department.Def, ec)(es, ticker)
 
   @Test
   def inserting(): Unit = {

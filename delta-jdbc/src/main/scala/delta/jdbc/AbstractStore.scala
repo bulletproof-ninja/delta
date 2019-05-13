@@ -6,21 +6,56 @@ import scala.util.Try
 import java.sql.Statement
 import scala.annotation.tailrec
 import scala.concurrent._
-import scuff.jdbc.ConnectionProvider
+import scuff.jdbc.ConnectionSource
 
-abstract class AbstractStore(implicit protected val blockingCtx: ExecutionContext) {
-  cp: ConnectionProvider =>
+abstract class AbstractStore(
+    cs: ConnectionSource,
+    version: Option[Short],
+    table: String, schema: Option[String])(
+    implicit
+    protected val blockingCtx: ExecutionContext) {
 
-  protected def selectMaxTick(tableRef: String, version: Short) = s"""
+  protected def createTable(conn: Connection): Unit
+  protected def createTickIndex(conn: Connection): Unit
+
+  /** Ensure table. */
+  def ensureTable(): this.type =
+    cs.forUpdate { conn =>
+      ensureTable(conn)
+      this
+    }
+
+  protected def ensureTable(conn: Connection): Unit = {
+    createTable(conn)
+    createTickIndex(conn)
+  }
+
+  private[this] val schemaRef = schema.map(_ + ".") getOrElse ""
+  protected val tableRef: String = schemaRef concat table
+
+  def tickWatermark: Option[Long] =
+    cs.forQuery { conn =>
+      maxTick(tableRef)(conn)
+    }
+
+  protected def tickIndexName = tableRef.replace(".", "_") concat "_tick"
+  protected def createTickIndexDDL = {
+    val withVersion = version.map(_ => "version, ") getOrElse ""
+    s"""
+CREATE INDEX IF NOT EXISTS $tickIndexName
+  ON $tableRef (${withVersion}tick)
+"""
+  }
+
+  protected def selectMaxTick(tableRef: String) = s"""
 SELECT MAX(tick)
 FROM $tableRef
-WHERE version = $version
-  """.trim
+""" concat (version.map(version => s"WHERE version = $version") getOrElse "")
 
-  protected def maxTick(tableRef: String, version: Short)(conn: Connection): Option[Long] = {
+  protected def maxTick(tableRef: String)(conn: Connection): Option[Long] = {
     val stm = conn.createStatement()
     try {
-      val rs = stm executeQuery selectMaxTick(tableRef, version)
+      val rs = stm executeQuery selectMaxTick(tableRef)
       if (rs.next) {
         val tick = rs.getLong(1)
         if (rs.wasNull) None
@@ -29,8 +64,8 @@ WHERE version = $version
     } finally Try(stm.close)
   }
 
-  protected def futureUpdate[R](thunk: Connection => R): Future[R] = Future(forUpdate(thunk))
-  protected def futureQuery[R](thunk: Connection => R): Future[R] = Future(forQuery(thunk))
+  protected def futureUpdate[R](thunk: Connection => R): Future[R] = Future(cs.forUpdate(thunk))
+  protected def futureQuery[R](thunk: Connection => R): Future[R] = Future(cs.forQuery(thunk))
 
   /** Execute batch, return failures. */
   protected def executeBatch[K](ps: PreparedStatement, keys: Iterable[K]): Iterable[K] = {
@@ -56,10 +91,9 @@ WHERE version = $version
   }
 
   protected def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
-  protected def executeDDL(conn: Connection, ddl: String): Unit = {
-    val stm = conn.createStatement()
-    try stm.execute(ddl) finally Try(stm.close)
-  }
+
+  import Dialect.executeDDL
+
   protected def createTable(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)
   protected def createIndex(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)
   protected def dropTable(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)

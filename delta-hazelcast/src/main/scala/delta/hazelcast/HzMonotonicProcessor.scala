@@ -1,20 +1,20 @@
 package delta.hazelcast
 
 import delta.Transaction
-import delta.EventReducer
+import delta.Projector
 import com.hazelcast.core.IMap
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.util._
-import delta.util.MissingRevisionsReplay
+import delta.process.MissingRevisionsReplay
 import delta.EventSource
 import java.util.concurrent.ScheduledExecutorService
 
-class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
+class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null: ClassTag](
     es: EventSource[ID, _ >: EVT],
     imap: IMap[ID, EntryState[S, EVT]],
-    reducer: EventReducer[S, EVT],
+    projector: Projector[S, EVT],
     reportFailure: Throwable => Unit,
     missingRevisionsReplayScheduler: ScheduledExecutorService,
     missingRevisionsReplayDelay: FiniteDuration = 1111.milliseconds)
@@ -23,8 +23,8 @@ class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
 
   implicit private[this] val ec = ExecutionContext.fromExecutorService(missingRevisionsReplayScheduler, reportFailure)
 
-  private[this] val replay = onMissingRevisions(es, missingRevisionsReplayDelay, missingRevisionsReplayScheduler, reportFailure) _
-  private[this] val process = DistributedMonotonicProcessor(imap, reducer) _
+  private[this] val replay = replayMissingRevisions(es, missingRevisionsReplayDelay, missingRevisionsReplayScheduler, reportFailure) _
+  private[this] val process = DistributedMonotonicProcessor(imap, projector) _
 
   type TXN = Transaction[ID, _ >: EVT]
   def apply(txn: TXN) = {

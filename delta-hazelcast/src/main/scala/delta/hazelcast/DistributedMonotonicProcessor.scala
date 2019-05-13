@@ -7,7 +7,7 @@ import scala.collection.immutable.TreeMap
 
 import com.hazelcast.map.AbstractEntryProcessor
 
-import delta.{ EventReducer, Snapshot, Transaction }
+import delta.{ Projector, Snapshot, Transaction }
 import com.hazelcast.core.IMap
 import scala.concurrent.Future
 import scala.reflect.{ ClassTag, classTag }
@@ -27,7 +27,7 @@ object DistributedMonotonicProcessor {
   /**
     * Process transaction, ensuring proper sequencing.
     */
-  def apply[K, EVT: ClassTag, S >: Null](imap: IMap[K, EntryState[S, EVT]], reducer: EventReducer[S, EVT])(
+  def apply[K, EVT: ClassTag, S >: Null: ClassTag](imap: IMap[K, EntryState[S, EVT]], projector: Projector[S, EVT])(
     txn: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
     val verifiedTxn: Transaction[K, EVT] = {
       txn.events.collect { case evt: EVT => evt } match {
@@ -35,7 +35,7 @@ object DistributedMonotonicProcessor {
         case events => txn.copy(events = events)
       }
     }
-    val processor = new DistributedMonotonicProcessor[K, EVT, S](verifiedTxn, reducer)
+    val processor = new DistributedMonotonicProcessor[K, EVT, S](verifiedTxn, projector)
     val callback = CallbackPromise[EntryUpdateResult]
     imap.submitToKey(txn.stream, processor, callback)
     callback.future
@@ -49,13 +49,13 @@ object DistributedMonotonicProcessor {
  */
 final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] (
   val txn: Transaction[K, EVT],
-  val reducer: EventReducer[S, EVT])(implicit val evtTag: ClassTag[EVT])
+  val projector: Projector[S, EVT])(implicit val evtTag: ClassTag[EVT], val stateTag: ClassTag[S])
     extends AbstractEntryProcessor[K, EntryState[S, EVT]](true) {
 
   type EntryState = delta.hazelcast.EntryState[S, EVT]
   type TXN = Transaction[_, EVT]
 
-  private[this] val reduce = EventReducer.process(reducer) _
+  private[this] val reduce = Projector.process(projector) _
 
   def process(entry: Entry[K, EntryState]): Object = processTransaction(entry, this.txn)
 

@@ -24,13 +24,13 @@ trait Repository[ID, E] extends Updates[ID, E] {
 
   /**
     * Insert new entity. Will, by definition, always be given revision `0`.
-    * @param id The instance id
+    * @param newId The new instance id function
     * @param entity The instance to insert
     * @param metadata Optional metadata.
     * @return The id if successful,
-    * or [[delta.ddd.DuplicateIdException]] if id already exists
+    * or [[delta.ddd.DuplicateIdException]] if id already exists and id is constant
     */
-  def insert(id: ID, entity: E, metadata: Map[String, String] = Map.empty): Future[ID]
+  def insert(newId: => ID, entity: E, metadata: Map[String, String] = Map.empty): Future[ID]
 }
 
 sealed trait Updates[ID, E] {
@@ -44,7 +44,10 @@ sealed trait Updates[ID, E] {
 
   /**
     * Update entity.
-    * @param id The instance id
+    * NOTE: The `updateThunk` should be side-effect free, as it
+    * may be invoked multiple times, if there are concurrent
+    * updates.
+    * @param id The entity id
     * @param expectedRevision The revision that is expected to be updated.
     * @param metadata Optional metadata.
     * @param updateThunk The code block responsible for updating.
@@ -63,7 +66,10 @@ sealed trait Updates[ID, E] {
 
   /**
     * Update entity.
-    * @param id The instance id
+    * NOTE: The `updateThunk` should be side-effect free, as it
+    * may be invoked multiple times, if there are concurrent
+    * updates.
+    * @param id The entity id
     * @param metadata Metadata.
     * @param updateThunk The code block responsible for updating.
     * Will receive the instance and current revision.

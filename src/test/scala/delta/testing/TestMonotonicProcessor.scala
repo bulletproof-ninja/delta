@@ -7,16 +7,17 @@ import scala.collection.concurrent.TrieMap
 import org.junit.Assert._
 import org.junit.Test
 
-import delta.{ EventReducer, Snapshot, Transaction }
+import delta.{ Projector, Snapshot, Transaction }
 import Transaction.Channel
-import delta.util._
 import scuff.concurrent.PartitionedExecutionContext
 import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
+import delta.process.MonotonicReplayProcessor
+import delta.process.ConcurrentMapStore
 
 class TestMonotonicProcessor {
   private val NoFuture = Future successful None
-  private val NoFallback = (r: Int) => NoFuture
+  private val NoFallback = (_: Int) => NoFuture
 
   @Test
   def `test out-of-order and callback`(): Unit = {
@@ -32,7 +33,7 @@ class TestMonotonicProcessor {
     class Mono(ec: ExecutionContext)
       extends MonotonicReplayProcessor[Int, Char, String, Unit](
         20.seconds,
-        new ConcurrentMapStore(Tracker.snapshotMap)(NoFallback)) {
+        new ConcurrentMapStore(Tracker.snapshotMap, None)(NoFallback)) {
       def whenDone() = Future successful (())
       override def onSnapshotUpdate(id: Int, update: SnapshotUpdate) = {
         //        println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
@@ -44,12 +45,12 @@ class TestMonotonicProcessor {
           Tracker.latch.countDown()
         }
       }
-      object Concat extends EventReducer[String, Char] {
+      object Concat extends Projector[String, Char] {
         def init(c: Char) = new String(Array(c))
         def next(str: String, c: Char) = s"$str$c"
-        val process = EventReducer.process(this) _
+        val process = Projector.process(this) _
       }
-      def processingContext(id: Int) = ec
+      def processContext(id: Int) = ec
       def process(txn: TXN, state: Option[String]) = {
         val newState = Concat.process(state, txn.events)
         //        println(s"Txn ${txn.revision}: $state => $newState")
@@ -118,8 +119,8 @@ class TestMonotonicProcessor {
         val snapshotMap = new TrieMap[Int, Snapshot[String]]
         val processor = new MonotonicReplayProcessor[Int, Char, String, Unit](
           20.seconds,
-          new ConcurrentMapStore(snapshotMap)(NoFallback)) {
-          protected def processingContext(id: Int): ExecutionContext = ec match {
+          new ConcurrentMapStore(snapshotMap, None)(NoFallback)) {
+          protected def processContext(id: Int): ExecutionContext = ec match {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
           }

@@ -6,10 +6,11 @@ import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 
 /**
-  * [[delta.util.EventSourceProcessor]], adapted for Java.
+  * [[delta.process.PersistentConsumer]], adapted for Java.
   */
-abstract class EventSourceConsumer[ID, EVT](protected val tickWatermark: Option[Long])(implicit evtTag: ClassTag[EVT])
-  extends delta.util.EventSourceConsumer[ID, EVT] {
+abstract class EventSourceConsumer[ID, EVT](
+    protected val tickWatermark: Option[Long])(implicit evtTag: ClassTag[EVT])
+  extends delta.process.EventSourceConsumer[ID, EVT] {
 
   def this(tickWatermark: Optional[java.lang.Long], evtType: Class[_ <: EVT]) =
     this(tickWatermark: Option[Long])(ClassTag(evtType))

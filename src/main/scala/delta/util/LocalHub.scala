@@ -1,7 +1,6 @@
 package delta.util
 
 import delta.MessageHub
-import MessageHub.Namespace
 import scala.concurrent.ExecutionContext
 import scuff.Codec
 import scuff.Subscription
@@ -9,24 +8,24 @@ import scuff.Subscription
 /**
   * Local (JVM scope) transaction hub.
   */
-final class LocalHub[MSG](getNamespace: MSG => Namespace,
+final class LocalHub[M](getTopic: M => MessageHub.Topic,
     protected val publishCtx: ExecutionContext)
-  extends MessageHub[MSG] {
+  extends MessageHub {
 
-  type PublishFormat = MSG
-  protected val messageCodec = Codec.noop[PublishFormat]
+  type MsgType = M
+  protected val messageCodec = Codec.noop[MsgType]
 
   protected type SubscriptionKey = Unit
   private val SubscriptionKeys = Set(())
-  protected def subscriptionKeys(channels: Set[Namespace]): Set[SubscriptionKey] = SubscriptionKeys
-  protected def subscribeToKey(key: SubscriptionKey)(callback: (Namespace, PublishFormat) => Unit): Subscription = {
-    pubSub.subscribe(_ => true) { msg: MSG =>
-      callback(getNamespace(msg), msg)
+  protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = SubscriptionKeys
+  protected def subscribeToKey(key: SubscriptionKey)(callback: (Topic, MsgType) => Unit): Subscription = {
+    pubSub.subscribe(_ => true) { msg =>
+      callback(getTopic(msg), msg)
     }
   }
 
-  private val pubSub = new scuff.PubSub[PublishFormat, PublishFormat](publishCtx)
+  private val pubSub = new scuff.PubSub[MsgType, MsgType](publishCtx)
 
-  protected def publishImpl(ns: Namespace, msg: PublishFormat) = pubSub.publish(msg)
+  protected def publishImpl(topic: Topic, msg: MsgType) = pubSub.publish(msg)
 
 }

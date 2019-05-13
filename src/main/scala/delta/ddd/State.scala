@@ -1,12 +1,12 @@
 package delta.ddd
 
-import delta.EventReducer
+import delta.Projector
 
 /**
   * This class encapsulates and transforms
   * domain state, based on events.
   */
-final class State[S >: Null, EVT] private[ddd] (reducer: EventReducer[S, EVT], private[this] var _state: S) {
+final class State[S >: Null, EVT] private[ddd] (projector: Projector[S, EVT], private[this] var _state: S) {
 
   @inline
   private[ddd] final def mutate(evt: EVT): Unit = reduce(evt)
@@ -18,8 +18,8 @@ final class State[S >: Null, EVT] private[ddd] (reducer: EventReducer[S, EVT], p
   @inline
   private def reduce(evt: EVT): Unit = {
     _state = _state match {
-      case null => reducer.init(evt)
-      case state => reducer.next(state, evt)
+      case null => projector.init(evt)
+      case state => projector.next(state, evt)
     }
   }
 

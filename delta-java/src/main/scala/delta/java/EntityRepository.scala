@@ -15,10 +15,10 @@ import java.util.Optional
 class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     entity: Entity[ID, ET, S, EVT] { type Type = ET },
     eventStore: EventStore[ESID, _ >: EVT],
-    exeCtx: ExecutionContext, ticker: Ticker,
+    ticker: Ticker, exeCtx: ExecutionContext,
     idConv: Function1[ID, ESID]) {
 
-  private[this] val repo = new delta.ddd.EntityRepository[ESID, EVT, S, ID, ET](entity)(eventStore)(idConv, exeCtx, ticker)
+  private[this] val repo = new delta.ddd.EntityRepository[ESID, EVT, S, ID, ET](entity, exeCtx)(eventStore, ticker)(idConv)
 
   private def toJInt(t: (Any, Int)): Integer = Integer valueOf t._2
   private def toJInt(t: (ET, Int)): (ET, Integer) = (t._1, Integer valueOf t._2)
@@ -30,9 +30,9 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
 
   def load(id: ID): Future[(ET, Integer)] = repo.load(id).map(toJInt)(PiggyBack)
 
-  def insert(id: ID, entity: ET): Future[ID] =
+  def insert(id: => ID, entity: ET): Future[ID] =
     repo.insert(id, entity, Map.empty)
-  def insert(id: ID, entity: ET, metadata: Map[String, String]): Future[ID] =
+  def insert(id: => ID, entity: ET, metadata: Map[String, String]): Future[ID] =
     repo.insert(id, entity, metadata)
 
   def update(id: ID, expectedRevision: Option[Int], metadata: Map[String, String], consumer: BiConsumer[ET, Integer]): Future[Integer] = {

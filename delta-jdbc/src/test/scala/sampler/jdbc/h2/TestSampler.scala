@@ -15,7 +15,8 @@ import delta.util.LocalHub
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
-import delta.Publishing
+import delta.MessageHubPublishing
+import scuff.jdbc.ConnectionSource
 
 object TestSampler {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
@@ -33,15 +34,16 @@ final class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     val sql = new H2Dialect[Int, DomainEvent, JSON](None)
-    val ds = new JdbcDataSource
-    ds.setURL(s"jdbc:h2:./${h2Name}")
-    new JdbcEventStore(sql, RandomDelayExecutionContext)
-      with Publishing[Int, DomainEvent]
-      with DataSourceConnection {
-      def toNamespace(ch: Channel) = Namespace(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toNamespace(t.channel), RandomDelayExecutionContext)
+    val cs = new ConnectionSource with DataSourceConnection {
+      val dataSource = new JdbcDataSource
+      dataSource.setURL(s"jdbc:h2:./${h2Name}")
+    }
+    new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)
+      with MessageHubPublishing[Int, DomainEvent] {
+      def toTopic(ch: Channel) = Topic(ch.toString)
+      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      protected def dataSource = ds
+      val txnCodec = scuff.Codec.noop
     }.ensureSchema()
   }
 

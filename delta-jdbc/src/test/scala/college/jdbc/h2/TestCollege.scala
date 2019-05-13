@@ -15,11 +15,13 @@ import delta.util.LocalHub
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
-import delta.Publishing
+import delta.MessageHubPublishing
+import scuff.jdbc.ConnectionSource
+import college.CollegeEventFormat
 
 object TestCollege {
   implicit object StringColumn extends VarCharColumn
-  implicit object ByteArrayColumn extends VarBinaryColumn
+  implicit object ByteArrayColumn extends VarBinaryColumn()
 
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
   val h2File = new File(".", h2Name + ".mv.db")
@@ -35,15 +37,18 @@ class TestCollege extends college.TestCollege {
 
   override lazy val eventStore: EventStore[Int, CollegeEvent] = {
     val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
-    val ds = new JdbcDataSource
-    ds.setURL(s"jdbc:h2:./${h2Name}")
+    val cs = new ConnectionSource with DataSourceConnection {
+      val dataSource = new JdbcDataSource
+      dataSource.setURL(s"jdbc:h2:./${h2Name}")
+    }
     new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
-      sql, RandomDelayExecutionContext) with Publishing[Int, CollegeEvent] with DataSourceConnection {
-      def toNamespace(ch: Channel) = Namespace(s"transactions:$ch")
-      def toNamespace(txn: TXN): Namespace = toNamespace(txn.channel)
-      val txnHub = new LocalHub[TXN](toNamespace, RandomDelayExecutionContext)
+      CollegeEventFormat,
+      sql, cs, RandomDelayExecutionContext) with MessageHubPublishing[Int, CollegeEvent] {
+      def toTopic(ch: Channel) = Topic(s"transactions:$ch")
+      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
+      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      protected def dataSource = ds
+      val txnCodec = scuff.Codec.noop
     }.ensureSchema()
   }
 

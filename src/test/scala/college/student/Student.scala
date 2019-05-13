@@ -2,7 +2,7 @@ package college.student
 
 import college._
 import delta.ddd._
-import delta.EventReducer
+import delta.Projector
 
 object Student extends Entity("student", StudentAssembler) {
   type Id = IntId[Student]
@@ -20,7 +20,7 @@ object Student extends Entity("student", StudentAssembler) {
   }
 }
 
-object StudentAssembler extends EventReducer[StudentState, StudentEvent] {
+object StudentAssembler extends Projector[StudentState, StudentEvent] {
   def init(evt: StudentEvent) = evt match {
     case StudentRegistered(name) => new StudentState(name)
     case _ => sys.error(s"Should not happen on init state: $evt")

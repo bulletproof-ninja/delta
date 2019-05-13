@@ -10,10 +10,14 @@ import delta.Snapshot
 import delta.jdbc.{ JdbcStreamProcessHistory, JdbcStreamProcessStore, VarCharColumn }
 import delta.jdbc.mysql.MySQLSyntax
 import delta.testing.{ RandomDelayExecutionContext, TestStreamProcessStore }
-import delta.util.StreamProcessStore
+import delta.process.StreamProcessStore
 import scuff.concurrent._
-import scuff.jdbc.DataSourceConnection
+import scuff.jdbc.{ ConnectionSource, DataSourceConnection }
 import java.sql.Connection
+import delta.jdbc.ColumnType
+import delta.testing.Foo
+import scala.util.Random
+import scala.concurrent.Future
 
 object TestJdbcStreamProcessStore {
 
@@ -23,15 +27,19 @@ object TestJdbcStreamProcessStore {
   val readModelName = "readmodel_test"
   val ds = {
     val ds = new MysqlDataSource
-    ds setUrl s"jdbc:mysql://localhost/$db"
+    ds setServerName "localhost"
+    ds setDatabaseName db
     ds setCreateDatabaseIfNotExist true
     ds setUseUnicode true
-    ds setRewriteBatchedStatements false
+    ds setRewriteBatchedStatements true
+    ds setContinueBatchOnError false
+    ds setProfileSQL true
     ds setAutoReconnect true
     ds setCharacterEncoding "UTF-8"
     ds setDatabaseName db
     ds setUser "root"
     ds setUseSSL false
+    ds setLoggerClassName classOf[com.mysql.jdbc.log.Slf4JLogger].getName
     ds
   }
 
@@ -51,15 +59,55 @@ class TestJdbcStreamProcessStore
   extends TestStreamProcessStore {
   import TestJdbcStreamProcessStore._
 
-  override def newStore: StreamProcessStore[Long, String] =
-    new JdbcStreamProcessStore[Long, String](RandomDelayExecutionContext, 1, readModelName) with MySQLSyntax with DataSourceConnection {
-      def dataSource = ds
-      override def getConnection = {
-        val conn = super.getConnection
-        conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED)
-        conn
-      }
-    }.ensureTable()
+  private val cs = new ConnectionSource with DataSourceConnection {
+    def dataSource = ds
+    override def getConnection = {
+      val conn = super.getConnection
+      conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED)
+      conn
+    }
+  }
+
+  override def newStore(): StreamProcessStore[Long, String] = {
+    val store = new JdbcStreamProcessStore[Long, String](
+      cs, None, readModelName, None, RandomDelayExecutionContext) with MySQLSyntax
+    store.ensureTable()
+  }
+
+  private val fooTable = s"foo_${Random.nextInt.toHexString}"
+
+  def fooVersion: Short = 1
+
+  object FooProcessStore {
+    import JdbcStreamProcessStore._
+    val qryColumns = List(
+      Index(Nullable("foo_text")((foo: Foo) => Option(foo.text))),
+      Index(NotNull("foo_num")((foo: Foo) => foo.num)))
+    implicit val FooColumn = ColumnType(Foo)
+  }
+  class FooProcessStore(cs: ConnectionSource, version: Short)(implicit fooCol: ColumnType[Foo])
+    extends JdbcStreamProcessStore[Long, Foo](
+      FooProcessStore.qryColumns, cs, Some(version), fooTable, None, RandomDelayExecutionContext) {
+    def queryText(text: String): Future[Map[Long, Snapshot]] = {
+      this.query("foo_text" -> text)
+    }
+  }
+  override def newFooStore = {
+    import FooProcessStore._
+    val store = new FooProcessStore(cs, fooVersion) with MySQLSyntax
+    store.ensureTable()
+  }
+
+  override def foo(): Unit = {
+    super.foo()
+    val fooStore = newFooStore
+    fooStore.write(567567, Snapshot(Foo("Foo", 9999), 99, 999999L))
+    val result = fooStore.queryText("Foo").await
+    assertTrue(result.nonEmpty)
+    result.values.foreach {
+      case Snapshot(foo, _, _) => assertEquals("Foo", foo.text)
+    }
+  }
 
   @Test
   def mock() = ()
@@ -69,11 +117,14 @@ class TestJdbcStreamProcessHistory
   extends TestJdbcStreamProcessStore {
   import TestJdbcStreamProcessStore._
 
-  override def newStore: StreamProcessStore[Long, String] = newStore(1)
-  private def newStore(v: Short) =
-    new JdbcStreamProcessHistory[Long, String](RandomDelayExecutionContext, v, readModelName) with MySQLSyntax with DataSourceConnection {
-      val dataSource = ds
-    }.ensureTable()
+  override def newStore(): StreamProcessStore[Long, String] = newStore(1)
+  private def newStore(v: Int) = {
+    val cs = new ConnectionSource with DataSourceConnection {
+      def dataSource = ds
+    }
+    val store = new JdbcStreamProcessHistory[Long, String](RandomDelayExecutionContext, cs, v.toShort, readModelName) with MySQLSyntax
+    store.ensureTable()
+  }
 
   private def history(id: Long, store: StreamProcessStore[Long, String], dataPrefix: String): Unit = {
     store.write(id, Snapshot("{}", 0, 3L)).await(1.hour)

@@ -1,13 +1,13 @@
 package delta.hazelcast
 
-import delta.util.EventSourceConsumer
+import delta.process.EventSourceConsumer
 import com.hazelcast.core.IMap
 import scala.concurrent._
 import scala.concurrent.duration._
 import scuff.concurrent.PartitionedExecutionContext
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
-import delta.EventReducer
+import delta.Projector
 import java.util.concurrent.ScheduledExecutorService
 import delta.Snapshot
 
@@ -17,21 +17,20 @@ import delta.Snapshot
  * @tparam WS The working state type
  * @tparam RS The resting state type
  */
-abstract class HzEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
+abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag](
     protected val imap: IMap[ID, EntryState[S, EVT]],
-    reducer: EventReducer[S, EVT],
+    projector: Projector[S, EVT],
     protected val tickWatermark: Option[Long],
-    replayProcessingCompletionTimeout: FiniteDuration,
+    finishReplayProcessingTimeout: FiniteDuration,
+    executionContext: ExecutionContext,
     scheduler: ScheduledExecutorService)
   extends EventSourceConsumer[ID, EVT] {
 
   protected type ReplayResult = Any
 
   protected def reportFailure(th: Throwable): Unit
-  /** Event source selector. */
-  protected def selector(es: ES): es.CompleteSelector
-
-  protected def executionContext: ExecutionContext = ExecutionContext.fromExecutorService(scheduler, reportFailure)
+  /** Event source streams selector. */
+  protected def selector(es: ES): es.StreamsSelector
 
   /** Partitions on stream id. Defaults to `availableProcessors - 1`. */
   protected def newPartitionedExecutionContext: PartitionedExecutionContext = {
@@ -69,11 +68,12 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
     * [[delta.util.MonotonicReplayProcessor]] here.
     */
 
-  private[this] val reduce = EventReducer.process(reducer) _
+  private[this] val reduce = Projector.process(projector) _
   protected def replayProcessor(es: ES) =
     new HzMonotonicReplayProcessor[ID, EVT, S](
+      tickWatermark,
       imap,
-      replayProcessingCompletionTimeout,
+      finishReplayProcessingTimeout,
       executionContext,
       newPartitionedExecutionContext,
       newReplayMap) {
@@ -82,9 +82,9 @@ abstract class HzEventSourceConsumer[ID, EVT: ClassTag, S >: Null](
 
   protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis
 
-  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => _ = {
+  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => Any = {
     new HzMonotonicProcessor[ID, EVT, S](
-      es, imap, reducer, reportFailure,
+      es, imap, projector, reportFailure,
       scheduler, missingRevisionsReplayDelay)
   }
 

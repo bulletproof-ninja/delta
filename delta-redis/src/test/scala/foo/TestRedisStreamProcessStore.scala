@@ -7,7 +7,7 @@ import org.junit._
 import delta.util.json
 import scuff.Codec
 import redis.clients.jedis.JedisPool
-import delta.util.StreamProcessStore
+import delta.process.StreamProcessStore
 
 object TestRedisStreamProcessStore {
   val jedisProvider = new JedisProvider(new JedisPool)
@@ -18,12 +18,14 @@ class TestRedisStreamProcessStore extends TestStreamProcessStore {
 
   import TestRedisStreamProcessStore._
 
+  val snapshotVersion: Short = 1
+
   override def storeSupportsConditionalWrites = false
   override def newStore: StreamProcessStore[Long, String] = {
     new RedisStreamProcessStore[Long, String](
       keyCodec = Codec.fromString(_.toLong),
       snapshotCodec = json.SnapshotCodec(jsonStringCodec),
-      getClass.getSimpleName, ec)(jedisProvider)
+      s"${getClass.getSimpleName}:$snapshotVersion", ec)(jedisProvider)
   }
 
   @Before

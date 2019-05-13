@@ -2,7 +2,7 @@ package college.semester
 
 import college._
 import delta.ddd._
-import delta.EventReducer
+import delta.Projector
 import college.student.Student
 
 object Semester extends Entity("semester", SemesterAssembler) {
@@ -23,7 +23,7 @@ object Semester extends Entity("semester", SemesterAssembler) {
 
 }
 
-private[semester] object SemesterAssembler extends EventReducer[SemesterState, SemesterEvent] {
+private[semester] object SemesterAssembler extends Projector[SemesterState, SemesterEvent] {
   def init(evt: SemesterEvent) = evt match {
     case ClassCreated(name) => new SemesterState(name)
     case _ => ???
