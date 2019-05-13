@@ -24,7 +24,7 @@ class TestSampler {
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(Employee.Def.channel, Department.Def.channel)
-      val txnCodec = Codec.noop
+      val txnCodec = Codec.noop[TXN]
     }
 
   implicit def ec = RandomDelayExecutionContext

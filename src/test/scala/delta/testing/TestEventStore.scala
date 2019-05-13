@@ -38,7 +38,7 @@ class TestEventStore {
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(Channel)
-      val txnCodec = Codec.noop
+      val txnCodec = Codec.noop[TXN]
   }
 
   @Test

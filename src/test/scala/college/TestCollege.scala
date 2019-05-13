@@ -35,7 +35,7 @@ class TestCollege {
       def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
       val txnHub = new LocalHub[TXN](txn => toTopic(txn.channel), RandomDelayExecutionContext)
       val txnChannels = Set(Student.channel, Semester.channel)
-      val txnCodec = Codec.noop
+      val txnCodec = Codec.noop[TXN]
     }
 
   implicit def ec = RandomDelayExecutionContext

@@ -13,7 +13,7 @@ private[impl] abstract class EventSourceReadModel[ID, ESID, S >: Null: ClassTag,
 
   protected type TXN = Transaction[ESID, _ >: EVT]
 
-  private[this] val projectorProcOrNull = projectorSource.toOption.map { projector =>
+  private[this] val projectorProcOrNull = projectorSource.right.toOption.map { projector =>
     Projector.process(projector) _
   }.orNull
   private[this] val getProjector = projectorSource.left.toOption.orNull

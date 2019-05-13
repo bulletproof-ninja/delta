@@ -358,7 +358,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, ec)
       val txnChannels = Set(TheOneAggr.channel)
-      val txnCodec = Codec.noop
+      val txnCodec = Codec.noop[TXN]
     }
     repo = new EntityRepository(TheOneAggr, ec)(es, ticker)
   }
@@ -408,7 +408,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(TheOneAggr.channel)
-      val txnCodec = Codec.noop
+      val txnCodec = Codec.noop[TXN]
     }
     val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
     val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap, None)(_ => Future successful None)
