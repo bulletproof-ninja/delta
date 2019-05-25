@@ -371,7 +371,7 @@ CREATE INDEX IF NOT EXISTS $indexName
     } finally Try(ps.close)
   }
 
-  protected def query(queryColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
+  protected def querySnapshot(queryColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
     val queryValues: List[(QueryColumn[S], Any)] = (queryColumnMatch :: more.toList).map {
       case (name, value) => queryColumns(name).asInstanceOf[QueryColumn[S]] -> value
     }
@@ -397,6 +397,40 @@ $WHERE $where
           while (rs.next) {
             val snapshot = getSnapshot(rs)
             map = map.updated(pkColumn.colType.readFrom(rs, 4), snapshot)
+          }
+          map
+        } finally Try(rs.close)
+      } finally Try(ps.close)
+    }
+  }
+
+  protected def queryTick(queryColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
+    val queryValues: List[(QueryColumn[S], Any)] = (queryColumnMatch :: more.toList).map {
+      case (name, value) => queryColumns(name).asInstanceOf[QueryColumn[S]] -> value
+    }
+    val where = queryValues.map {
+      case (col, _) => s"${col.name} = ?"
+    }.mkString(" AND ")
+    val select =
+      s"""
+SELECT tick, $pkColumnName
+FROM $tableRef
+$WHERE $where
+"""
+    futureQuery { conn =>
+      val ps = conn.prepareStatement(select)
+      try {
+        queryValues.zipWithIndex.foreach {
+          case ((col, value), idx) =>
+            ps.setValue(idx + 1, value)(col.colType)
+        }
+        val rs = ps.executeQuery()
+        try {
+          var map = Map.empty[PK, Long]
+          while (rs.next) {
+            val tick = rs.getLong(1)
+            val pk = rs.getValue[PK](2)
+            map = map.updated(pk, tick)
           }
           map
         } finally Try(rs.close)

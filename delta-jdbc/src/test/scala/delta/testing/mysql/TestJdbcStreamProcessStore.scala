@@ -89,7 +89,7 @@ class TestJdbcStreamProcessStore
     extends JdbcStreamProcessStore[Long, Foo](
       FooProcessStore.qryColumns, cs, Some(version), fooTable, None, RandomDelayExecutionContext) {
     def queryText(text: String): Future[Map[Long, Snapshot]] = {
-      this.query("foo_text" -> text)
+      this.querySnapshot("foo_text" -> text)
     }
   }
   override def newFooStore = {
