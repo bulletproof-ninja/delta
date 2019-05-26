@@ -34,4 +34,6 @@ final class State[S >: Null, EVT] private[ddd] (projector: Projector[S, EVT], pr
 
   /** Current state. */
   def curr: S = _state
+
+  override def toString = s"${_state} with ${_applied.length} events"
 }

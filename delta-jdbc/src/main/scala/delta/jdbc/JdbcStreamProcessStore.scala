@@ -270,42 +270,44 @@ CREATE INDEX IF NOT EXISTS $indexName
   }
 
   /** Update snapshots, return failures. */
-  protected def updateSnapshots(conn: Connection, snapshots: collection.Map[PK, Snapshot]): Iterable[PK] = if (snapshots.isEmpty) Nil else {
-    val isBatch = snapshots.tail.nonEmpty
-    val ps = conn prepareStatement updateSnapshotDefensiveSQL
-    try {
-      val keys = snapshots.map {
-        case (key, snapshot) =>
-          val offset = setSnapshot(ps, snapshot)
-          ps.setValue(1 + offset, key)
-          setRevTick(ps, snapshot.revision, snapshot.tick, 1 + offset)
-          if (isBatch) ps.addBatch()
-          key
-      }
-      if (isBatch) executeBatch(ps, keys)
-      else if (ps.executeUpdate() == 1) Nil
-      else keys
-    } finally Try(ps.close)
-  }
+  protected def updateSnapshots(conn: Connection, snapshots: collection.Map[PK, Snapshot]): Iterable[PK] =
+    if (snapshots.isEmpty) Nil else {
+      val isBatch = snapshots.tail.nonEmpty
+      val ps = conn prepareStatement updateSnapshotDefensiveSQL
+      try {
+        val keys = snapshots.map {
+          case (key, snapshot) =>
+            val offset = setSnapshot(ps, snapshot)
+            ps.setValue(1 + offset, key)
+            setRevTick(ps, snapshot.revision, snapshot.tick, 1 + offset)
+            if (isBatch) ps.addBatch()
+            key
+        }
+        if (isBatch) executeBatch(ps, keys)
+        else if (ps.executeUpdate() == 1) Nil
+        else keys
+      } finally Try(ps.close)
+    }
 
   /** Insert snapshots, return failed ids. */
-  protected def insertSnapshots(conn: Connection, snapshots: collection.Map[PK, Snapshot]): Iterable[PK] = if (snapshots.isEmpty) Nil else {
-    val isBatch = snapshots.tail.nonEmpty
-    val ps = conn.prepareStatement(insertSnapshotSQL)
-    try {
-      val keys = snapshots.map {
-        case (key, snapshot) =>
-          setParmsOnInsert(ps, key, snapshot)
-          if (isBatch) ps.addBatch()
-          key
-      }
-      if (isBatch) executeBatch(ps, keys)
-      else if (ps.executeUpdate() == 1) Nil
-      else keys
-    } catch {
-      case e: SQLException if isDuplicateKeyViolation(e) => snapshots.keys
-    } finally Try(ps.close)
-  }
+  protected def insertSnapshots(conn: Connection, snapshots: collection.Map[PK, Snapshot]): Iterable[PK] =
+    if (snapshots.isEmpty) Nil else {
+      val isBatch = snapshots.tail.nonEmpty
+      val ps = conn.prepareStatement(insertSnapshotSQL)
+      try {
+        val keys = snapshots.map {
+          case (key, snapshot) =>
+            setParmsOnInsert(ps, key, snapshot)
+            if (isBatch) ps.addBatch()
+            key
+        }
+        if (isBatch) executeBatch(ps, keys)
+        else if (ps.executeUpdate() == 1) Nil
+        else keys
+      } catch {
+        case e: SQLException if isDuplicateKeyViolation(e) => snapshots.keys
+      } finally Try(ps.close)
+    }
 
   def write(key: PK, data: Snapshot): Future[Unit] = futureUpdate { conn =>
     writeSnapshot(conn, key, data)
