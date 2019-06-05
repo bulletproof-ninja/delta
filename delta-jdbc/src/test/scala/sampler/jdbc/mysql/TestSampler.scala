@@ -48,7 +48,7 @@ final class TestSampler extends sampler.TestSampler {
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop
+      val txnCodec = scuff.Codec.noop[TXN]
     }.ensureSchema()
   }
 

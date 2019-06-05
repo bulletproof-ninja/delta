@@ -15,6 +15,6 @@ class SomeEventStore(ec: ExecutionContext, hz: HazelcastInstance)
   protected def toTopic(ch: Channel) = Topic(s"txn:$ch")
   protected val txnHub = new TopicMessageHub[TXN](hz, ec)
   protected val txnChannels = Set(Channel("one"))
-  protected val txnCodec = Codec.noop
+  protected val txnCodec = Codec.noop[TXN]
 
 }

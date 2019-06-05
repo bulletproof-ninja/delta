@@ -69,7 +69,7 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
       def toTopic(ch: Channel) = Topic(s"txn:$ch")
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(Channel("any"))
-      val txnCodec = Codec.noop
+      val txnCodec = Codec.noop[TXN]
     }
     repo = new EntityRepository(TheOneAggr, ec)(es, ticker)
   }

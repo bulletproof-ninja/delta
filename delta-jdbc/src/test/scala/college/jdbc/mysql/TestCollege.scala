@@ -66,7 +66,7 @@ class TestCollege extends college.TestCollege {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop
+      val txnCodec = scuff.Codec.noop[TXN]
     }.ensureSchema()
   }
 
