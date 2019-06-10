@@ -104,8 +104,10 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
     case (snapshot, _) => snapshot.content -> Nil -> snapshot.revision
   }
 
-  def insert(newId: => RID, stEvt: RepoType, metadata: Map[String, String]): Future[RID] =
-    insertImpl(newId, newId, ticker.nextTick(), stEvt, metadata)
+  def insert(newId: => RID, stEvt: RepoType)(
+      implicit
+      metadata: Metadata): Future[RID] =
+    insertImpl(newId, newId, ticker.nextTick(), stEvt, metadata.toMap)
 
   private def insertImpl(
       id: RID, generateId: => RID, tick: Long,
@@ -179,8 +181,10 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
 
   protected def update[_](
       expectedRevision: Option[Int], id: RID,
-      metadata: Map[String, String], updateThunk: (RepoType, Int) => Future[RepoType]): Future[Int] = try {
-    loadAndUpdate(id, expectedRevision, metadata, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
+      updateThunk: (RepoType, Int) => Future[RepoType])(
+      implicit
+      metadata: Metadata): Future[Int] = try {
+    loadAndUpdate(id, expectedRevision, metadata.toMap, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
   } catch {
     case NonFatal(th) => Future failed th
   }

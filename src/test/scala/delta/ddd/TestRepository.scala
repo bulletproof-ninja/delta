@@ -21,6 +21,8 @@ class TestRepository {
   implicit def toFut[T](t: T) = Future successful t
   case class Customer(name: String, postCode: String)
 
+  implicit def metadata = Metadata("hello" -> "world")
+
   @Test
   def `insert success`(): Unit = {
     withLatch(5) { latch =>
@@ -38,7 +40,7 @@ class TestRepository {
         update1.foreach { rev =>
           assertEquals(1, rev)
           latch.countDown()
-          val update2 = repo.update(5, Map("hello"->"world")) {
+          val update2 = repo.update(5) {
             case (customer, rev) =>
               assertEquals(1, rev)
               latch.countDown()
@@ -59,11 +61,11 @@ class TestRepository {
 
   @Test
   def `event publishing`(): Unit = {
-    case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Map[String, String])
+    case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Metadata)
     val notifications = new LinkedBlockingQueue[Notification]
     val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new ConcurrentMapRepository, global) {
       type Event = VeryBasicEvent
-      def publish(id: Long, revision: Int, events: List[Event], metadata: Map[String, String]): Unit = {
+      def publish(id: Long, revision: Int, events: List[Event], metadata: Metadata): Unit = {
         notifications offer Notification(id, revision, events, metadata)
       }
     }

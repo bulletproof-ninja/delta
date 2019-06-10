@@ -28,7 +28,7 @@ private class StateHandler(state: DeptState = null)
 
 }
 
-object DeptAssembler extends Projector[DeptState, DeptEvent] {
+object DeptProjector extends Projector[DeptState, DeptEvent] {
   def init(evt: DeptEvent): DeptState = new StateHandler().dispatch(evt)
   def next(state: DeptState, evt: DeptEvent): DeptState = new StateHandler(state).dispatch(evt)
 }

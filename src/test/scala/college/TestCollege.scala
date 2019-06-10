@@ -38,6 +38,7 @@ class TestCollege {
       val txnCodec = Codec.noop[TXN]
     }
 
+  implicit val md = Metadata.empty
   implicit def ec = RandomDelayExecutionContext
   lazy val ticker = LamportTicker(eventStore)
 

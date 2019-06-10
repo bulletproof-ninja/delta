@@ -33,7 +33,7 @@ case class ChangeStatus(newStatus: String)
 
 case class AggrState(status: String, numbers: Set[Int])
 
-object AggrStateAssembler extends Projector[AggrState, AggrEvent] {
+object AggrStateProjector extends Projector[AggrState, AggrEvent] {
   def init(evt: AggrEvent) = new EvtHandler().dispatch(evt)
   def next(s: AggrState, evt: AggrEvent) = new EvtHandler(s).dispatch(evt)
 }
@@ -91,7 +91,7 @@ abstract class AbstractEventStoreRepositoryTest {
     }
   }
 
-  def metadata: Map[String, String] = Map(
+  implicit def metadata: Metadata = Metadata(
     "timestamp" -> new Timestamp().toString,
     "random" -> math.random.toString)
 
@@ -111,7 +111,7 @@ abstract class AbstractEventStoreRepositoryTest {
     val id = "Foo"
     val newFoo = TheOneAggr.create()
     newFoo apply AddNewNumber(-1)
-    repo.insert(id, newFoo, metadata).onComplete {
+    repo.insert(id, newFoo).onComplete {
       case Failure(_) =>
         repo.exists(id).onComplete {
           case Failure(t) => done.failure(t)
@@ -126,10 +126,10 @@ abstract class AbstractEventStoreRepositoryTest {
   def saveNewThenUpdate() = doAsync { done =>
     val id = "Foo"
     val newFoo = TheOneAggr.create()
-    repo.insert(id, newFoo, metadata).onComplete {
+    repo.insert(id, newFoo).onComplete {
       case Failure(t) => done.failure(t)
       case Success(_) =>
-        repo.update("Foo", Some(0), metadata) {
+        repo.update("Foo", Some(0)) {
           case (foo, rev) =>
             assertEquals(0, rev)
             assertEquals("New", foo.aggr.status)
@@ -156,7 +156,7 @@ abstract class AbstractEventStoreRepositoryTest {
                   case Failure(t) => done.failure(t)
                   case Success((_, rev)) =>
                     assertEquals(1, rev)
-                    repo.update("Foo", Some(1), metadata) {
+                    repo.update("Foo", Some(1)) {
                       case (foo, rev) =>
                         assertEquals(1, rev)
                         assertTrue(foo.mergeEvents.isEmpty)
@@ -238,7 +238,7 @@ abstract class AbstractEventStoreRepositoryTest {
     val executor = java.util.concurrent.Executors.newScheduledThreadPool(16)
     val id = "Foo"
     val foo = TheOneAggr.create()
-    val insFut = repo.insert(id, foo, metadata)
+    val insFut = repo.insert(id, foo)
     val updateRevisions = new TrieMap[Int, Future[Int]]
     val range = 0 to 75
     val latch = new CountDownLatch(range.size)
@@ -248,7 +248,7 @@ abstract class AbstractEventStoreRepositoryTest {
         for (i <- range) {
           val runThis = new Runnable {
             def run: Unit = {
-              val fut = repo.update(id, Some(0), metadata) {
+              val fut = repo.update(id, Some(0)) {
                 case (foo, _) =>
                   foo(AddNewNumber(i))
                   Future successful foo
@@ -310,7 +310,7 @@ class Aggr(val state: TheOneAggr.State, val mergeEvents: Seq[AggrEvent]) {
   def numbers = aggr.numbers
 }
 
-object TheOneAggr extends Entity("", AggrStateAssembler) {
+object TheOneAggr extends Entity("", AggrStateProjector) {
 
   type Id = String
   type Type = Aggr

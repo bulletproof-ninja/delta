@@ -51,9 +51,11 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
 
   protected def update[R](
       expectedRevision: Option[Int], id: ID,
-      metadata: Map[String, String], updateThunk: (ET, Int) => Future[R]): Future[(R, Int)] = {
+      updateThunk: (ET, Int) => Future[R])(
+      implicit
+      metadata: Metadata): Future[(R, Int)] = {
     @volatile var returnValue = null.asInstanceOf[R]
-    val futureRev = repo.update(id, expectedRevision, metadata) {
+    val futureRev = repo.update(id, expectedRevision) {
       case ((state, mergeEvents), revision) =>
         val instance = entity.initEntity(state, mergeEvents)
         updateThunk(instance, revision).map { ret =>
@@ -65,10 +67,12 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     futureRev.map(returnValue -> _)
   }
 
-  def insert(newId: => ID, instance: ET, metadata: Map[String, String]): Future[ID] = {
+  def insert(newId: => ID, instance: ET)(
+      implicit
+      metadata: Metadata): Future[ID] = {
     try {
       val state = entity.validatedState(instance)
-      repo.insert(newId, state.curr -> state.appliedEvents, metadata)
+      repo.insert(newId, state.curr -> state.appliedEvents)
     } catch {
       case NonFatal(e) => Future failed e
     }

@@ -30,7 +30,7 @@ private class StateHandler(state: EmpState = null)
 
 }
 
-object EmpAssembler extends Projector[EmpState, EmpEvent] {
+object EmpProjector extends Projector[EmpState, EmpEvent] {
   def init(evt: EmpEvent) = new StateHandler().dispatch(evt)
   def next(state: EmpState, evt: EmpEvent) = new StateHandler(state).dispatch(evt)
 }

@@ -5,6 +5,7 @@ import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
 import delta.ddd.Repository
 import delta.ddd.ImmutableEntity
+import delta.ddd.Metadata
 
 /**
   * [[delta.ddd.Repository]] wrapper for non-Event-source
@@ -17,9 +18,9 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
 
   final type E = (T, List[EVT])
 
-  protected def publish(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String]): Unit
+  protected def publish(id: ID, revision: Int, events: List[EVT], metadata: Metadata): Unit
 
-  private def publishEvents(id: ID, revision: Int, events: List[EVT], metadata: Map[String, String]): Unit = {
+  private def publishEvents(id: ID, revision: Int, events: List[EVT], metadata: Metadata): Unit = {
     if (events.nonEmpty) try publish(id, revision, events, metadata) catch {
       case NonFatal(e) => publishCtx.reportFailure(e)
     }
@@ -32,10 +33,11 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
 
   protected def update[R](
       expectedRevision: Option[Int], id: ID,
-      metadata: Map[String, String],
-      updateThunk: (E, Int) => Future[UT[R]]): Future[impl.UM[R]] = {
+      updateThunk: (E, Int) => Future[UT[R]])(
+      implicit
+      metadata: Metadata): Future[impl.UM[R]] = {
     @volatile var toPublish: List[EVT] = Nil
-    val updated = impl.update(id, expectedRevision, metadata) {
+    val updated = impl.update(id, expectedRevision) {
       case (e, rev) =>
         updateThunk(e -> Nil, rev).map {
           case (result, events) =>
@@ -49,9 +51,11 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
     updated
   }
 
-  def insert(id: => ID, content: E, metadata: Map[String, String]): Future[ID] = {
+  def insert(id: => ID, content: E)(
+      implicit
+      metadata: Metadata): Future[ID] = {
     val (state, events) = content
-    val inserted = impl.insert(id, state, metadata)
+    val inserted = impl.insert(id, state)
     inserted.foreach { id =>
       publishEvents(id, 0, events, metadata)
     }(publishCtx)

@@ -32,7 +32,7 @@ object Employee {
     emp
   }
 
-  object Def extends Entity("Employee", EmpAssembler) {
+  object Def extends Entity("Employee", EmpProjector) {
     type Id = EmpId
     type Type = Employee
     def init(state: State, mergeEvents: List[EmpEvent]) = new Employee(state)

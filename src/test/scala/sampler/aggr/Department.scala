@@ -22,16 +22,16 @@ object Department {
   implicit def ec = delta.testing.RandomDelayExecutionContext
   def insert(repo: Repository[DeptId, Department])(
     id: DeptId, cmd: CreateDepartment)(
-      thunk: Department => Map[String, String]): Future[Int] = {
+      thunk: Department => Metadata): Future[Int] = {
     val name = cmd.name.trim()
     require(name.length() > 0)
     val dept = new Impl
     dept.state(DeptCreated(name))
-    val metadata = thunk(dept)
-    repo.insert(id, dept, metadata).map(_ => 0)
+    implicit val metadata = thunk(dept)
+    repo.insert(id, dept).map(_ => 0)
   }
 
-  object Def extends Entity("Department", DeptAssembler) {
+  object Def extends Entity("Department", DeptProjector) {
     type Id = DeptId
     type Type = Department
     def init(state: State, mergeEvents: List[DeptEvent]) = new Impl(state)

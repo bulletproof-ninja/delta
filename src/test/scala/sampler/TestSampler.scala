@@ -12,10 +12,11 @@ import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 import delta.util.LocalHub
 import scuff.Codec
+import delta.ddd.Metadata
 
 class TestSampler {
 
-  def metadata = Map("timestamp" -> new scuff.Timestamp().toString)
+  implicit def metadata = Metadata("timestamp" -> new scuff.Timestamp().toString)
 
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
@@ -39,9 +40,9 @@ class TestSampler {
     assertFalse(EmployeeRepo.exists(id).await.isDefined)
     val register = RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor")
     val emp = Employee(register)
-    val insertId = EmployeeRepo.insert(id, emp, metadata).await
+    val insertId = EmployeeRepo.insert(id, emp).await
     assertEquals(id, insertId)
-    Try(EmployeeRepo.insert(id, emp, metadata).await) match {
+    Try(EmployeeRepo.insert(id, emp).await) match {
       case Success(idAgain) =>
         // Allow idempotent inserts
         assertEquals(id, idAgain)
@@ -49,7 +50,7 @@ class TestSampler {
         fail(s"Should succeed, but didn't: $th")
     }
     emp.apply(UpdateSalary(40000))
-    Try(EmployeeRepo.insert(id, emp, metadata).await) match {
+    Try(EmployeeRepo.insert(id, emp).await) match {
       case Success(revision) => fail(s"Should fail, but inserted revision $revision")
       case Failure(DuplicateIdException(dupe)) => assertEquals(id, dupe)
       case Failure(th) => fail(s"Should have thrown ${classOf[DuplicateIdException].getSimpleName}, not $th")
@@ -61,10 +62,10 @@ class TestSampler {
     val id = new EmpId
     assertTrue(EmployeeRepo.exists(id).await.isEmpty)
     val emp = register(id, RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor"))
-    val insertId = EmployeeRepo.insert(id, emp, metadata).await
+    val insertId = EmployeeRepo.insert(id, emp).await
     assertEquals(id, insertId)
     try {
-      EmployeeRepo.update(id, metadata) {
+      EmployeeRepo.update(id) {
         case (emp, 3) =>
           emp(UpdateSalary(45000))
         case (_, rev) =>
@@ -75,14 +76,14 @@ class TestSampler {
       case e: IllegalStateException =>
         assertEquals("0", e.getMessage)
     }
-    var revs = EmployeeRepo.update(id, Some(0), metadata) {
+    var revs = EmployeeRepo.update(id, Some(0)) {
       case (emp, revision) =>
         emp(UpdateSalary(45000))
         revision
     }.await
     assertEquals(0, revs._1)
     assertEquals(1, revs._2)
-    revs = EmployeeRepo.update(id, Some(0), metadata) {
+    revs = EmployeeRepo.update(id, Some(0)) {
       case (emp, revision) =>
         emp(UpdateSalary(45000))
         revision
@@ -90,7 +91,7 @@ class TestSampler {
     assertEquals(1, revs._1)
     assertEquals(1, revs._2)
     try {
-      EmployeeRepo.update(id, metadata) {
+      EmployeeRepo.update(id) {
         case (emp, 0) =>
           emp(UpdateSalary(66000))
         case (_, rev) => throw new IllegalStateException(rev.toString)
@@ -104,7 +105,7 @@ class TestSampler {
 
   private def register(id: EmpId, cmd: RegisterEmployee): Employee = {
     val emp = Employee(cmd)
-    EmployeeRepo.insert(id, emp, metadata).await
+    EmployeeRepo.insert(id, emp).await
     emp
   }
 }

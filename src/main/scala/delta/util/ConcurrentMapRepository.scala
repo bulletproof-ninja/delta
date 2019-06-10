@@ -6,6 +6,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import delta.ddd.{ DuplicateIdException, Repository, UnknownIdException }
 import scuff.concurrent.{ Threads }
 import delta.ddd.ImmutableEntity
+import delta.ddd.Metadata
 
 /**
  * Repository backed by concurrent map.
@@ -15,8 +16,10 @@ class ConcurrentMapRepository[K, V <: AnyRef](
     map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
   extends Repository[K, V] with ImmutableEntity[V] {
 
-  def insert(id: => K, entity: V, metadata: Map[String, String]): Future[K] = Future {
-    insertImpl(id, id, entity, metadata)
+  def insert(id: => K, entity: V)(
+      implicit
+      metadata: Metadata): Future[K] = Future {
+    insertImpl(id, id, entity, metadata.toMap)
   }
 
   private def insertImpl(id: K, generateId: => K, entity: V, metadata: Map[String, String]): K = {
@@ -53,9 +56,11 @@ class ConcurrentMapRepository[K, V <: AnyRef](
     }
   }
 
-  def update[_](
+  protected def update[_](
       expectedRevision: Option[Int], id: K,
-      metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] =
-    Future(tryUpdate(id, expectedRevision, metadata, updateThunk)).flatMap(identity)
+      updateThunk: (V, Int) => Future[V])(
+      implicit
+      metadata: Metadata): Future[Int] =
+    Future(tryUpdate(id, expectedRevision, metadata.toMap, updateThunk)).flatMap(identity)
 
 }
