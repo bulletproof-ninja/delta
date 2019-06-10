@@ -71,13 +71,11 @@ trait MessageHub {
       topic: Topic, msg: Future[M])(
       implicit
       encoder: M => MsgType): Unit = {
-    msg.onComplete {
-      case Success(msg) =>
-        try publish(topic, msg) catch {
-          case NonFatal(cause) =>
-            publishCtx reportFailure new MessageHub.PublishFailure(topic, msg, cause)
-        }
-      case Failure(cause) => publishCtx reportFailure cause
+    msg.foreach { msg =>
+      try publish(topic, msg) catch {
+        case NonFatal(cause) =>
+          publishCtx reportFailure new MessageHub.PublishFailure(topic, msg, cause)
+      }
     }(publishCtx)
   }
 
@@ -101,10 +99,7 @@ trait MessageHub {
    *  NOTE: Must be an immutable value type.
    */
   protected type SubscriptionKey
-  //  protected trait SubscriptionKeys[M] {
-  //    def keys: Set[SubscriptionKey]
-  //    def codec: Codec[M, MsgType]
-  //  }
+
   /**
    *  Define subscription key(s) from requested topic(s).
    */
@@ -119,11 +114,6 @@ trait MessageHub {
   protected final class Subscriber[M: ClassTag](topics: Set[Topic], callback: PartialFunction[M, Unit]) {
     @inline def matches[M2: ClassTag](topic: Topic) = (topics contains topic) && (classTag[M] == classTag[M2])
     @inline def notifyIfMatch(msg: M): Unit = if (callback isDefinedAt msg) callback(msg)
-//
-//      decodedMsg match {
-//      case msg: M if callback isDefinedAt msg => callback(msg)
-//      case _ => // No match
-//    }
   }
 
   final def subscribe[M](msgType: Class[M], decoder: MsgType => M, topics: java.lang.Iterable[Topic], callback: java.util.function.Consumer[_ >: M]): Subscription = {
