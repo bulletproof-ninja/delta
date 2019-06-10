@@ -11,7 +11,6 @@ import java.util.function.Consumer
 import delta.process.StreamProcessStore
 import delta.process.MonotonicJoinState
 import delta.process.MissingRevisionsReplay
-import delta.EventSource
 import delta.Transaction
 
 /**
@@ -73,7 +72,7 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null](
   override type SnapshotUpdate = delta.process.SnapshotUpdate[S]
 
   protected def replayMissingRevisions(
-      es: EventSource[ID, _ >: EVT], replayDelayLength: Long, replayDelayUnit: TimeUnit,
+      es: delta.EventSource[ID, _ >: EVT], replayDelayLength: Long, replayDelayUnit: TimeUnit,
       scheduler: ScheduledExecutorService, reportFailure: Consumer[Throwable],
       id: ID, missing: Range,
       replayProcess: Consumer[Transaction[ID, _ >: EVT]]): Unit =

@@ -15,7 +15,7 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT: ClassTag, S >: Null](
   extends PersistentMonotonicConsumer(processStore, scheduler)
   with JoinState[ID, EVT, S] {
 
-  override protected def replayProcessor(es: ES): StreamConsumer[TXN, Future[ReplayResult]] =
+  override protected def replayProcessor(es: EventSource): StreamConsumer[TXN, Future[ReplayResult]] =
     new ReplayProcessor with MonotonicJoinState[ID, EVT, S] {
 
       def join(streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String], streamState: Option[S])(evt: EVT): Map[ID, Processor] =
@@ -23,7 +23,7 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT: ClassTag, S >: Null](
 
     }
 
-  override protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => Any =
+  override protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any =
     new LiveProcessor(es) with MonotonicJoinState[ID, EVT, S] {
 
       def join(streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String], streamState: Option[S])(evt: EVT): Map[ID, Processor] =

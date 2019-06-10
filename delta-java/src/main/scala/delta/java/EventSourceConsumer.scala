@@ -20,8 +20,8 @@ abstract class EventSourceConsumer[ID, EVT](
 
   type ReplayResult = Object
 
-  protected def replayProcessor(es: ES): ReplayProcessor[ID, EVT]
-  protected def liveProcessor(es: ES, replayResult: Option[Object]): LiveProcessor[ID, EVT]
+  protected def replayProcessor(es: EventSource): ReplayProcessor[ID, EVT]
+  protected def liveProcessor(es: EventSource, replayResult: Option[Object]): LiveProcessor[ID, EVT]
 
   /** Turn Scala `List` of events into Java `Iterable`. */
   protected def iterable(list: List[_ >: EVT]): java.lang.Iterable[EVT] = {

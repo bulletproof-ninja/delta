@@ -2,7 +2,6 @@ package delta.process
 
 import scala.concurrent.{ ExecutionContext, Future }
 
-import delta.EventSource
 import scuff.Subscription
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
@@ -19,7 +18,7 @@ trait EventSourceConsumer[ID, EVT] {
 
   protected type ReplayResult
 
-  type ES = EventSource[ID, _ >: EVT]
+  type EventSource = delta.EventSource[ID, _ >: EVT]
   protected type TXN = Transaction[ID, _ >: EVT]
 
   /**
@@ -31,7 +30,7 @@ trait EventSourceConsumer[ID, EVT] {
   protected def maxTickSkew: Int
 
   /** Transaction selector. */
-  protected def selector(es: ES): es.Selector
+  protected def selector(es: EventSource): es.Selector
 
   /**
    * Called at startup, when replay processing of
@@ -53,7 +52,7 @@ trait EventSourceConsumer[ID, EVT] {
    * It is highly recommended to return an instance of
    * [[delta.process.MonotonicReplayProcessor]] here.
    */
-  protected def replayProcessor(es: ES): StreamConsumer[TXN, Future[ReplayResult]]
+  protected def replayProcessor(es: EventSource): StreamConsumer[TXN, Future[ReplayResult]]
 
   /**
    * When replay processing is completed, a live processor
@@ -72,7 +71,7 @@ trait EventSourceConsumer[ID, EVT] {
    * @param replayResult The result of replay processing, if any.
    * @return A live transaction processing function
    */
-  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => Any
+  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any
 
   /** The currently processed tick watermark. */
   protected def tickWatermark: Option[Long]
@@ -86,7 +85,7 @@ trait EventSourceConsumer[ID, EVT] {
    * thus state is considered current. Or `None` if publishiing
    * is not supported by event source.
    */
-  def consume(eventSource: ES)(
+  def consume(eventSource: EventSource)(
       implicit
       ec: ExecutionContext): Future[Subscription] = {
     val maxTickSkew = this.maxTickSkew
@@ -106,7 +105,7 @@ trait EventSourceConsumer[ID, EVT] {
     }
   }
 
-  private def start(es: ES, maxEventSourceTickAtStart: Option[Long])(
+  private def start(es: EventSource, maxEventSourceTickAtStart: Option[Long])(
       selector: es.Selector, maxTickSkew: Int)(
       implicit
       ec: ExecutionContext): Future[Subscription] = {
@@ -135,7 +134,7 @@ trait EventSourceConsumer[ID, EVT] {
       windowClosed.map(_ => liveSubscription)
     }
   }
-  private def resume(es: ES, maxEventSourceTickAtStart: Long)(
+  private def resume(es: EventSource, maxEventSourceTickAtStart: Long)(
       selector: es.Selector, tickWatermark: Long, maxTickSkew: Int)(
       implicit
       ec: ExecutionContext): Future[Subscription] = {

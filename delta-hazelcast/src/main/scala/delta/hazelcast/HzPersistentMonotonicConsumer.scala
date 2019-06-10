@@ -30,7 +30,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
 
   protected def reportFailure(th: Throwable): Unit
   /** Event source streams selector. */
-  protected def selector(es: ES): es.StreamsSelector
+  protected def selector(es: EventSource): es.StreamsSelector
 
   /** Partitions on stream id. Defaults to `availableProcessors - 1`. */
   protected def newPartitionedExecutionContext: PartitionedExecutionContext = {
@@ -69,7 +69,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     */
 
   private[this] val reduce = Projector.process(projector) _
-  protected def replayProcessor(es: ES) =
+  protected def replayProcessor(es: EventSource) =
     new HzMonotonicReplayProcessor[ID, EVT, S](
       tickWatermark,
       imap,
@@ -82,7 +82,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
 
   protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis
 
-  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => Any = {
+  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any = {
     new HzMonotonicProcessor[ID, EVT, S](
       es, imap, projector, reportFailure,
       scheduler, missingRevisionsReplayDelay)

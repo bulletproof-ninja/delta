@@ -83,7 +83,7 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
       PersistentMonotonicConsumer.this.processAsync(tx, state).asInstanceOf[Future[S]]
   }
 
-  protected class LiveProcessor(es: ES)
+  protected class LiveProcessor(es: EventSource)
     extends DefaultMonotonicProcessor[ID, EVT, S](es, processStore, replayMissingRevisionsDelay, scheduler, newPartitionedExecutionContext) {
     protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate) =
       PersistentMonotonicConsumer.this.onSnapshotUpdate(id, update)
@@ -93,11 +93,10 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
 
   }
 
-  protected def replayProcessor(es: ES): StreamConsumer[TXN, Future[ReplayResult]] =
+  protected def replayProcessor(es: EventSource): StreamConsumer[TXN, Future[ReplayResult]] =
     new ReplayProcessor
 
-//  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): MonotonicProcessor[ID, EVT, S] =
-  protected def liveProcessor(es: ES, replayResult: Option[ReplayResult]): TXN => Any =
+  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any =
     new LiveProcessor(es)
 
 }
