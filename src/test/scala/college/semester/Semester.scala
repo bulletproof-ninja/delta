@@ -5,7 +5,7 @@ import delta.ddd._
 import delta.Projector
 import college.student.Student
 
-object Semester extends Entity("semester", SemesterAssembler) {
+object Semester extends Entity("semester", SemesterProjector) {
   type Id = IntId[Semester]
   type Type = Semester
 
@@ -23,19 +23,16 @@ object Semester extends Entity("semester", SemesterAssembler) {
 
 }
 
-private[semester] object SemesterAssembler extends Projector[SemesterState, SemesterEvent] {
-  def init(evt: SemesterEvent) = evt match {
-    case ClassCreated(name) => new SemesterState(name)
-    case _ => ???
-  }
+private[semester] object SemesterProjector extends Projector[SemesterState, SemesterEvent] {
+  def init(evt: SemesterEvent) = next(null, evt)
   def next(semester: SemesterState, evt: SemesterEvent) = evt match {
+    case ClassCreated(name) => assert(semester == null); new SemesterState(name)
     case StudentEnrolled(studentId) =>
       val enrolled = semester.enrolled + studentId
       semester.copy(enrolled = enrolled)
     case StudentCancelled(studentId) =>
       val without = semester.enrolled - studentId
       semester.copy(enrolled = without)
-    case _ => ???
   }
 }
 

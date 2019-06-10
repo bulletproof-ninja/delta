@@ -10,7 +10,7 @@ import scuff.jdbc.ConnectionSource
 
 abstract class AbstractStore(
     cs: ConnectionSource,
-    version: Option[Short],
+    protected val version: Option[Short],
     table: String, schema: Option[String])(
     implicit
     protected val blockingCtx: ExecutionContext) {

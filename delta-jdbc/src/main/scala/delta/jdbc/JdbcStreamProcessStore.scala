@@ -11,14 +11,14 @@ import scuff.concurrent.Threads
 import scuff.jdbc.ConnectionSource
 
 object JdbcStreamProcessStore {
-  private case class PkColumn[T](name: String, colType: ColumnType[T])
+  private[jdbc] case class PkColumn[T](name: String, colType: ColumnType[T])
 
-  /** Index definition of query columns. */
-  case class Index[S](name: String, first: QueryColumn[S], more: QueryColumn[S]*) {
+  /** Index definition of index columns. */
+  case class Index[S](name: String, first: IndexColumn[S], more: IndexColumn[S]*) {
     def columns = first :: more.toList
   }
   object Index {
-    def apply[S](first: QueryColumn[S], more: QueryColumn[S]*) =
+    def apply[S](first: IndexColumn[S], more: IndexColumn[S]*) =
       new Index("", first, more: _*)
   }
 
@@ -26,16 +26,16 @@ object JdbcStreamProcessStore {
    *  Optional column for custom querying and lookups,
    *  extracted from snapshot.
    */
-  sealed abstract class QueryColumn[S] {
+  sealed abstract class IndexColumn[S] {
     def name: String
     def nullable: Boolean
     def colType: ColumnType[Any]
   }
-  case class NotNull[S, C: ColumnType](name: String)(val getColumnValue: S => C) extends QueryColumn[S] {
+  case class NotNull[S, C: ColumnType](name: String)(val getColumnValue: S => C) extends IndexColumn[S] {
     def nullable = false
     def colType = implicitly[ColumnType[C]].asInstanceOf[ColumnType[Any]]
   }
-  case class Nullable[S, C: ColumnType](name: String)(val getColumnValue: S => Option[C]) extends QueryColumn[S] {
+  case class Nullable[S, C: ColumnType](name: String)(val getColumnValue: S => Option[C]) extends IndexColumn[S] {
     def nullable = true
     def colType = implicitly[ColumnType[C]].asInstanceOf[ColumnType[Any]]
   }
@@ -53,7 +53,7 @@ import JdbcStreamProcessStore._
  * side-effects being repeated.
  */
 class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
-    pkColumnName: String, customIndexes: List[Index[S]],
+    streamColumnName: String, customIndexes: List[Index[S]],
     cs: ConnectionSource,
     version: Option[Short],
     table: String, schema: Option[String],
@@ -62,12 +62,12 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
   with StreamProcessStore[PK, S] with BlockingCASWrites[PK, S, Connection] {
 
   def this(
-      pkColumnName: String,
+      streamColumnName: String,
       cs: ConnectionSource,
       version: Option[Short],
       table: String, schema: Option[String],
       blockingCtx: ExecutionContext) =
-    this(pkColumnName, Nil, cs, version, table, schema, blockingCtx)
+    this(streamColumnName, Nil, cs, version, table, schema, blockingCtx)
 
   def this(
       cs: ConnectionSource,
@@ -86,19 +86,23 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
 
   protected val WHERE: String = version.map(version => s"WHERE version = $version\nAND") getOrElse "WHERE"
 
-  private[this] val pkColumn = PkColumn(pkColumnName, implicitly[ColumnType[PK]])
-  private[this] val queryColumns: Map[String, QueryColumn[S]] = customIndexes.flatMap(_.columns).map(c => c.name -> c).toMap
+  final protected val streamColumn = PkColumn(streamColumnName, implicitly[ColumnType[PK]])
+  final protected val indexColumns: Map[String, IndexColumn[S]] = customIndexes.flatMap(_.columns).map(c => c.name.toLowerCase -> c).toMap
   protected def versionColType: ColumnType[Short] = ShortColumn
-
-  protected def createTableDDL = {
-    val pkColumns = version.map(_ => PkColumn("version", versionColType)).toList :+ pkColumn
-    val pkColumnDefs = pkColumns.map {
+  protected def versionColumn: Option[PkColumn[_]] = version.map(_ => PkColumn("version", versionColType))
+  protected def pkColumnDefsDDL(pkColumns: List[PkColumn[_]]): String = {
+    pkColumns.map {
       case PkColumn(name, colType) => s"$name ${colType.typeName} NOT NULL"
     }.mkString(",\n  ")
+  }
+
+  protected def createTableDDL = {
+    val pkColumns = versionColumn.toList :+ streamColumn
+    val pkColumnDefs = pkColumnDefsDDL(pkColumns)
 
     val pkNames = pkColumns.map(_.name).mkString(",")
-    val qryColumnDefs = if (queryColumns.isEmpty) "" else {
-      queryColumns.values.map { col =>
+    val qryColumnDefs = if (indexColumns.isEmpty) "" else {
+      indexColumns.values.map { col =>
         val nullable = if (col.nullable) "" else " NOT NULL"
         s"""${col.name} ${col.colType.typeName}$nullable"""
       }.mkString("\n  ", ",\n  ", ",")
@@ -120,19 +124,19 @@ CREATE TABLE IF NOT EXISTS $tableRef (
     s"""
 SELECT data, revision, tick
 FROM $tableRef
-$WHERE $pkColumnName = ?
+$WHERE $streamColumnName = ?
 """
 
   protected def insertSnapshotSQL = _insertSnapshotSQL
   private[this] val _insertSnapshotSQL = {
-    val (qryNames, qryQs) = if (queryColumns.isEmpty) "" -> "" else {
-      queryColumns.keys.mkString("", ", ", ", ") ->
-        queryColumns.map(_ => "?").mkString("", ",", ",")
+    val (qryNames, qryQs) = if (indexColumns.isEmpty) "" -> "" else {
+      indexColumns.values.map(_.name).mkString("", ", ", ", ") ->
+        indexColumns.map(_ => "?").mkString("", ",", ",")
     }
     val (vCol, vQ) = version.map(version => "version, " -> s"$version, ") getOrElse "" -> ""
     s"""
 INSERT INTO $tableRef
-(${vCol}data, revision, tick, $qryNames$pkColumnName)
+(${vCol}data, revision, tick, $qryNames$streamColumnName)
 VALUES ($vQ?,?,?,$qryQs?)
 """
   }
@@ -149,13 +153,13 @@ VALUES ($vQ?,?,?,$qryQs?)
   private[this] val _updateSnapshotDefensiveSQL = updateSnapshotSQL(exact = false)
 
   protected def updateSnapshotSQL(exact: Boolean): String = {
-    val qryColumns = (if (queryColumns.isEmpty) "" else ", ") concat
-      queryColumns.keys.map(name => s"$name = ?").mkString(", ")
+    val qryColumns = (if (indexColumns.isEmpty) "" else ", ") concat
+      indexColumns.values.map(col => s"${col.name} = ?").mkString(", ")
     val matches = if (exact) "=" else "<="
     s"""
 UPDATE $tableRef
 SET data = ?, revision = ?, tick = ?$qryColumns
-$WHERE $pkColumnName = ?
+$WHERE $streamColumnName = ?
 AND revision $matches ? AND tick $matches ?
 """
   }
@@ -165,7 +169,7 @@ AND revision $matches ? AND tick $matches ?
     s"""
 UPDATE $tableRef
 SET revision = ?, tick = ?
-$WHERE $pkColumnName = ?
+$WHERE $streamColumnName = ?
 AND revision <= ? AND tick <= ?
 """
 
@@ -201,7 +205,7 @@ CREATE INDEX IF NOT EXISTS $indexName
     ps.setValue(1 + offset, s.content)
     ps.setInt(2 + offset, s.revision)
     ps.setLong(3 + offset, s.tick)
-    queryColumns.values.foldLeft(3 + offset) {
+    indexColumns.values.foldLeft(3 + offset) {
       case (offset, qryCol) =>
         val value = qryCol match {
           case qryCol @ NotNull(_) => qryCol.getColumnValue(s.content)
@@ -362,7 +366,7 @@ CREATE INDEX IF NOT EXISTS $indexName
    *  Otherwise return current snapshot.
    *  @return `None` if write was successful, or `Some` current snapshot
    */
-  def writeReplacement(conn: Connection)(key: PK, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot] = {
+  protected def writeReplacement(conn: Connection)(key: PK, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot] = {
     val ps = conn prepareStatement replaceSnapshotSQL
     try {
       val offset = setSnapshot(ps, newSnapshot)
@@ -373,16 +377,16 @@ CREATE INDEX IF NOT EXISTS $indexName
     } finally Try(ps.close)
   }
 
-  protected def querySnapshot(queryColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
-    val queryValues: List[(QueryColumn[S], Any)] = (queryColumnMatch :: more.toList).map {
-      case (name, value) => queryColumns(name).asInstanceOf[QueryColumn[S]] -> value
+  protected def querySnapshot(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
+    val queryValues: List[(IndexColumn[S], Any)] = (indexColumnMatch :: more.toList).map {
+      case (name, value) => indexColumns(name.toLowerCase).asInstanceOf[IndexColumn[S]] -> value
     }
     val where = queryValues.map {
       case (col, _) => s"${col.name} = ?"
     }.mkString(" AND ")
     val select =
       s"""
-SELECT data, revision, tick, $pkColumnName
+SELECT data, revision, tick, $streamColumnName
 FROM $tableRef
 $WHERE $where
 """
@@ -398,7 +402,7 @@ $WHERE $where
           var map = Map.empty[PK, Snapshot]
           while (rs.next) {
             val snapshot = getSnapshot(rs)
-            map = map.updated(pkColumn.colType.readFrom(rs, 4), snapshot)
+            map = map.updated(streamColumn.colType.readFrom(rs, 4), snapshot)
           }
           map
         } finally Try(rs.close)
@@ -406,16 +410,16 @@ $WHERE $where
     }
   }
 
-  protected def queryTick(queryColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
-    val queryValues: List[(QueryColumn[S], Any)] = (queryColumnMatch :: more.toList).map {
-      case (name, value) => queryColumns(name).asInstanceOf[QueryColumn[S]] -> value
+  protected def queryTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
+    val queryValues: List[(IndexColumn[S], Any)] = (indexColumnMatch :: more.toList).map {
+      case (name, value) => indexColumns(name.toLowerCase).asInstanceOf[IndexColumn[S]] -> value
     }
     val where = queryValues.map {
       case (col, _) => s"${col.name} = ?"
     }.mkString(" AND ")
     val select =
       s"""
-SELECT tick, $pkColumnName
+SELECT tick, $streamColumnName
 FROM $tableRef
 $WHERE $where
 """

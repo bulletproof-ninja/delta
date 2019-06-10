@@ -18,6 +18,7 @@ import scuff.jdbc.DataSourceConnection
 import delta.MessageHubPublishing
 import scuff.jdbc.ConnectionSource
 import college.CollegeEventFormat
+import college.jdbc.StudentEmailsStore
 
 object TestCollege {
   implicit object StringColumn extends VarCharColumn
@@ -31,19 +32,22 @@ object TestCollege {
   }
 }
 
-class TestCollege extends college.TestCollege {
+class TestCollege extends college.jdbc.TestCollege {
 
   import TestCollege._
 
+  lazy val connSource = new ConnectionSource with DataSourceConnection {
+    val dataSource = new JdbcDataSource
+    dataSource.setURL(s"jdbc:h2:./${h2Name}")
+  }
+
+  override def newLookupServiceProcStore = new StudentEmailsStore(connSource, 1, ec).ensureTable()
+
   override lazy val eventStore: EventStore[Int, CollegeEvent] = {
     val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
-    val cs = new ConnectionSource with DataSourceConnection {
-      val dataSource = new JdbcDataSource
-      dataSource.setURL(s"jdbc:h2:./${h2Name}")
-    }
     new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
       CollegeEventFormat,
-      sql, cs, RandomDelayExecutionContext) with MessageHubPublishing[Int, CollegeEvent] {
+      sql, connSource, RandomDelayExecutionContext) with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions:$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)

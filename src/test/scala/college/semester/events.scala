@@ -3,7 +3,7 @@ package college.semester
 import college.CollegeEvent
 import college.student.Student
 
-sealed trait SemesterEvent extends CollegeEvent
+sealed abstract class SemesterEvent extends CollegeEvent
 
 case class ClassCreated(className: String) extends SemesterEvent
 case class StudentEnrolled(student: Student.Id) extends SemesterEvent

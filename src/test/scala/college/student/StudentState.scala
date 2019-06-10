@@ -1,4 +1,5 @@
 package college.student
 
 case class StudentState(
-  name: String)
+  name: String,
+  emails: Set[String])
