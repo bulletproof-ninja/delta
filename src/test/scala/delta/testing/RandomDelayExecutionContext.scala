@@ -2,6 +2,7 @@ package delta.testing
 
 import scala.concurrent._
 import scala.util.Random
+import delta.EventStore
 
 class RandomDelayExecutionContext(exeCtx: ExecutionContext, maxDelayMs: Int) extends ExecutionContext {
 
@@ -15,7 +16,10 @@ class RandomDelayExecutionContext(exeCtx: ExecutionContext, maxDelayMs: Int) ext
     }
   }
 
-  def reportFailure(th: Throwable) = exeCtx reportFailure th
+  def reportFailure(th: Throwable) = th match {
+    case _: EventStore[_, _]#DuplicateRevisionException => // suppress
+    case _ => exeCtx reportFailure th
+  }
 
 }
 
