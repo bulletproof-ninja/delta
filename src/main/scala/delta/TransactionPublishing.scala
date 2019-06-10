@@ -4,11 +4,28 @@ import scala.concurrent.Future
 import scuff.Subscription
 import scuff.Codec
 
+trait TransactionPublishing[ID, EVT]
+  extends EventStore[ID, EVT] {
+
+  protected def publishTransaction(ch: Channel, txn: Future[TXN]): Unit
+
+  abstract final override def commit(
+      channel: Channel, stream: ID, revision: Int, tick: Long,
+      events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
+    val txn = super.commit(channel, stream, revision, tick, events, metadata)
+    publishTransaction(channel, txn)
+    txn
+  }
+
+  override def subscribe[U](selector: StreamsSelector)(callback: TXN => U): Subscription
+
+}
+
 /**
  * Enable pub/sub of transactions.
  */
 trait MessageHubPublishing[ID, EVT]
-  extends EventStore[ID, EVT] {
+  extends TransactionPublishing[ID, EVT] {
 
   protected val txnHub: MessageHub
   protected def txnChannels: Set[Channel]
@@ -18,16 +35,11 @@ trait MessageHubPublishing[ID, EVT]
   implicit private lazy val encoder = txnCodec.encode _
   implicit private lazy val decoder = txnCodec.decode _
 
+  protected def publishTransaction(ch: Channel, txn: Future[TXN]): Unit = 
+    txnHub.publish(toTopic(ch), txn)
+
   protected type Topic = MessageHub.Topic
   protected def Topic(name: String): Topic = MessageHub.Topic(name)
-
-  abstract final override def commit(
-      channel: Channel, stream: ID, revision: Int, tick: Long,
-      events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
-    val txn = super.commit(channel, stream, revision, tick, events, metadata)
-    txnHub.publish(toTopic(channel), txn)
-    txn
-  }
 
   override def subscribe[U](selector: StreamsSelector)(callback: TXN => U): Subscription = {
 
