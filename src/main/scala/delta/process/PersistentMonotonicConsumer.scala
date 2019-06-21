@@ -72,19 +72,22 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
 
   /**
     * Time delay before replaying missing revisions.
-    * This allows some margin for delayed out-of-order transactions.
+    * This allows some margin for delayed out-of-order transactions,
+    * either due to choice of messaging infrastructure, or consistency
+    * validation, where transaction propagation is reversed during a
+    * consistency violation.
     */
   protected def replayMissingRevisionsDelay: FiniteDuration = 1111.milliseconds
 
   protected class ReplayProcessor
-    extends DefaultMonotonicReplayProcessor[ID, EVT, S](processStore, replayProcessorCompletionTimeout, ExecutionContext.fromExecutorService(scheduler, reportFailure), replayProcessorWriteBatchSize, newPartitionedExecutionContext, newReplayMap) {
+    extends PersistentMonotonicReplayProcessor[ID, EVT, S](processStore, replayProcessorCompletionTimeout, ExecutionContext.fromExecutorService(scheduler, reportFailure), replayProcessorWriteBatchSize, newPartitionedExecutionContext, newReplayMap) {
     protected def process(tx: TXN, state: Option[S]): S = ???
     override protected def processAsync(tx: TXN, state: Option[S]): Future[S] =
       PersistentMonotonicConsumer.this.processAsync(tx, state).asInstanceOf[Future[S]]
   }
 
   protected class LiveProcessor(es: EventSource)
-    extends DefaultMonotonicProcessor[ID, EVT, S](es, processStore, replayMissingRevisionsDelay, scheduler, newPartitionedExecutionContext) {
+    extends PersistentMonotonicProcessor[ID, EVT, S](es, processStore, replayMissingRevisionsDelay, scheduler, newPartitionedExecutionContext) {
     protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate) =
       PersistentMonotonicConsumer.this.onSnapshotUpdate(id, update)
     protected def process(tx: TXN, state: Option[S]): S = ???

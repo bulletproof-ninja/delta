@@ -6,7 +6,7 @@ import scala.concurrent.duration.FiniteDuration
 import delta.EventSource
 import java.util.concurrent.ScheduledExecutorService
 
-abstract class DefaultMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
+abstract class PersistentMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
     es: EventSource[ID, _ >: EVT],
     protected val processStore: StreamProcessStore[ID, S],
     replayMissingRevisionsDelay: FiniteDuration,
@@ -23,7 +23,7 @@ abstract class DefaultMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
       reportFailure: Throwable => Unit,
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1)) =
     this(es, store, replayMissingRevisionsDelay, scheduler,
-      PartitionedExecutionContext(processingThreads, reportFailure, Threads.factory(s"default-replay-processor")))
+      PartitionedExecutionContext(processingThreads, reportFailure, Threads.factory(s"default-replay-processor", reportFailure)))
 
   protected def processContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 

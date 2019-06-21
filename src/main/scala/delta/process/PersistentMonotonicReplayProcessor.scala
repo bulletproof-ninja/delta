@@ -7,7 +7,7 @@ import scala.reflect.ClassTag
 import scuff.concurrent.Threads
 import scala.concurrent.ExecutionContext
 
-abstract class DefaultMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
+abstract class PersistentMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
     store: StreamProcessStore[ID, S],
     whenDoneCompletionTimeout: FiniteDuration,
     protected val persistContext: ExecutionContext,
@@ -28,7 +28,7 @@ abstract class DefaultMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
       cmap: collection.concurrent.Map[ID, delta.Snapshot[S]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[S]]) =
     this(store, whenDoneCompletionTimeout, whenDoneContext, writeBatchSize,
-      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-replay-processor")),
+      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-replay-processor", failureReporter)),
       cmap)
 
   protected def processContext(id: ID) = partitionThreads.singleThread(id.hashCode)

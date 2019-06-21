@@ -35,12 +35,14 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
 
   sealed private abstract class StreamStatus {
     def isActive: Boolean
+    def unapplied: Unapplied
+    def promise: Promise[Unit]
   }
   /** Currently being processed. */
-  private final class Active(val unapplied: Unapplied, val p: Promise[Unit])
+  private final class Active(val unapplied: Unapplied, val promise: Promise[Unit])
     extends StreamStatus { def isActive = true }
   /** Not currently being processed. */
-  private final class Inactive(val unapplied: Unapplied, val p: Promise[Unit])
+  private final class Inactive(val unapplied: Unapplied, val promise: Promise[Unit])
     extends StreamStatus { def isActive = false }
 
   /** Set active. A non-empty map indicates success. */
@@ -48,18 +50,18 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
     streamStatus.get(txn.stream) match {
       case None =>
         val promise = Promise[Unit]
-        val newActive = new Active(Empty, promise)
-        if (streamStatus.putIfAbsent(txn.stream, newActive).isEmpty) {
+        val active = new Active(Empty, promise)
+        if (streamStatus.putIfAbsent(txn.stream, active).isEmpty) {
           Empty.add(txn) -> promise.future
         } else setActive(txn)
       case Some(inactive: Inactive) =>
-        val promise = inactive.p
-        val newActive = new Active(Empty, promise)
-        if (streamStatus.replace(txn.stream, inactive, newActive)) {
+        val promise = inactive.promise
+        val active = new Active(Empty, promise)
+        if (streamStatus.replace(txn.stream, inactive, active)) {
           inactive.unapplied.add(txn) -> promise.future
         } else setActive(txn)
       case Some(active: Active) =>
-        val promise = active.p
+        val promise = active.promise
         val newActive = new Active(active.unapplied.add(txn), promise)
         if (streamStatus.replace(txn.stream, active, newActive)) {
           Empty -> promise.future
@@ -68,40 +70,33 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
   }
   private def forceInactive(stream: ID, unapplied: Unapplied): Unit = {
     assert(unapplied.nonEmpty)
-    streamStatus(stream) match {
-      case active: Active =>
-        val promise = active.p
-        val allUnapplied = unapplied ++ active.unapplied
-        if (!streamStatus.replace(stream, active, new Inactive(allUnapplied, promise))) {
-          forceInactive(stream, allUnapplied)
-        }
-      case inactive: Inactive =>
-        val promise = inactive.p
-        val allUnapplied = inactive.unapplied ++ unapplied
-        if (!streamStatus.replace(stream, inactive, new Inactive(allUnapplied, promise))) {
-          forceInactive(stream, allUnapplied)
-        }
+    val status = streamStatus(stream)
+    val allUnapplied = unapplied ++ status.unapplied
+    val inactive = new Inactive(allUnapplied, status.promise)
+    if (!streamStatus.replace(stream, status, inactive)) {
+      forceInactive(stream, allUnapplied)
     }
   }
+
   /** Set inactive. An empty list indicates success. */
-  private def setInactive(stream: ID, stillUnapplied: Unapplied): Unapplied = {
+  private def setInactive(stream: ID, stillUnapplied: Unapplied): (Unapplied, Future[Unit]) = {
     streamStatus(stream) match {
       case active: Active =>
-        val promise = active.p
+        val promise = active.promise
         if (active.unapplied.isEmpty) {
           if (stillUnapplied.isEmpty) {
             if (streamStatus.remove(stream, active)) {
               promise.success(())
-              Empty
+              Empty -> promise.future
             } else setInactive(stream, stillUnapplied)
-          } else {
+          } else { // Still has unapplied
             if (streamStatus.replace(stream, active, new Inactive(stillUnapplied, promise))) {
-              Empty
+              Empty -> promise.future
             } else setInactive(stream, stillUnapplied)
           }
         } else {
           if (streamStatus.replace(stream, active, new Active(Empty, promise))) {
-            active.unapplied ++ stillUnapplied
+            active.unapplied ++ stillUnapplied -> promise.future
           } else setInactive(stream, stillUnapplied)
         }
       case _ => ???
@@ -154,11 +149,11 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
       }
 
     val inactiveFuture = upsertResult.flatMap {
-      case (update, stillUnapplied) =>
-        update.foreach(upd => onSnapshotUpdate(stream, upd))
+      case (maybeUpdate, stillUnapplied) =>
+        maybeUpdate.foreach(upd => onSnapshotUpdate(stream, upd))
         setInactive(stream, stillUnapplied) match {
-          case Empty => Future successful (())
-          case moreUnapplied => upsertUntilInactive(stream, moreUnapplied)
+          case (Empty, future) => future
+          case (moreUnapplied, _) => upsertUntilInactive(stream, moreUnapplied)
         }
     }
 
