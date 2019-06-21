@@ -3,7 +3,8 @@ package sampler.jdbc.mysql
 import org.junit.Assert.assertTrue
 import org.junit._
 
-import com.mysql.jdbc.jdbc2.optional.MysqlConnectionPoolDataSource
+//import com.mysql.jdbc.jdbc2.optional.MysqlConnectionPoolDataSource
+import com.mysql.cj.jdbc.MysqlConnectionPoolDataSource
 
 import sampler.{ JSON, JsonDomainEventFormat }
 import sampler.aggr.DomainEvent

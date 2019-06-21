@@ -3,8 +3,8 @@ package college.jdbc.mysql
 import org.junit.Assert._
 import org.junit._
 
-import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
-//import com.mysql.cj.jdbc.MysqlDataSource
+//import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
+import com.mysql.cj.jdbc.MysqlDataSource
 
 import college.CollegeEvent
 import delta.EventStore
@@ -29,7 +29,7 @@ object TestCollege {
     ds setUseSSL true
     ds setAutoReconnect true
     ds setCharacterEncoding "utf-8"
-    ds setRewriteBatchedStatements true
+    ds setRewriteBatchedStatements false
     ds setContinueBatchOnError false
     ds
   }

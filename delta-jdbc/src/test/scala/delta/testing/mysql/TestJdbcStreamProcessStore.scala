@@ -4,7 +4,10 @@ import scala.concurrent.duration.DurationInt
 
 import org.junit._, Assert._
 
-import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
+//import com.mysql.jdbc.log.Slf4JLogger
+//import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
+import com.mysql.cj.log.Slf4JLogger
+import com.mysql.cj.jdbc.MysqlDataSource
 
 import delta.Snapshot
 import delta.jdbc.{ JdbcStreamProcessHistory, JdbcStreamProcessStore, VarCharColumn }
@@ -30,8 +33,7 @@ object TestJdbcStreamProcessStore {
     ds setServerName "localhost"
     ds setDatabaseName db
     ds setCreateDatabaseIfNotExist true
-    ds setUseUnicode true
-    ds setRewriteBatchedStatements true
+    ds setRewriteBatchedStatements false
     ds setContinueBatchOnError false
     ds setProfileSQL true
     ds setAutoReconnect true
@@ -39,7 +41,8 @@ object TestJdbcStreamProcessStore {
     ds setDatabaseName db
     ds setUser "root"
     ds setUseSSL false
-    ds setLoggerClassName classOf[com.mysql.jdbc.log.Slf4JLogger].getName
+//    ds setLoggerClassName classOf[Slf4JLogger].getName
+    ds setLogger classOf[Slf4JLogger].getName
     ds
   }
 
