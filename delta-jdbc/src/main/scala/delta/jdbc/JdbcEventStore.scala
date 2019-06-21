@@ -7,15 +7,9 @@ import scala.util.{ Failure, Success, Try }
 
 import delta.{ EventFormat, EventStore }
 import scuff.StreamConsumer
-import scuff.concurrent.Threads
 import scuff.jdbc.ConnectionSource
 
 private object JdbcEventStore {
-  lazy val DefaultThreadPool = {
-    val tg = Threads.newThreadGroup("JDBC Executors", daemon = false)
-    val tf = Threads.factory("jdbc-executor", tg)
-    Threads.newCachedThreadPool(tf)
-  }
   final class RawEvent[SF](name: String, version: Byte, data: SF) {
     def decode[EVT](channel: delta.Transaction.Channel, metadata: Map[String, String])(
         implicit
@@ -27,7 +21,7 @@ private object JdbcEventStore {
 class JdbcEventStore[ID, EVT, SF](
     evtFmt: EventFormat[EVT, SF],
     dialect: Dialect[ID, EVT, SF], cs: ConnectionSource,
-    blockingJdbcCtx: ExecutionContext = JdbcEventStore.DefaultThreadPool)
+    blockingJdbcCtx: ExecutionContext)
   extends EventStore[ID, EVT] {
 
   @inline implicit private def ef = evtFmt

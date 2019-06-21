@@ -32,7 +32,6 @@ object MessageHub {
         .map(_.seconds)
   }
 
-  private[delta] val ThreadGroup = Threads.newThreadGroup(classOf[MessageHub].getName, daemon = false)
   final class PublishFailure(topic: Topic, msg: Any, cause: Throwable)
     extends RuntimeException(s"Failed to publish '$topic': $msg", cause)
 
@@ -211,7 +210,7 @@ trait BufferedRetryPublish {
     extends RuntimeException(s"Failed to publish. Will retry again in $delay")
     with NoStackTrace
 
-  private val publisherThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:publisher", daemon = false, MessageHub.ThreadGroup, publishCtx.reportFailure)
+  private val publisherThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:publisher", daemon = false, publishCtx.reportFailure)
 
   private[this] val publishThread = new Thread(publisherThreadGroup, s"${publisherThreadGroup.getName}:${getClass.getName}") {
     override def run: Unit = {

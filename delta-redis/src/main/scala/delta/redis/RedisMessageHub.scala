@@ -71,8 +71,9 @@ class RedisMessageHub(
       new BoundedResourcePool(new BinaryJedis(info), 2, maxConnections)
     }
     val exe = pooledSubscriptionCancellationDelay.map(_._1) getOrElse {
-      val tf = Threads.daemonFactory(s"${getClass.getSimpleName} Redis connection evictor")
-      Threads.newSingleRunExecutor(tf, publishCtx.reportFailure)
+      val reportFailure = publishCtx.reportFailure _
+      val tf = Threads.daemonFactory(s"${getClass.getSimpleName} Redis connection evictor", reportFailure)
+      Threads.newSingleRunExecutor(tf, reportFailure)
     }
     pool.startEviction(unusedConnectionTimeout, exe)
     pool
@@ -84,7 +85,7 @@ class RedisMessageHub(
     }
   }
 
-  private val subscriberThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:subscriber", daemon = false, MessageHub.ThreadGroup, publishCtx.reportFailure)
+  private val subscriberThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:subscriber", daemon = false, publishCtx.reportFailure)
 
   protected def subscribeToKey(channels: SubscriptionKey)(callback: (Topic, MsgType) => Unit): Subscription = {
     val jedisSubscriber = new BinaryJedisPubSub {

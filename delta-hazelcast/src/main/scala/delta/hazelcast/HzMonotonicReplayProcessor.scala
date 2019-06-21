@@ -49,7 +49,7 @@ abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
       cmap: collection.concurrent.Map[ID, delta.Snapshot[S]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[S]]) =
     this(tickWatermark, imap, finishProcessingTimeout, persistContext,
-      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor")),
+      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor", failureReporter)),
       cmap)
 
   protected def processContext(id: ID): ExecutionContext = partitionThreads.singleThread(id.##)

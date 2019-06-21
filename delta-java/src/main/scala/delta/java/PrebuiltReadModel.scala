@@ -5,7 +5,6 @@ import delta.MessageHub
 import delta.read._
 import scala.concurrent.duration._
 import java.util.concurrent.ScheduledExecutorService
-import scuff.concurrent.Threads
 import scala.reflect.ClassTag
 
 abstract class PrebuiltReadModel[ID, SSID, SS, S >: SS](
@@ -33,15 +32,6 @@ abstract class PrebuiltReadModel[ID, SSID, SS, S >: SS](
       implicit
       idConv: ID => SSID) =
     this(stateClass, store, FiniteDuration(defaultLookupTimeoutLength, defaultLookupTimeoutUnits), hub, hubNS, scheduler)
-
-  def this(
-      stateClass: Class[S],
-      store: SnapshotStore[SSID, SS],
-      hub: MessageHub,
-      hubNS: MessageHub.Topic)(
-      implicit
-      idConv: ID => SSID) =
-    this(stateClass, store, DefaultReadTimeout, hub, hubNS, Threads.DefaultScheduler)
 
   def this(
       stateClass: Class[S],

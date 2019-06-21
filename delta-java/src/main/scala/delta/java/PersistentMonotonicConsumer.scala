@@ -5,7 +5,6 @@ import java.util.concurrent.ScheduledExecutorService
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 
-import scuff.concurrent.Threads
 import scala.concurrent.duration._
 import java.util.function.Consumer
 import delta.process.StreamProcessStore
@@ -34,11 +33,6 @@ abstract class PersistentMonotonicConsumer[ID, EVT, S >: Null](
       evtType: Class[_ <: EVT]) =
     this(processStore, scheduler)(ClassTag(evtType))
 
-  def this(
-      processStore: StreamProcessStore[ID, S],
-      evtType: Class[_ <: EVT]) =
-    this(processStore, Threads.DefaultScheduler)(ClassTag(evtType))
-
   /** Turn Scala `List` into Java `Iterable`. */
   protected def iterable(list: List[_ >: EVT]): java.lang.Iterable[EVT] = {
     new java.lang.Iterable[EVT] {
@@ -62,11 +56,6 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null](
       scheduler: ScheduledExecutorService,
       evtType: Class[_ <: EVT]) =
     this(processStore, scheduler)(ClassTag(evtType))
-
-  def this(
-      processStore: StreamProcessStore[ID, S],
-      evtType: Class[_ <: EVT]) =
-    this(processStore, Threads.DefaultScheduler)(ClassTag(evtType))
 
   override type Snapshot = delta.Snapshot[S]
   override type SnapshotUpdate = delta.process.SnapshotUpdate[S]

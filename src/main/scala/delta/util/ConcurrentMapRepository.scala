@@ -4,7 +4,6 @@ import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
 
 import delta.ddd.{ DuplicateIdException, Repository, UnknownIdException }
-import scuff.concurrent.{ Threads }
 import delta.ddd.ImmutableEntity
 import delta.ddd.Metadata
 
@@ -13,8 +12,11 @@ import delta.ddd.Metadata
  * Mostly useful for testing.
  */
 class ConcurrentMapRepository[K, V <: AnyRef](
-    map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])(implicit ec: ExecutionContext = Threads.Blocking)
+    exeCtx: ExecutionContext,
+    map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])
   extends Repository[K, V] with ImmutableEntity[V] {
+
+  private implicit def ec = exeCtx
 
   def insert(id: => K, entity: V)(
       implicit

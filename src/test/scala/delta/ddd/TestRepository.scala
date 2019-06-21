@@ -2,13 +2,13 @@ package delta.ddd
 
 import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 
 import org.junit.Assert._
 import org.junit.Test
 import delta.util.ConcurrentMapRepository
 import delta.util.PublishingRepository
+import delta.testing.RandomDelayExecutionContext
 
 class TestRepository {
 
@@ -21,12 +21,13 @@ class TestRepository {
   implicit def toFut[T](t: T) = Future successful t
   case class Customer(name: String, postCode: String)
 
+  implicit def ec = RandomDelayExecutionContext
   implicit def metadata = Metadata("hello" -> "world")
 
   @Test
   def `insert success`(): Unit = {
     withLatch(5) { latch =>
-      val repo = new ConcurrentMapRepository[BigInt, Customer]
+      val repo = new ConcurrentMapRepository[BigInt, Customer](ec)
       val hank = Customer("Hank", "12345")
       repo.insert(5, hank).foreach { id5 =>
         assertEquals(BigInt(5), id5)
@@ -63,7 +64,7 @@ class TestRepository {
   def `event publishing`(): Unit = {
     case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Metadata)
     val notifications = new LinkedBlockingQueue[Notification]
-    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new ConcurrentMapRepository, global) {
+    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new ConcurrentMapRepository(ec), ec) {
       type Event = VeryBasicEvent
       def publish(id: Long, revision: Int, events: List[Event], metadata: Metadata): Unit = {
         notifications offer Notification(id, revision, events, metadata)

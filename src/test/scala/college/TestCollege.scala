@@ -37,6 +37,8 @@ object TestCollege {
 // FIXME: Something's not right with the test case. Code coverage is incomplete.
 class TestCollege {
 
+  val Scheduler = Threads.newScheduledThreadPool(8, Threads.factory(Threads.SystemThreadGroup), _.printStackTrace)
+  
   import TestCollege._
 
   implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
@@ -394,7 +396,7 @@ class TestCollege {
     val procStore = newLookupServiceProcStore
     val lookup = lookupService(procStore)
     object ServiceBuilder
-      extends PersistentMonotonicConsumer[Int, StudentEvent, StudentEmails](procStore, Threads.DefaultScheduler) {
+      extends PersistentMonotonicConsumer[Int, StudentEvent, StudentEmails](procStore, Scheduler) {
       protected def maxTickSkew: Int = 2
       protected def selector(es: EventSource): es.Selector = es.ChannelSelector(Student.channel)
       protected def onSnapshotUpdate(id: Int, update: SnapshotUpdate): Unit = ()
