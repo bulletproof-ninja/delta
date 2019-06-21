@@ -6,7 +6,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.annotation.varargs
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
-import scala.util.{ Try, Success, Failure }
+import scala.util.Try
 import scala.util.control.NonFatal
 
 import scuff.{ FakeType, Memoizer, Subscription, Numbers }
@@ -71,7 +71,7 @@ trait MessageHub {
       implicit
       encoder: M => MsgType): Unit = {
     msg.foreach { msg =>
-      try publish(topic, msg) catch {
+      try publishImpl(topic, encoder(msg)) catch {
         case NonFatal(cause) =>
           publishCtx reportFailure new MessageHub.PublishFailure(topic, msg, cause)
       }
