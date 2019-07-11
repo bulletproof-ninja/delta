@@ -404,8 +404,9 @@ class TestCollege {
         th.printStackTrace()
         fail(th.getMessage)
       }
+      private[this] val project = TransactionProjector(StudentEmailsProjector)
       protected def process(txn: TXN, currState: Option[StudentEmails]): StudentEmails = {
-        Projector.process(StudentEmailsProjector)(currState, txn.events)
+        project(txn, currState)
       }
     }
     val subscription = ServiceBuilder.consume(eventStore).await

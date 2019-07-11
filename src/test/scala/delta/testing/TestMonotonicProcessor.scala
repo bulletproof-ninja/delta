@@ -14,6 +14,7 @@ import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
 import delta.process.MonotonicReplayProcessor
 import delta.process.ConcurrentMapStore
+import delta.TransactionProjector
 
 class TestMonotonicProcessor {
   private val NoFuture = Future successful None
@@ -48,11 +49,11 @@ class TestMonotonicProcessor {
       object Concat extends Projector[String, Char] {
         def init(c: Char) = new String(Array(c))
         def next(str: String, c: Char) = s"$str$c"
-        val process = Projector.process(this) _
+        val process = TransactionProjector[String, Char](this)
       }
       def processContext(id: Int) = ec
       def process(txn: TXN, state: Option[String]) = {
-        val newState = Concat.process(state, txn.events)
+        val newState = Concat.process(txn, state)
         //        println(s"Txn ${txn.revision}: $state => $newState")
         newState
       }

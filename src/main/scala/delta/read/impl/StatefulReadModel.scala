@@ -1,7 +1,6 @@
 package delta.read.impl
 
-import delta.Projector
-import delta.EventSource
+import delta._
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.reflect.ClassTag
 import delta.read._
@@ -25,25 +24,20 @@ import delta.read._
  * @tparam ESID The event-source id type
  * @tparam EVT The event type used for producing state
  */
-abstract class StatefulReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag] private (
-    projectorSource: Either[Map[String, String] => Projector[S, EVT], Projector[S, EVT]],
+abstract class StatefulReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
+    txProjector: TransactionProjector[S, EVT],
     es: EventSource[ESID, _ >: EVT])(
     implicit
     convId: ID => ESID)
-  extends EventSourceReadModel[ID, ESID, S, EVT](es, projectorSource)
+  extends EventSourceReadModel[ID, ESID, S, EVT](es, txProjector)
   with ProcessStoreSupport[ID, ESID, S] {
 
   def this(
       projector: Projector[S, EVT])(
       es: EventSource[ESID, _ >: EVT])(
       implicit
-      convId: ID => ESID) = this(Right(projector), es)
-
-  def this(
-      withMetadata: Map[String, String] => Projector[S, EVT])(
-      es: EventSource[ESID, _ >: EVT])(
-      implicit
-      convId: ID => ESID) = this(Left(withMetadata), es)
+      convId: ID => ESID) =
+        this(TransactionProjector[S, EVT](projector), es)
 
   protected def idConv(id: ID): ESID = convId(id)
 

@@ -17,22 +17,18 @@ import delta.read._
  * @tparam S The state type
  * @tparam EVT The event type used for producing state
  */
-class StatelessReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag] private (
-    projectorSource: Either[Map[String, String] => Projector[S, EVT], Projector[S, EVT]],
+class StatelessReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
+    txProjector: TransactionProjector[S, EVT],
     es: EventSource[ESID, _ >: EVT])(
     implicit
     idConv: ID => ESID)
-  extends EventSourceReadModel[ID, ESID, S, EVT](es, projectorSource) {
+  extends EventSourceReadModel[ID, ESID, S, EVT](es, txProjector) {
 
   def this(projector: Projector[S, EVT])(
       es: EventSource[ESID, _ >: EVT])(
       implicit
-      idConv: ID => ESID) = this(Right(projector), es)
-
-  def this(withMetadata: Map[String, String] => Projector[S, EVT])(
-      es: EventSource[ESID, _ >: EVT])(
-      implicit
-      idConv: ID => ESID) = this(Left(withMetadata), es)
+      idConv: ID => ESID) =
+        this(TransactionProjector[S, EVT](projector), es)
 
   def readLatest(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
     replayToComplete(None, id).flatMap {

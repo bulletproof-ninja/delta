@@ -8,49 +8,53 @@ import scala.reflect.ClassTag
  * @tparam S state type
  * @tparam EVT event type
  */
-trait Projector[S, EVT] extends Serializable {
+trait Projector[S >: Null, EVT] extends Serializable {
   /** Initial event. */
   def init(evt: EVT): S
   /** Subsequent event(s). */
   def next(state: S, evt: EVT): S
 
-  def apply(evt: EVT)(state: Option[S]): S = state match {
-    case Some(state) => next(state, evt)
-    case _ => init(evt)
-  }
+}
+
+trait TransactionProjector[M >: Null, EVT]
+  extends ((Transaction[_, _ >: EVT], Option[_ >: M]) => M)
+  with Serializable {
+
+  type TXN = Transaction[_, _ >: EVT]
+
+  def apply(txn: TXN, st: Option[_ >: M]): M
 
 }
 
-object Projector {
+object TransactionProjector {
 
-  def apply[S, EVT](initF: EVT => S)(nextF: S => EVT => S): Projector[S, EVT] = new Projector[S, EVT] {
-    def init(evt: EVT): S = initF(evt)
-    def next(state: S, evt: EVT): S = nextF(state)(evt)
-  }
+  def apply[T >: Null: ClassTag, EVT: ClassTag](
+      projector: Projector[T, EVT]): TransactionProjector[T, EVT] =
+    this.apply(projector, Codec.noop)
 
-  def process[S >: Null: ClassTag, EVT: ClassTag](
-      projector: Projector[S, EVT])(
-      os: Option[_ >: S], events: List[_ >: EVT]): S = process[S, EVT, S](projector, Codec.noop)(os, events)
+  def apply[M >: Null: ClassTag, S >: Null, EVT: ClassTag](
+      projector: Projector[S, EVT], codec: Codec[M, S]): TransactionProjector[M, EVT] =
 
-  def process[S1 >: Null: ClassTag, EVT: ClassTag, S2 >: Null](
-      projector: Projector[S2, EVT],
-      codec: Codec[S1, S2])(
-      os: Option[_ >: S1], events: List[_ >: EVT]): S1 = {
+    new TransactionProjector[M, EVT] {
+      def apply(tx: Transaction[_, _ >: EVT], m: Option[_ >: M]): M = {
+        val initState = m.collectAs[M].orNull match {
+          case null => null
+          case m => codec encode m
+        }
+        val state = tx.events.iterator
+          .collectAs[EVT]
+          .foldLeft(initState) {
+            case (state, evt) =>
+              if (state == null) projector.init(evt)
+              else projector.next(state, evt)
+          }
+        if (state != null) codec decode state
+        else {
+          val projectorName = projector.getClass.getName
+          val events = tx.events.collectAs[EVT].mkString("\n")
+          throw new IllegalStateException(s"$projectorName produced `null` state on events:\n$events")
+        }
 
-    val initState = os.collect { case state: S1 => state }
-    val state = events.iterator
-      .collect { case (evt: EVT) => evt }
-      .foldLeft(initState.map(codec.encode).orNull) {
-        case (state, evt) =>
-          if (state == null) projector.init(evt)
-          else projector.next(state, evt)
       }
-    if (state != null) codec decode state
-    else {
-      val projectorName = projector.getClass.getName
-      val filteredEvents = events.collect { case (evt: EVT) => evt }.mkString("\n")
-      throw new IllegalStateException(s"$projectorName produced `null` state on events:\n$filteredEvents")
     }
-  }
-
 }

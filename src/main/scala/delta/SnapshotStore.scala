@@ -8,7 +8,7 @@ trait SnapshotStore[K, T] {
   def write(key: K, snapshot: Snapshot): Future[Unit]
 }
 
-private[delta] object SnapshotStore {
+object SnapshotStore {
   private[this] val UnitFuture = Future.successful(())
   private[this] val NoneFuture = Future successful None
   private[this] val Empty = new SnapshotStore[Any, AnyRef] {

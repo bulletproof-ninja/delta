@@ -7,7 +7,7 @@ import scala.collection.immutable.TreeMap
 
 import com.hazelcast.map.AbstractEntryProcessor
 
-import delta.{ Projector, Snapshot, Transaction }
+import delta.{ Projector, Snapshot, Transaction, TransactionProjector }
 import com.hazelcast.core.IMap
 import scala.concurrent.Future
 import scala.reflect.{ ClassTag, classTag }
@@ -55,7 +55,7 @@ final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] 
   type EntryState = delta.hazelcast.EntryState[S, EVT]
   type TXN = Transaction[_, EVT]
 
-  private[this] val reduce = Projector.process(projector) _
+  private[this] val project = TransactionProjector(projector)
 
   def process(entry: Entry[K, EntryState]): Object = processTransaction(entry, this.txn)
 
@@ -65,7 +65,7 @@ final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] 
 
       case null => // First transaction seen
         if (txn.revision == 0) { // First transaction, as expected
-          val snapshot = new Snapshot(reduce(None, txn.events), txn.revision, txn.tick)
+          val snapshot = new Snapshot(project(txn, None), txn.revision, txn.tick)
           entry setValue new EntryState(snapshot, contentUpdated = true)
           Updated(snapshot)
         } else { // Not first, so missing some
@@ -75,7 +75,7 @@ final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] 
 
       case EntryState(null, _, unapplied) => // Un-applied transactions exists, no snapshot yet
         if (txn.revision == 0) { // This transaction is first, so apply
-          val snapshot = new Snapshot(reduce(None, txn.events), txn.revision, txn.tick)
+          val snapshot = new Snapshot(project(txn, None), txn.revision, txn.tick)
           entry setValue new EntryState(snapshot, contentUpdated = true, unapplied.tail)
           processTransaction(entry, unapplied.head._2)
         } else { // Still not first transaction
@@ -87,7 +87,7 @@ final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] 
       case EntryState(snapshot, _, unapplied) =>
         val expectedRev = snapshot.revision + 1
         if (txn.revision == expectedRev) { // Expected revision, apply
-          val updSnapshot = new Snapshot(reduce(Some(snapshot.content), txn.events), txn.revision, txn.tick)
+          val updSnapshot = new Snapshot(project(txn, Some(snapshot.content)), txn.revision, txn.tick)
           unapplied.headOption match {
             case None =>
               val contentUpdated = !(snapshot contentEquals updSnapshot)

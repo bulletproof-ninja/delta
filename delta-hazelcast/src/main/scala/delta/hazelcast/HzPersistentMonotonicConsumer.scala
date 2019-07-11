@@ -1,15 +1,17 @@
 package delta.hazelcast
 
-import delta.process.EventSourceConsumer
-import com.hazelcast.core.IMap
-import scala.concurrent._
-import scala.concurrent.duration._
-import scuff.concurrent.PartitionedExecutionContext
-import scala.collection.JavaConverters._
-import scala.reflect.ClassTag
-import delta.Projector
 import java.util.concurrent.ScheduledExecutorService
-import delta.Snapshot
+
+import scala.collection.JavaConverters._
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
+import scala.reflect.ClassTag
+
+import com.hazelcast.core.IMap
+
+import delta.{ Projector, Snapshot, TransactionProjector }
+import delta.process.EventSourceConsumer
+import scuff.concurrent.PartitionedExecutionContext
 
 /**
  * @tparam ID The key identifier
@@ -68,7 +70,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     * [[delta.util.MonotonicReplayProcessor]] here.
     */
 
-  private[this] val reduce = Projector.process(projector) _
+  private[this] val project = TransactionProjector(projector)
   protected def replayProcessor(es: EventSource) =
     new HzMonotonicReplayProcessor[ID, EVT, S](
       tickWatermark,
@@ -77,7 +79,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
       executionContext,
       newPartitionedExecutionContext,
       newReplayMap) {
-    def process(txn: TXN, currState: Option[S]): S = reduce(currState, txn.events)
+    def process(txn: TXN, currState: Option[S]): S = project(txn, currState)
   }
 
   protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis

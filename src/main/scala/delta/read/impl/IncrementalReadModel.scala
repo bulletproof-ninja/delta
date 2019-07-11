@@ -1,7 +1,6 @@
 package delta.read.impl
 
-import delta.Projector
-import delta.EventSource
+import delta._
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import delta.process._
@@ -19,15 +18,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  * NOTE: *Cannot* be used for state derived
  * from joined streams.
  * @tparam ID The id type
- * @tparam S The state type
+ * @tparam S The model type
  * @tparam EVT The event type used for producing state
  */
-abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag] private[delta] (
-    projectorSource: Either[Map[String, String] => Projector[S, EVT], Projector[S, EVT]],
+abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
+    txProjector: TransactionProjector[S, EVT],
     es: EventSource[ESID, _ >: EVT])(
     implicit
     convId: ID => ESID)
-  extends EventSourceReadModel[ID, ESID, S, EVT](es, projectorSource)
+  extends EventSourceReadModel[ID, ESID, S, EVT](es, txProjector)
   with SubscriptionSupport[ID, S]
   with MessageHubSupport[ID, ESID, S]
   with ProcessStoreSupport[ID, ESID, S] {
@@ -37,14 +36,7 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
       eventSource: EventSource[ESID, _ >: EVT])(
       implicit
       convId: ID => ESID) =
-    this(Right(projector), eventSource)
-
-  def this(
-      withMetadata: Map[String, String] => Projector[S, EVT],
-      eventSource: EventSource[ESID, _ >: EVT])(
-      implicit
-      convId: ID => ESID) =
-    this(Left(withMetadata), eventSource)
+    this(TransactionProjector[S, EVT](projector), eventSource)
 
   protected def idConv(id: ID): ESID = convId(id)
 
@@ -92,14 +84,11 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
       replayMissingRevisions(
         eventSource, replayDelayOnMissing, scheduler, processContext(id).reportFailure)(
         id, missing)(this.apply)
-    protected def onSnapshotUpdate(id: ESID, update: delta.process.SnapshotUpdate[S]): Unit =
+    protected def onSnapshotUpdate(id: ESID, update: SnapshotUpdate): Unit =
       snapshotHub.publish(snapshotTopic, id -> update)
     protected def processStore = IncrementalReadModel.this.processStore
     protected def processContext(id: ESID) = IncrementalReadModel.this.processContext(id)
-    protected def process(txn: TXN, currState: Option[S]): S = {
-      val process = projectorProcess(txn.metadata)
-      process(currState, txn.events)
-    }
+    protected def process(txn: TXN, currState: Option[S]): S = txProjector(txn, currState)
   }
 
 }

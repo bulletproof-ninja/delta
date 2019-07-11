@@ -4,13 +4,13 @@ import java.util.concurrent.ScheduledExecutorService
 
 import scala.reflect.ClassTag
 
-import delta.{ EventSource, Projector }
+import delta._
 import delta.process.StreamProcessStore
 import delta.MessageHub
 
-abstract class IncrementalReadModel[ID, ESID, S >: Null, EVT] private (
+abstract class IncrementalReadModel[ID, ESID, S >: Null, EVT](
     snapshotClass: Class[S], eventClass: Class[EVT],
-    projectorSource: Either[Map[String, String] => Projector[S, EVT], Projector[S, EVT]],
+    txProjector: TransactionProjector[S, EVT],
     protected val processStore: StreamProcessStore[ESID, S],
     protected val snapshotHub: delta.MessageHub,
     protected val snapshotTopic: delta.MessageHub.Topic,
@@ -18,7 +18,7 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null, EVT] private (
     eventSource: EventSource[ESID, _ >: EVT],
     idConv: ID => ESID)
 
-  extends delta.read.impl.IncrementalReadModel[ID, ESID, S, EVT](projectorSource, eventSource)(
+  extends delta.read.impl.IncrementalReadModel[ID, ESID, S, EVT](txProjector, eventSource)(
     ClassTag(snapshotClass), ClassTag(eventClass), idConv)
   with SubscriptionAdapter[ID, S] {
 
@@ -32,22 +32,9 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null, EVT] private (
       scheduler: ScheduledExecutorService,
       eventSource: EventSource[ESID, _ >: EVT]) =
     this(
-      snapshotClass, eventClass, Right(projector), processStore,
-      snapshotHub, MessageHub.Topic(snapshotTopic), scheduler)(
-      eventSource, idConv)
-
-  def this(
-      idConv: ID => ESID,
-      snapshotClass: Class[S], eventClass: Class[EVT],
-      withMetadata: Map[String, String] => Projector[S, EVT],
-      processStore: StreamProcessStore[ESID, S],
-      snapshotHub: MessageHub,
-      snapshotTopic: String,
-      scheduler: ScheduledExecutorService,
-      eventSource: EventSource[ESID, _ >: EVT]) =
-    this(
-      snapshotClass, eventClass, Left(withMetadata), processStore,
-      snapshotHub, MessageHub.Topic(snapshotTopic), scheduler)(
+      snapshotClass, eventClass,
+      TransactionProjector(projector)(ClassTag(snapshotClass), ClassTag(eventClass)),
+      processStore, snapshotHub, MessageHub.Topic(snapshotTopic), scheduler)(
       eventSource, idConv)
 
 }
