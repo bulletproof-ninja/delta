@@ -30,13 +30,25 @@ object TransactionProjector {
 
   def apply[T >: Null: ClassTag, EVT: ClassTag](
       projector: Projector[T, EVT]): TransactionProjector[T, EVT] =
-    this.apply(projector, Codec.noop)
+    this.apply(projector, Codec.noop[T])
+
+  def apply[T >: Null: ClassTag, EVT: ClassTag](
+      newProjector: Transaction[_, _ >: EVT] => Projector[T, EVT]): TransactionProjector[T, EVT] =
+    this.apply(Codec.noop[T])(newProjector)
 
   def apply[M >: Null: ClassTag, S >: Null, EVT: ClassTag](
       projector: Projector[S, EVT], codec: Codec[M, S]): TransactionProjector[M, EVT] =
+    this.apply(codec)(_ => projector)
+
+  def apply[M >: Null: ClassTag, S >: Null, EVT: ClassTag](
+      codec: Codec[M, S])(
+      newProjector: Transaction[_, _ >: EVT] => Projector[S, EVT]): TransactionProjector[M, EVT] =
 
     new TransactionProjector[M, EVT] {
       def apply(tx: Transaction[_, _ >: EVT], m: Option[_ >: M]): M = {
+
+        val projector = newProjector(tx)
+
         val initState = m.collectAs[M].orNull match {
           case null => null
           case m => codec encode m
