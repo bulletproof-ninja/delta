@@ -97,6 +97,10 @@ trait SubscriptionSupport[ID, S] {
     }(Threads.PiggyBack)
   }
 
+  protected def readStrict(id: ID, tickOrRevision: Either[Long, Int])(
+      implicit
+      ec: ExecutionContext): Future[Snapshot]
+
   private def readOrSubscribe(id: ID, tickOrRevision: Either[Long, Int], timeout: FiniteDuration)(
       implicit
       ec: ExecutionContext): Future[Snapshot] = {
@@ -125,7 +129,8 @@ trait SubscriptionSupport[ID, S] {
               promise tryFailure Timeout(id, maybeSnapshot, tickOrRevision, timeout)
             }
           }
-          readLatest(id) andThen { // Unfortunately we have to try another read, to eliminate the race condition
+          // Unfortunately we have to try another read, to eliminate the race condition
+          readStrict(id, tickOrRevision) andThen {
             case Success(snapshot) if matchesTickOrRevision(snapshot) =>
               promise trySuccess snapshot
             case Failure(th) =>

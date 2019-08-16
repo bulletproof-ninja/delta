@@ -69,42 +69,28 @@ package object read {
       case None => Future failed UnknownIdRequested(snapshotId)
     }
 
-  //  protected def verify(
-  //      snapshotId: ID, snapshot: Snapshot,
-  //      minTickOrRevision: Either[Long, Int]): Future[Snapshot] =
-  //    minTickOrRevision match {
-  //      case Right(minRevision) =>
-  //        if (snapshot.revision >= minRevision) Future successful snapshot
-  //        else Future failed
-  //          new IllegalArgumentException(s"Unknown revision: $minRevision") with UnknownRevisionRequested { def id = snapshotId; def knownRevision = snapshot.revision }
-  //      case Left(minTick) =>
-  //        if (snapshot.tick >= minTick) Future successful snapshot
-  //        else Future failed
-  //          new IllegalArgumentException(s"Unknown tick: $minTick") with UnknownTickRequested { def id = snapshotId; def knownTick = snapshot.tick }
-  //    }
-
-  private[read] def verifyRevision[ID, S](
+  private[delta] def verifyRevision[ID, S](
       snapshotId: ID, snapshot: Option[Snapshot[S]],
       minRevision: Int): Future[Snapshot[S]] =
     snapshot match {
       case Some(snapshot) => verifyRevision(snapshotId, snapshot, minRevision)
       case None => Future failed UnknownIdRequested(snapshotId)
     }
-  private[read] def verifyRevision[ID, S](
+  private[delta] def verifyRevision[ID, S](
       snapshotId: ID, snapshot: Snapshot[S],
       minRevision: Int): Future[Snapshot[S]] =
     if (snapshot.revision >= minRevision) Future successful snapshot
     else Future failed
       new IllegalArgumentException(s"Unknown revision: $minRevision") with UnknownRevisionRequested { def id = snapshotId; def knownRevision = snapshot.revision }
 
-  private[read] def verifyTick[ID, S](
+  private[delta] def verifyTick[ID, S](
       snapshotId: ID, snapshot: Option[Snapshot[S]],
       minTick: Long): Future[Snapshot[S]] =
     snapshot match {
       case Some(snapshot) => verifyTick(snapshotId, snapshot, minTick)
       case None => Future failed UnknownIdRequested(snapshotId)
     }
-  private[read] def verifyTick[ID, S](
+  private[delta] def verifyTick[ID, S](
       snapshotId: ID, snapshot: Snapshot[S],
       minTick: Long): Future[Snapshot[S]] =
     if (snapshot.tick >= minTick) Future successful snapshot

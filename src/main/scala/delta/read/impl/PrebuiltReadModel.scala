@@ -26,6 +26,14 @@ abstract class PrebuiltReadModel[ID, ESID, SS, S >: SS: ClassTag](
   protected val stateClass = classTag[S].runtimeClass.asInstanceOf[Class[S]]
   protected def idConv(id: ID): ESID = convId(id)
 
+  protected def readStrict(id: ID, expected: Either[Long, Int])(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] =
+    expected match {
+      case Right(minRev) => readLatest(id).flatMap(verifyRevision(id, _, minRev))
+      case Left(minTick) => readLatest(id).flatMap(verifyTick(id, _, minTick))
+    }
+
   def readMinTick(id: ID, minTick: Long)(
       implicit
       ec: ExecutionContext): Future[Snapshot] = readMinTick(id, minTick, defaultReadTimeout)

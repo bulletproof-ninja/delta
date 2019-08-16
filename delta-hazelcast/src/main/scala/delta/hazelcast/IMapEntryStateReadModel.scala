@@ -24,6 +24,14 @@ class IMapEntryStateReadModel[ID, S, EVT](
 
   protected def reportFailure(th: Throwable) = failureReporter(th)
 
+  protected def readStrict(id: ID, expected: Either[Long, Int])(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] =
+    expected match {
+      case Right(minRev) => readLatest(id).flatMap(verifyRevision(id, _, minRev))
+      case Left(minTick) => readLatest(id).flatMap(verifyTick(id, _, minTick))
+    }
+
   def readLatest(id: ID)(
       implicit
       ec: ExecutionContext): Future[Snapshot] = {

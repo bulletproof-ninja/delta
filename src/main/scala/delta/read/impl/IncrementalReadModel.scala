@@ -38,6 +38,17 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
       convId: ID => ESID) =
     this(TransactionProjector[S, EVT](projector), eventSource)
 
+  protected def readStrict(id: ID, expected: Either[Long, Int])(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] = {
+    expected match {
+      case Right(minRevision) =>
+        readAndUpdate(id, minRev = minRevision).flatMap(verifyRevision(id, _, minRevision))
+      case Left(minTick) =>
+        readAndUpdate(id, minTick = minTick).flatMap(verifyTick(id, _, minTick))
+    }
+  }
+
   protected def idConv(id: ID): ESID = convId(id)
 
   private[this] val started = new AtomicBoolean(false)
