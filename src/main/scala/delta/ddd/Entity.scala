@@ -1,7 +1,7 @@
 package delta.ddd
 
 import delta.Projector
-import delta.Transaction.Channel
+import delta.Transaction
 
 private[delta] object Entity {
   def defaultName(e: Class[_]): String = {
@@ -15,7 +15,7 @@ private[delta] object Entity {
   */
 abstract class Entity[S >: Null, EVT](name: String, projector: Projector[S, EVT]) {
 
-  val channel: delta.Transaction.Channel = Channel(name)
+  val channel: Transaction.Channel = Transaction.Channel(name)
 
   type Id
   type Type
@@ -31,15 +31,15 @@ abstract class Entity[S >: Null, EVT](name: String, projector: Projector[S, EVT]
     s
   }
 
-  private[ddd] def initEntity(state: S, mergeEvents: List[EVT]): Type = init(newState(state), mergeEvents)
+  private[ddd] def initEntity(state: S, concurrentUpdates: List[EVT]): Type = init(newState(state), concurrentUpdates)
 
   /**
     * Initialize entity instance.
-    * @param state The internal state
-    * @param mergeEvents Any potential events to merge
+    * @param state The internal state. This is always up-to-date, regardless of any concurrent updates
+    * @param concurrentUpdates Any concurrent events, i.e. events that are unknown to the updater.
     * @return The Entity instance
     */
-  protected def init(state: State, mergeEvents: List[Event]): Type
+  protected def init(state: State, concurrentUpdates: List[EVT]): Type
 
   /**
     * Get state used by the entity instance.
