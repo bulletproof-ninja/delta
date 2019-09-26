@@ -1,9 +1,13 @@
-/bin/
-/.*
+# Ignore . files
+.*
+# Except .gitignore
 !/.gitignore
-*~
-/build/
-/*/build/
-/*/.*
-*.db
 
+# Ignore build dirs
+bin/
+build/
+
+*~
+
+# Ignore temp db files
+*.db
