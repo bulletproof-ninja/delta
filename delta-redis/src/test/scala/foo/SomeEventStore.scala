@@ -9,9 +9,12 @@ import delta.redis.RedisMessageHub
 import delta.Transaction.Channel
 import java.util.concurrent.ArrayBlockingQueue
 import scuff.JavaSerializer
+import delta.{ Ticker, EventSource }
 
-class SomeEventStore(ec: ExecutionContext, jedisInfo: JedisShardInfo)
-  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)
+class SomeEventStore(
+    ec: ExecutionContext, jedisInfo: JedisShardInfo)(
+    initTicker: EventSource[Int, MyEvent] => Ticker)
+  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)(initTicker)
   with MessageHubPublishing[Int, MyEvent] {
 
   protected def toTopic(ch: Channel) = Topic(s"${this.getClass}:$ch")

@@ -7,7 +7,6 @@ import delta.{ EventStore, SnapshotStore }
 import delta.Transaction.Channel
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
-import delta.Ticker
 
 /**
  * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
@@ -34,7 +33,7 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
     exeCtx: ExecutionContext,
     snapshots: SnapshotStore[RID, S] = SnapshotStore.empty[RID, S],
     assumeCurrentSnapshots: Boolean = false)(
-    es: EventStore[ESID, _ >: EVT], ticker: Ticker)(
+    es: EventStore[ESID, _ >: EVT])(
     implicit
     idConv: RID => ESID)
   extends Repository[RID, (S, List[EVT])] with ImmutableEntity[(S, List[EVT])] {
@@ -44,6 +43,7 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
   private type Snapshot = delta.Snapshot[S]
 
   private[this] val eventStore = es.asInstanceOf[EventStore[ESID, EVT]]
+  private[this] val ticker = eventStore.ticker
 
   private type Events = List[EVT]
   private type RepoType = (S, Events)

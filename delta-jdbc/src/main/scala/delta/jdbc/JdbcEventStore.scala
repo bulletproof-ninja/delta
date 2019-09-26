@@ -8,6 +8,7 @@ import scala.util.{ Failure, Success, Try }
 import delta.{ EventFormat, EventStore }
 import scuff.StreamConsumer
 import scuff.jdbc.ConnectionSource
+import delta.Ticker
 
 private object JdbcEventStore {
   final class RawEvent[SF](name: String, version: Byte, data: SF) {
@@ -21,9 +22,12 @@ private object JdbcEventStore {
 class JdbcEventStore[ID, EVT, SF](
     evtFmt: EventFormat[EVT, SF],
     dialect: Dialect[ID, EVT, SF], cs: ConnectionSource,
-    blockingJdbcCtx: ExecutionContext)
+    blockingJdbcCtx: ExecutionContext)(
+    initTicker: JdbcEventStore[ID, EVT, SF] => Ticker)
   extends EventStore[ID, EVT] {
 
+  lazy val ticker = initTicker(this)
+  
   @inline implicit private def ef = evtFmt
 
   def ensureSchema(): this.type = {

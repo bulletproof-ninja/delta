@@ -6,13 +6,17 @@ import scala.util.{ Failure, Success, Try }
 
 import scuff.StreamConsumer
 import delta.{ EventFormat, EventStore }
+import delta.Ticker
 
 /**
   * Non-persistent implementation, probably only useful for testing.
   */
-abstract class TransientEventStore[ID, EVT, SF](
-  execCtx: ExecutionContext, evtFmt: EventFormat[EVT, SF])
+class TransientEventStore[ID, EVT, SF](
+  execCtx: ExecutionContext, evtFmt: EventFormat[EVT, SF])(
+  initTicker: TransientEventStore[ID, EVT, SF] => Ticker)
     extends EventStore[ID, EVT] {
+
+  lazy val ticker = initTicker(this)
 
   private def Txn(id: ID, rev: Int, channel: Channel, tick: Long, metadata: Map[String, String], events: List[EVT]): Txn = {
     val eventsSF = events.map { evt =>

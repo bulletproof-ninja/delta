@@ -64,14 +64,15 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   def setup(): Unit = {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
-    es = new CassandraEventStore[String, AggrEvent, String](
-      session, TableDescriptor, AggrEventFormat, RandomDelayExecutionContext) with MessageHubPublishing[String, AggrEvent] {
+    es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor, 
+      AggrEventFormat, RandomDelayExecutionContext)(_ => ticker) 
+      with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"txn:$ch")
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(Channel("any"))
       val txnCodec = Codec.noop[TXN]
     }
-    repo = new EntityRepository(TheOneAggr, ec)(es, ticker)
+    repo = new EntityRepository(TheOneAggr, ec)(es)
   }
   private def deleteAll(session: Session): Unit = {
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))

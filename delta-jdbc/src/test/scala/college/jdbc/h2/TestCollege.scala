@@ -45,9 +45,8 @@ class TestCollege extends college.jdbc.TestCollege {
 
   override lazy val eventStore: EventStore[Int, CollegeEvent] = {
     val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
-    new JdbcEventStore[Int, CollegeEvent, Array[Byte]](
-      CollegeEventFormat,
-      sql, connSource, RandomDelayExecutionContext) with MessageHubPublishing[Int, CollegeEvent] {
+    new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker) 
+    with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions:$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)

@@ -18,9 +18,12 @@ class TestSampler {
 
   implicit def metadata = Metadata("timestamp" -> new scuff.Timestamp().toString)
 
+  protected def initTicker(es: EventStore[Int, DomainEvent]) = LamportTicker(es)
+  
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
-      RandomDelayExecutionContext, JsonDomainEventFormat) with MessageHubPublishing[Int, DomainEvent] {
+         RandomDelayExecutionContext, JsonDomainEventFormat)(initTicker) 
+         with MessageHubPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
@@ -29,10 +32,9 @@ class TestSampler {
     }
 
   implicit def ec = RandomDelayExecutionContext
-  lazy val ticker = LamportTicker(es)
 
-  lazy val EmployeeRepo = new EntityRepository(Employee.Def, ec)(es, ticker)
-  lazy val DepartmentRepo = new EntityRepository(Department.Def, ec)(es, ticker)
+  lazy val EmployeeRepo = new EntityRepository(Employee.Def, ec)(es)
+  lazy val DepartmentRepo = new EntityRepository(Department.Def, ec)(es)
 
   @Test
   def inserting(): Unit = {

@@ -26,6 +26,7 @@ import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
 import org.bson.codecs.configuration.CodecConfigurationException
+import delta.Ticker
 
 object MongoEventStore {
   @varargs
@@ -82,11 +83,17 @@ object MongoEventStore {
 class MongoEventStore[ID: BsonCodec, EVT](
   docCollection: MongoCollection[Document],
   evtFmt: EventFormat[EVT, BsonValue],
-  overrideTransactionCodec: BsonCodec[Transaction[ID, EVT]])
+  overrideTransactionCodec: BsonCodec[Transaction[ID, EVT]])(
+  initTicker: MongoEventStore[ID, EVT] => Ticker)
     extends delta.EventStore[ID, EVT] {
 
-  def this(docCollection: MongoCollection[Document], evtFmt: EventFormat[EVT, BsonValue]) =
-    this(docCollection, evtFmt, null)
+  def this(
+      docCollection: MongoCollection[Document], 
+      evtFmt: EventFormat[EVT, BsonValue])(
+      initTicker: MongoEventStore[ID, EVT] => Ticker) =
+    this(docCollection, evtFmt, null)(initTicker)
+    
+  lazy val ticker = initTicker(this)
 
   protected val txnCollection: MongoCollection[TXN] = {
     val txnCodec = Option(overrideTransactionCodec) getOrElse new DefaultTransactionCodec(

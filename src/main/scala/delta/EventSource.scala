@@ -18,6 +18,7 @@ trait EventSource[ID, EVT] {
 
   def currRevision(stream: ID): Future[Option[Int]]
   def maxTick(): Future[Option[Long]]
+  def ticker: Ticker
 
   /** Replay complete stream. */
   def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit
@@ -39,7 +40,8 @@ trait EventSource[ID, EVT] {
   /** Subscribe to selected transactions, if publishing. */
   def subscribe[U](
       selector: StreamsSelector)(
-      callback: TXN => U): Subscription = sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageHubPublishing[_, _]].getName}")
+      callback: TXN => U): Subscription = 
+    sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageHubPublishing[_, _]].getName}")
 
   type CEVT = Class[_ <: EVT]
 

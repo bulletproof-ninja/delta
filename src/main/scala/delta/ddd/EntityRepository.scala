@@ -5,7 +5,6 @@ import scala.util.control.NonFatal
 
 import delta.EventStore
 import delta.SnapshotStore
-import delta.Ticker
 
 /**
   * [[delta.ddd.Entity]]-based [[delta.ddd.Repository]] implementation.
@@ -30,13 +29,14 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     entity: Entity[S, EVT] { type Id = ID; type Type = ET },
     exeCtx: ExecutionContext)(
     eventStore: EventStore[ESID, _ >: EVT],
-    ticker: Ticker,
     snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
     assumeCurrentSnapshots: Boolean = false)(
     implicit idConv: ID => ESID)
   extends Repository[ID, ET] with MutableEntity {
 
-  private[this] val repo = new EventStoreRepository(entity.channel, entity.newState, exeCtx, snapshots, assumeCurrentSnapshots)(eventStore, ticker)
+  private[this] val repo = 
+    new EventStoreRepository(
+        entity.channel, entity.newState, exeCtx, snapshots, assumeCurrentSnapshots)(eventStore)
 
   @inline implicit private def ec = exeCtx
 

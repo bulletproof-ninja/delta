@@ -69,13 +69,15 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   def setup(): Unit = {
     val result = deleteAll()
     assertTrue(result.wasAcknowledged)
-    es = new MongoEventStore[String, AggrEvent](coll, MongoDBAggrEventFmt) with MessageHubPublishing[String, AggrEvent] {
+    es = new MongoEventStore[String, AggrEvent](
+        coll, MongoDBAggrEventFmt)(
+        _ => ticker) with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txnCodec = scuff.Codec.noop[TXN]
     }
-    repo = new EntityRepository(TheOneAggr, ec)(es, ticker)
+    repo = new EntityRepository(TheOneAggr, ec)(es)
   }
   private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>

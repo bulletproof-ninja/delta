@@ -7,9 +7,11 @@ import delta.MessageHubPublishing
 import delta.hazelcast.TopicMessageHub
 import delta.Transaction.Channel
 import scuff.Codec
+import delta.Ticker
+import delta.EventSource
 
-class SomeEventStore(ec: ExecutionContext, hz: HazelcastInstance)
-  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)
+class SomeEventStore(ec: ExecutionContext, hz: HazelcastInstance, initTicker: EventSource[Int, MyEvent] => Ticker)
+  extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)(initTicker)
   with MessageHubPublishing[Int, MyEvent] {
 
   protected def toTopic(ch: Channel) = Topic(s"txn:$ch")

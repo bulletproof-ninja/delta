@@ -54,7 +54,8 @@ class TestCollege extends college.TestCollege {
   def EvtFormat = new EventFormatAdapter(BinaryDocCodec, CollegeEventFormat)
 
   override lazy val eventStore: EventStore[Int, CollegeEvent] = {
-    new MongoEventStore[Int, CollegeEvent](coll, EvtFormat) with MessageHubPublishing[Int, CollegeEvent] {
+    new MongoEventStore[Int, CollegeEvent](coll, EvtFormat)(initTicker) 
+    with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)

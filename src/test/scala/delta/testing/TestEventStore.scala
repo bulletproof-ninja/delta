@@ -33,7 +33,8 @@ class TestEventStore {
   }
 
   private[this] val es = new util.TransientEventStore[Symbol, Event, Array[Byte]](
-      RandomDelayExecutionContext, EvtFmt) with MessageHubPublishing[Symbol, Event] {
+      RandomDelayExecutionContext, EvtFmt)(_ => SysClockTicker) 
+      with MessageHubPublishing[Symbol, Event] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
       val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)

@@ -17,7 +17,8 @@ class TestSampler extends sampler.TestSampler {
     val settings = com.mongodb.MongoClientSettings.builder().build()
     val ns = new MongoNamespace("unit-testing", "event-store")
     val txnCollection = MongoEventStore.getCollection(ns, settings)
-    new MongoEventStore[Int, DomainEvent](txnCollection, BsonDomainEventFormat) with MessageHubPublishing[Int, DomainEvent] {
+    new MongoEventStore[Int, DomainEvent](txnCollection, BsonDomainEventFormat)(initTicker)
+    with MessageHubPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)

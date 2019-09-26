@@ -41,6 +41,7 @@ private abstract class EventStoreProxy[ID, EVT, M](
     case SingleStreamSelector(stream, channel) => evtStore.SingleStreamSelector.apply(stream, channel)
   }
 
+  def ticker = evtStore.ticker
   def currRevision(stream: ID) = evtStore.currRevision(stream)
   def maxTick() = evtStore.maxTick()
   def query[U](selector: Selector)(callback: StreamConsumer[TXN, U]): Unit =

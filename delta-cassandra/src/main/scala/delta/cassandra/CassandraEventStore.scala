@@ -16,6 +16,7 @@ import scuff.{ Memoizer, StreamConsumer }
 import scuff.concurrent._
 import delta.{ EventFormat, EventStore }
 import delta.Transaction.Channel
+import delta.Ticker
 
 private[cassandra] object CassandraEventStore {
 
@@ -86,8 +87,11 @@ trait TableDescriptor {
 class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     session: Session, td: TableDescriptor,
     evtFmt: EventFormat[EVT, SF],
-    exeCtx: ExecutionContext)
+    exeCtx: ExecutionContext)(
+    initTicker: CassandraEventStore[ID, EVT, SF] => Ticker)
   extends EventStore[ID, EVT] {
+
+  lazy val ticker = initTicker(this)
 
   private implicit def ec = exeCtx
 

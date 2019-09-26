@@ -43,9 +43,11 @@ class TestCollege {
 
   implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
 
+  protected def initTicker(es: EventSource[Int, CollegeEvent]) = LamportTicker(es)
+  
   lazy val eventStore: EventStore[Int, CollegeEvent] =
-    new TransientEventStore[Int, CollegeEvent, Array[Byte]](
-      RandomDelayExecutionContext, CollegeEventFormat) with MessageHubPublishing[Int, CollegeEvent] {
+    new TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker) 
+        with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
       val txnHub = new LocalHub[TXN](txn => toTopic(txn.channel), RandomDelayExecutionContext)
       val txnChannels = Set(Student.channel, Semester.channel)
@@ -54,7 +56,6 @@ class TestCollege {
 
   implicit val md = Metadata.empty
   implicit def ec = RandomDelayExecutionContext
-  lazy val ticker = LamportTicker(eventStore)
 
   type TXN = eventStore.TXN
 
@@ -63,8 +64,8 @@ class TestCollege {
 
   @Before
   def setup(): Unit = {
-    StudentRepository = new EntityRepository(Student, ec)(eventStore, ticker)
-    SemesterRepository = new EntityRepository(Semester, ec)(eventStore, ticker)
+    StudentRepository = new EntityRepository(Student, ec)(eventStore)
+    SemesterRepository = new EntityRepository(Semester, ec)(eventStore)
   }
 
   private def randomName(): String = (

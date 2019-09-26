@@ -38,7 +38,7 @@ final class TestSampler extends sampler.TestSampler {
       val dataSource = new JdbcDataSource
       dataSource.setURL(s"jdbc:h2:./${h2Name}")
     }
-    new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)
+    new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)(initTicker)
       with MessageHubPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
