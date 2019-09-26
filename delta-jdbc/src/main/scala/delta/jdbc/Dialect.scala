@@ -51,12 +51,12 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   def createSchema(conn: Connection): Unit = schema.foreach(schema => executeDDL(conn, schemaDDL(schema)))
 
   protected def streamTableDDL: String = s"""
-    CREATE TABLE IF NOT EXISTS $streamTable (
-      stream_id ${idType.typeName} NOT NULL,
-      channel $channelType NOT NULL,
+CREATE TABLE IF NOT EXISTS $streamTable (
+  stream_id ${idType.typeName} NOT NULL,
+  channel $channelType NOT NULL,
 
-      PRIMARY KEY (stream_id)
-    )
+  PRIMARY KEY (stream_id)
+)
   """
   def createStreamTable(conn: Connection): Unit = executeDDL(conn, streamTableDDL)
 
@@ -67,15 +67,15 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   def createChannelIndex(conn: Connection): Unit = executeDDL(conn, channelIndexDDL)
 
   protected def transactionTableDDL: String = s"""
-    CREATE TABLE IF NOT EXISTS $transactionTable (
-      stream_id ${idType.typeName} NOT NULL,
-      revision INT NOT NULL,
-      tick BIGINT NOT NULL,
+CREATE TABLE IF NOT EXISTS $transactionTable (
+  stream_id ${idType.typeName} NOT NULL,
+  revision INT NOT NULL,
+  tick BIGINT NOT NULL,
 
-      PRIMARY KEY (stream_id, revision),
-      FOREIGN KEY (stream_id)
-        REFERENCES $streamTable (stream_id)
-    )
+  PRIMARY KEY (stream_id, revision),
+  FOREIGN KEY (stream_id)
+    REFERENCES $streamTable (stream_id)
+)
   """
   def createTransactionTable(conn: Connection): Unit = executeDDL(conn, transactionTableDDL)
 
@@ -88,24 +88,24 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   protected def channelType = "VARCHAR(255)"
   protected def eventNameType = "VARCHAR(255)"
   protected def eventTableDDL: String = s"""
-    CREATE TABLE IF NOT EXISTS $eventTable (
-      stream_id ${idType.typeName} NOT NULL,
-      revision INT NOT NULL,
-      event_idx $byteDataType NOT NULL,
-      event_name $eventNameType NOT NULL,
-      event_version $byteDataType NOT NULL,
-      event_data ${sfType.typeName} NOT NULL,
+CREATE TABLE IF NOT EXISTS $eventTable (
+  stream_id ${idType.typeName} NOT NULL,
+  revision INT NOT NULL,
+  event_idx $byteDataType NOT NULL,
+  event_name $eventNameType NOT NULL,
+  event_version $byteDataType NOT NULL,
+  event_data ${sfType.typeName} NOT NULL,
 
-      PRIMARY KEY (stream_id, revision, event_idx),
-      FOREIGN KEY (stream_id, revision)
-        REFERENCES $transactionTable (stream_id, revision)
-    )
+  PRIMARY KEY (stream_id, revision, event_idx),
+  FOREIGN KEY (stream_id, revision)
+    REFERENCES $transactionTable (stream_id, revision)
+)
   """
   def createEventTable(conn: Connection): Unit = executeDDL(conn, eventTableDDL)
 
   protected def eventNameIndexDDL: String = s"""
-    CREATE INDEX IF NOT EXISTS $eventNameIndex
-      ON $eventTable (event_name)
+CREATE INDEX IF NOT EXISTS $eventNameIndex
+  ON $eventTable (event_name)
   """
   def createEventNameIndex(conn: Connection): Unit = executeDDL(conn, eventNameIndexDDL)
 
@@ -113,16 +113,16 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   protected def metadataValType = "VARCHAR(32767)"
 
   protected def metadataTableDDL: String = s"""
-    CREATE TABLE IF NOT EXISTS $metadataTable (
-      stream_id ${idType.typeName} NOT NULL,
-      revision INT NOT NULL,
-      metadata_key $metadataKeyType NOT NULL,
-      metadata_val $metadataValType NOT NULL,
+CREATE TABLE IF NOT EXISTS $metadataTable (
+  stream_id ${idType.typeName} NOT NULL,
+  revision INT NOT NULL,
+  metadata_key $metadataKeyType NOT NULL,
+  metadata_val $metadataValType NOT NULL,
 
-      PRIMARY KEY (stream_id, revision, metadata_key),
-      FOREIGN KEY (stream_id, revision)
-        REFERENCES $transactionTable (stream_id, revision)
-    )
+  PRIMARY KEY (stream_id, revision, metadata_key),
+  FOREIGN KEY (stream_id, revision)
+    REFERENCES $transactionTable (stream_id, revision)
+)
   """
   def createMetadataTable(conn: Connection): Unit = executeDDL(conn, metadataTableDDL)
 
@@ -149,9 +149,9 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     }
   }
   protected val transactionInsert: String = s"""
-      INSERT INTO $transactionTable
-        (stream_id, revision, tick)
-        VALUES (?, ?, ?)
+INSERT INTO $transactionTable
+  (stream_id, revision, tick)
+  VALUES (?, ?, ?)
   """
   def insertTransaction(stream: ID, rev: Int, tick: Long)(
       implicit conn: Connection): Unit = {
@@ -163,9 +163,9 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     }
   }
   protected val eventInsert: String = s"""
-      INSERT INTO $eventTable
-        (stream_id, revision, event_idx, event_name, event_version, event_data)
-        VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO $eventTable
+  (stream_id, revision, event_idx, event_name, event_version, event_data)
+  VALUES (?, ?, ?, ?, ?, ?)
   """
   def insertEvents(stream: ID, rev: Int, events: List[EVT])(
       implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
@@ -187,9 +187,9 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     }
   }
   protected val metadataInsert: String = s"""
-    INSERT INTO $metadataTable
-      (stream_id, revision, metadata_key, metadata_val)
-      VALUES (?, ?, ?, ?)
+INSERT INTO $metadataTable
+  (stream_id, revision, metadata_key, metadata_val)
+  VALUES (?, ?, ?, ?)
   """
   def insertMetadata(stream: ID, rev: Int, metadata: Map[String, String])(
       implicit conn: Connection) = if (metadata.nonEmpty) {
@@ -244,10 +244,10 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   }
 
   protected val maxRevisionQuery = s"""
-    SELECT MAX(revision)
-    FROM $transactionTable
-    WHERE stream_id = ?
-    GROUP BY stream_id
+SELECT MAX(revision)
+FROM $transactionTable
+WHERE stream_id = ?
+GROUP BY stream_id
 """
   def selectMaxRevision(stream: ID)(implicit conn: Connection): Option[Int] = {
     prepareStatement(maxRevisionQuery) { ps =>
@@ -260,7 +260,10 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
     }
   }
 
-  protected val maxTickQuery = s"SELECT MAX(tick) FROM $transactionTable"
+  protected val maxTickQuery = s"""
+SELECT MAX(tick)
+FROM $transactionTable
+"""
   def selectMaxTick(implicit conn: Connection): Option[Long] = {
     prepareStatement(maxTickQuery) { ps =>
       ps.setFetchSize(1)
@@ -272,22 +275,22 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   }
 
   protected def FromJoin = s"""
-    FROM $streamTable s
-    JOIN $transactionTable t
-      ON t.stream_id = s.stream_id
-    JOIN $eventTable e
-      ON e.stream_id = t.stream_id
-      AND e.revision = t.revision
-    LEFT OUTER JOIN $metadataTable m
-      ON m.stream_id = t.stream_id
-      AND m.revision = t.revision
-  """
+FROM $streamTable s
+JOIN $transactionTable t
+  ON t.stream_id = s.stream_id
+JOIN $eventTable e
+  ON e.stream_id = t.stream_id
+  AND e.revision = t.revision
+LEFT OUTER JOIN $metadataTable m
+  ON m.stream_id = t.stream_id
+  AND m.revision = t.revision
+"""
   protected def makeTxnQuery(WHERE: String = ""): String = s"""
-    SELECT $TxnColumnsSelect
-    $FromJoin
-    $WHERE
-    ORDER BY e.stream_id, e.revision, e.event_idx
-  """
+SELECT $TxnColumnsSelect
+$FromJoin
+$WHERE
+ORDER BY e.stream_id, e.revision, e.event_idx
+"""
 
   def selectTransactionsByChannels(channels: Set[Channel], sinceTick: Long = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
@@ -358,12 +361,12 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
         val parms = Iterator.fill(evtCount)("?")
         parms.mkString("WHERE e2.event_name IN (", ",", ")")
       }
-    val andEventMatch = if (evtCount == 0) "" else s"""AND
-      (t.stream_id, t.revision) IN (
-        SELECT e2.stream_id, e2.revision
-        FROM $eventTable e2
-        $whereEventName
-      )
+    val andEventMatch = if (evtCount == 0) "" else s"""
+AND (t.stream_id, t.revision) IN (
+  SELECT e2.stream_id, e2.revision
+  FROM $eventTable e2
+  $whereEventName
+)
     """
     if (chCount == 1) {
       s"s.channel = ? $andEventMatch"
@@ -374,10 +377,10 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
   }
 
   protected def makeStreamQuery(AND: String = ""): String = s"""
-    SELECT $StreamColumnsSelect
-    $FromJoin
-    WHERE t.stream_id = ? $AND
-    ORDER BY e.revision, e.event_idx
+SELECT $StreamColumnsSelect
+$FromJoin
+WHERE t.stream_id = ? $AND
+ORDER BY e.revision, e.event_idx
   """
 
   private val streamQueryFull = makeStreamQuery()
