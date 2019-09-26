@@ -120,8 +120,8 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
         } else {
           val committedId: Future[RID] =
             eventStore.commit(channel, id, 0, tick, events, metadata).map(_ => id) recoverWith {
-              case eventStore.DuplicateRevisionException(conflict) =>
-                if (conflict.events == events) { // Idempotent insert
+              case dupe: eventStore.DuplicateRevisionException =>
+                if (dupe.conflict.events == events) { // Idempotent insert
                   Future successful id
                 } else {
                   val newId = generateId
@@ -167,11 +167,11 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
             } else {
               val now = ticker.nextTick(snapshot.tick)
               recordUpdate(id, state, snapshot.revision + 1, newEvents, metadata, now).recoverWith {
-                case eventStore.DuplicateRevisionException(conflict) =>
+                case dupe: eventStore.DuplicateRevisionException =>
                   val state = newState(snapshot.content)
-                  conflict.events.foreach(state.mutate)
-                  val latestSnapshot = Future successful Some(new Snapshot(state.curr, conflict.revision, conflict.tick))
-                  onUpdateCollision(id, conflict.revision, conflict.channel)
+                  dupe.conflict.events.foreach(state.mutate)
+                  val latestSnapshot = Future successful Some(new Snapshot(state.curr, dupe.conflict.revision, dupe.conflict.tick))
+                  onUpdateCollision(id, dupe.conflict.revision, dupe.conflict.channel)
                   loadAndUpdate(id, expectedRevision, metadata, latestSnapshot, true, updateThunk)
               }
             }

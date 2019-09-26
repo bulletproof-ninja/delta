@@ -20,7 +20,7 @@ trait EventStore[ID, EVT]
       metadata: Map[String, String],
       events: List[EVT]) = new TXN(tick, channel, stream, revision, metadata, events)
 
-  final case class DuplicateRevisionException(conflict: TXN)
+  final class DuplicateRevisionException(val conflict: TXN)
     extends RuntimeException(s"Revision ${conflict.revision} already exists for: ${conflict.stream}")
     with NoStackTrace {
     override def toString = super[RuntimeException].toString()
