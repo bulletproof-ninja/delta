@@ -414,7 +414,8 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
       val txnChannels = Set(TheOneAggr.channel)
       val txnCodec = Codec.noop[TXN]
     }
-    val snapshotMap = new collection.concurrent.TrieMap[String, Snapshot[AggrState]]
+    type Value = ConcurrentMapStore.Value[AggrState]
+    val snapshotMap = new collection.concurrent.TrieMap[String, Value]
     val snapshotStore = new ConcurrentMapStore[String, AggrState](snapshotMap, None)(_ => Future successful None)
     repo = new EntityRepository(TheOneAggr, ec)(es, snapshotStore)
   }

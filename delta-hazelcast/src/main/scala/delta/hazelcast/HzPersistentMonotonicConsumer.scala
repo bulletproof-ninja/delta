@@ -9,7 +9,7 @@ import scala.reflect.ClassTag
 
 import com.hazelcast.core.IMap
 
-import delta.{ Projector, Snapshot, TransactionProjector }
+import delta.{ Projector, TransactionProjector }
 import delta.process.EventSourceConsumer
 import scuff.concurrent.PartitionedExecutionContext
 
@@ -40,14 +40,16 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     PartitionedExecutionContext(numThreads, failureReporter = reportFailure)
   }
 
+  import delta.process.ConcurrentMapStore.Value
+  
   /**
     * Instantiate new concurrent map used to hold state during
     * replay processing. This can be overridden to provide a
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newReplayMap: collection.concurrent.Map[ID, Snapshot[S]] =
-    new java.util.concurrent.ConcurrentHashMap[ID, Snapshot[S]].asScala
+  protected def newReplayMap: collection.concurrent.Map[ID, Value[S]] =
+    new java.util.concurrent.ConcurrentHashMap[ID, Value[S]].asScala
 
   /**
     * Called at startup, when replay processing of
@@ -79,7 +81,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
       executionContext,
       newPartitionedExecutionContext,
       newReplayMap) {
-    def process(txn: TXN, currState: Option[S]): S = project(txn, currState)
+    def process(txn: TXN, currState: Option[S]) = project(txn, currState)
   }
 
   protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis

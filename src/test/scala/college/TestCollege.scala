@@ -299,16 +299,19 @@ class TestCollege {
     case class StudentModel(enrolled: Set[SemesterRev] = Set.empty) extends Model
     case class SemesterModel(students: Set[Student.Id] = Set.empty) extends Model
 
-    class ModelBuilder(memMap: TrieMap[Int, delta.Snapshot[Model]])
+    type Value = ConcurrentMapStore.Value[Model]
+    import ConcurrentMapStore.Value
+
+    class ModelBuilder(memMap: TrieMap[Int, Value])
       extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Unit](
         10.seconds,
         new ConcurrentMapStore(memMap, None)(_ => Future successful None))
       with MonotonicJoinState[Int, SemesterEvent, Model] {
 
-      protected def join(semesterId: Int, semesterRev: Int, tick: Long, md: Map[String, String], streamState: Option[Model])(evt: SemesterEvent): Map[Int, Processor] =
-        preprocessJoin(semesterId, semesterRev, evt)
-
-      private def preprocessJoin(semesterId: Int, semesterRev: Int, evt: SemesterEvent): Map[Int, Processor] = {
+      protected def prepareJoin(
+          semesterId: Int, semesterRev: Int, tick: Long, md: Map[String, String])(
+          evt: SemesterEvent): Map[Int, Processor] = {
+        
         val semester = new SemesterRev(semesterId, semesterRev)
         evt match {
           case StudentEnrolled(studentId) => Map {
@@ -319,6 +322,7 @@ class TestCollege {
           }
           case _ => Map.empty
         }
+
       }
 
       val streamPartitions = scuff.concurrent.PartitionedExecutionContext(1, _.printStackTrace(System.err))
@@ -338,11 +342,12 @@ class TestCollege {
         case _ => // Ignore
       }
 
-      protected def process(txn: TXN, currState: Option[Model]) = txn.events.foldLeft(currState getOrElse SemesterModel()) {
-        case (model @ SemesterModel(students), StudentEnrolled(studentId)) => model.copy(students = students + studentId)
-        case (model @ SemesterModel(students), StudentCancelled(studentId)) => model.copy(students = students - studentId)
-        case (model, _) => model
-      }
+      protected def processStream(txn: TXN, currState: Option[Model]) = 
+        txn.events.foldLeft(currState getOrElse SemesterModel()) {
+          case (model @ SemesterModel(students), StudentEnrolled(studentId)) => model.copy(students = students + studentId)
+          case (model @ SemesterModel(students), StudentCancelled(studentId)) => model.copy(students = students - studentId)
+          case (model, _) => model
+        }
 
       private def studentEnrolled(semester: SemesterRev)(model: Option[Model]): StudentModel = {
         val student = model collectOrElse new StudentModel
@@ -363,28 +368,28 @@ class TestCollege {
       .map {
         case (id, revOpt) => id -> revOpt.getOrElse { fail(s"Semester $id does not exist"); -1 }
       }.toMap
-    val inMemoryMap = new TrieMap[Int, Snapshot[Model]]
+    val inMemoryMap = new TrieMap[Int, Value]
     val builder = StreamPromise(new ModelBuilder(inMemoryMap))
     eventStore.query(eventStore.Selector(Semester.channel))(builder)
     //    val queryProcess = StreamPromise.foreach(semesterQuery)(builder)
     builder.future.await
     inMemoryMap.foreach {
-      case (semesterId, Snapshot(SemesterModel(students), rev, _)) =>
+      case (semesterId, Value(Snapshot(SemesterModel(students), rev, _), _)) =>
         assertEquals(s"Semester $semesterId revision $rev failed", semesterRevs.get(new Semester.Id(semesterId)), Some(rev))
         val studentSemesters = students
           .map(id => inMemoryMap(id.int))
           .collect {
-            case Snapshot(StudentModel(semesters), _, _) => semesters.map(_.id.int)
+            case Value(Snapshot(StudentModel(semesters), _, _), _) => semesters.map(_.id.int)
           }
         studentSemesters.foreach { semesters =>
           assertTrue(semesters contains semesterId)
         }
-      case (studentId, Snapshot(StudentModel(semesters), rev, _)) =>
+      case (studentId, Value(Snapshot(StudentModel(semesters), rev, _), _)) =>
         assertEquals(-1, rev)
         val semesterStudents = semesters
           .map(s => inMemoryMap(s.id.int))
           .collect {
-            case Snapshot(SemesterModel(students), _, _) => students.map(_.int)
+            case Value(Snapshot(SemesterModel(students), _, _), _) => students.map(_.int)
           }
         semesterStudents.foreach { students =>
           assertTrue(students contains studentId)
@@ -397,7 +402,8 @@ class TestCollege {
     val procStore = newLookupServiceProcStore
     val lookup = lookupService(procStore)
     object ServiceBuilder
-      extends PersistentMonotonicConsumer[Int, StudentEvent, StudentEmails](procStore, Scheduler) {
+      extends PersistentMonotonicConsumer[Int, StudentEvent, StudentEmails](procStore, RandomDelayExecutionContext, Scheduler) {
+      def replayMissingRevisionsDelay = 2.seconds
       protected def maxTickSkew: Int = 2
       protected def selector(es: EventSource): es.Selector = es.ChannelSelector(Student.channel)
       protected def onSnapshotUpdate(id: Int, update: SnapshotUpdate): Unit = ()
@@ -406,9 +412,8 @@ class TestCollege {
         fail(th.getMessage)
       }
       private[this] val project = TransactionProjector(StudentEmailsProjector)
-      protected def process(txn: TXN, currState: Option[StudentEmails]): StudentEmails = {
+      protected def process(txn: TXN, currState: Option[StudentEmails]) =
         project(txn, currState)
-      }
     }
     val subscription = ServiceBuilder.consume(eventStore).await
     assertEquals(None, lookup.findStudent(EmailAddress("foo@bar.com")).await)

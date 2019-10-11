@@ -27,7 +27,8 @@ class TestMonotonicProcessor {
         snapshotMap.clear()
         latch = new CountDownLatch(1)
       }
-      val snapshotMap = new TrieMap[Int, Snapshot[String]]
+      type Value = ConcurrentMapStore.Value[String]
+      val snapshotMap = new TrieMap[Int, Value]
       @volatile var lastSnapshotUpdate: Snapshot[String] = _
       @volatile var latch: CountDownLatch = _
     }
@@ -94,7 +95,7 @@ class TestMonotonicProcessor {
         assertTrue(
           s"(Latch: ${Tracker.latch.getCount}) Timed out on number $n with the following revision sequence: $txnSequence, using EC $ec",
           Tracker.latch.await(5, TimeUnit.SECONDS))
-        assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.snapshotMap(42))
+        assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.snapshotMap(42).snapshot)
         assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.lastSnapshotUpdate)
       }
 
@@ -117,7 +118,8 @@ class TestMonotonicProcessor {
       def test(exeCtx: ExecutionContext): Unit = {
           implicit def ec = exeCtx
         //        println(s"Testing with $exeCtx")
-        val snapshotMap = new TrieMap[Int, Snapshot[String]]
+        type Value = ConcurrentMapStore.Value[String]
+        val snapshotMap = new TrieMap[Int, Value]
         val processor = new MonotonicReplayProcessor[Int, Char, String, Unit](
           20.seconds,
           new ConcurrentMapStore(snapshotMap, None)(NoFallback)) {
@@ -126,7 +128,7 @@ class TestMonotonicProcessor {
             case ec => ec
           }
           protected def whenDone() = Future successful (())
-          protected def process(txn: TXN, currState: Option[String]): String = {
+          protected def process(txn: TXN, currState: Option[String]) = {
             val sb = new StringBuilder(currState getOrElse "")
             txn.events.foreach {
               case char: Char => sb += char
@@ -153,7 +155,7 @@ class TestMonotonicProcessor {
         }
         val allProcessed = Future.sequence(processFutures)
         allProcessed.await
-        val Snapshot(string, revision, _) = snapshotMap(id)
+        val ConcurrentMapStore.Value(Snapshot(string, revision, _), modified) = snapshotMap(id)
         assertEquals(expectedString, string)
         assertEquals(txnCount - 1, revision)
       }

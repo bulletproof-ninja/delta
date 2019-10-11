@@ -24,6 +24,7 @@ import delta.Transaction
  */
 abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
     protected val processStore: StreamProcessStore[ID, S],
+    persistenceContext: ExecutionContext,
     scheduler: ScheduledExecutorService)
   extends EventSourceConsumer[ID, EVT]
   with TransactionProcessor[ID, EVT, S] {
@@ -54,8 +55,8 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newReplayMap: collection.concurrent.Map[ID, Snapshot] =
-    new java.util.concurrent.ConcurrentHashMap[ID, Snapshot].asScala
+  protected def newReplayMap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]] =
+    new java.util.concurrent.ConcurrentHashMap[ID, ConcurrentMapStore.Value[S]].asScala
 
   protected type ReplayResult = Any
 
@@ -77,22 +78,28 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
     * validation, where transaction propagation is reversed during a
     * consistency violation.
     */
-  protected def replayMissingRevisionsDelay: FiniteDuration = 1111.milliseconds
+  protected def replayMissingRevisionsDelay: FiniteDuration
 
   protected class ReplayProcessor
-    extends PersistentMonotonicReplayProcessor[ID, EVT, S](processStore, replayProcessorCompletionTimeout, ExecutionContext.fromExecutorService(scheduler, reportFailure), replayProcessorWriteBatchSize, newPartitionedExecutionContext, newReplayMap) {
-    protected def process(tx: TXN, state: Option[S]): S = ???
-    override protected def processAsync(tx: TXN, state: Option[S]): Future[S] =
-      PersistentMonotonicConsumer.this.processAsync(tx, state).asInstanceOf[Future[S]]
+    extends PersistentMonotonicReplayProcessor[ID, EVT, S](
+        processStore, 
+        replayProcessorCompletionTimeout, 
+        persistenceContext, 
+        replayProcessorWriteBatchSize, 
+        newPartitionedExecutionContext, newReplayMap) {
+    override protected def process(tx: TXN, state: Option[S]): Future[S] =
+      PersistentMonotonicConsumer.this.process(tx, state)
   }
 
   protected class LiveProcessor(es: EventSource)
-    extends PersistentMonotonicProcessor[ID, EVT, S](es, processStore, replayMissingRevisionsDelay, scheduler, newPartitionedExecutionContext) {
+    extends PersistentMonotonicProcessor[ID, EVT, S](
+        es, processStore, 
+        replayMissingRevisionsDelay, scheduler,
+        newPartitionedExecutionContext) {
     protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate) =
       PersistentMonotonicConsumer.this.onSnapshotUpdate(id, update)
-    protected def process(tx: TXN, state: Option[S]): S = ???
-    override protected def processAsync(tx: TXN, state: Option[S]): Future[S] =
-      PersistentMonotonicConsumer.this.processAsync(tx, state)
+    override protected def process(tx: TXN, state: Option[S]): Future[S] =
+      PersistentMonotonicConsumer.this.process(tx, state)
 
   }
 

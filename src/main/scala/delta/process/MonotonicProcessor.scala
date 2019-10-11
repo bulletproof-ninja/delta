@@ -1,7 +1,5 @@
 package delta.process
 
-import delta._
-import scala.concurrent._
 import scala.collection.concurrent.TrieMap
 import scala.reflect.ClassTag
 import scuff.concurrent.AsyncStreamConsumer
@@ -9,6 +7,9 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.Failure
 import scala.collection.immutable.TreeMap
 import java.util.concurrent.TimeoutException
+
+import scala.concurrent._
+import delta._
 
 private object MonotonicProcessor {
 
@@ -113,23 +114,25 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
   protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit
   protected def onMissingRevisions(id: ID, missing: Range): Unit
 
+  /**
+   * @return Most current snapshot and any unapplied transactions
+   */
   private def applyTransactions(
       unapplied: Unapplied, snapshot: Option[Snapshot])(
       implicit
       ec: ExecutionContext): Future[(Option[Snapshot], Unapplied)] = {
-    val expectedRev = snapshot.map(_.revision + 1) getOrElse 0
     if (unapplied.isEmpty) {
       Future successful (snapshot -> unapplied)
     } else {
-      val txn: TXN = unapplied.head._2
-      val remainingUnapplied = unapplied.tail
+      val expectedRev = snapshot.map(_.revision + 1) getOrElse 0
+      val txn = unapplied.head._2
       if (txn.revision == expectedRev) {
-        processAsync(txn, snapshot.map(_.content)).flatMap { updated =>
+        callProcess(txn, snapshot.map(_.content)).flatMap { updated =>
           val tick = snapshot.map(_.tick max txn.tick) getOrElse txn.tick
-          applyTransactions(remainingUnapplied, Some(Snapshot(updated, txn.revision, tick)))
+          applyTransactions(unapplied.tail, Some(Snapshot(updated, txn.revision, tick)))
         }
       } else if (txn.revision < expectedRev) { // Already processed
-        applyTransactions(remainingUnapplied, snapshot)
+        applyTransactions(unapplied.tail, snapshot)
       } else { // txn.revision > expectedRev
         onMissingRevisions(txn.stream, expectedRev until txn.revision)
         Future successful (snapshot -> unapplied)
@@ -235,15 +238,21 @@ Possible causes:
 trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, BR] {
   proc: MonotonicReplayProcessor[ID, EVT, S, BR] =>
 
-  protected def persistContext: ExecutionContext
-  protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[BR]
-  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Snapshot]]
-  protected final def whenDone(): Future[BR] = {
-      implicit def ec = persistContext
+  protected type Value = ConcurrentMapStore.Value[S]
+
+  /** Execution context for persisting final replay state. */
+  protected def persistenceContext: ExecutionContext
+  protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[BR]
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Value]]
+  protected def whenDone(): Future[BR] = {
+      implicit def ec = persistenceContext
     onReplayCompletion()
       .flatMap { cmap =>
         require(incompleteStreams.isEmpty, s"Incomplete streams are present. This code should not execute. This is a bug.")
-        persist(cmap).andThen {
+        val snapshots = cmap.iterator
+          .filter(_._2.modified)
+          .map(t => t._1 -> t._2.snapshot)
+        persistReplayState(snapshots).andThen {
           case _ => cmap.clear()
         }
       }

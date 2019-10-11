@@ -41,6 +41,13 @@ trait JoinState[ID, EVT, S >: Null] {
   protected final def Processor(process: Option[S] => S, revision: Int): Processor =
     new Processor(process, revision)
 
+  /** Process stream as normally implemented through `process`. */
+  protected def processStream(txn: TXN, streamState: Option[S]): Future[S]
+  
+  protected def process(txn: TXN, streamState: Option[S]): Future[S] = 
+    processStream(txn, streamState)
+
+
   /**
    *  Pre-process event by returning map of indirect ids, if any,
    *  and the associated processing function.
@@ -48,18 +55,16 @@ trait JoinState[ID, EVT, S >: Null] {
    *  @param streamRevision If duplicate processing is not idempotent, this can be used
    *  @param tick If causal ordering is necessary, use this transaction tick
    *  @param metadata Transaction metadata
-   *  @param streamState Current stream state (prior to applying transaction events)
    *  @param evt Event from stream
    *  @return Map of collateral id and state processor(s) derivable from event, if any.
    */
-  protected def join(
+  protected def prepareJoin(
       streamId: ID, streamRevision: Int,
-      tick: Long, metadata: Map[String, String],
-      streamState: Option[S])(evt: EVT): Map[ID, _ <: Processor]
+      tick: Long, metadata: Map[String, String])(evt: EVT): Map[ID, _ <: Processor]
 
-  protected def join(txn: TXN, streamState: Option[S]): Map[ID, Processor] = {
+  protected def prepareJoin(txn: TXN): Map[ID, Processor] = {
     import scuff._
-    val join = this.join(txn.stream, txn.revision, txn.tick, txn.metadata, streamState) _
+    val join = prepareJoin(txn.stream, txn.revision, txn.tick, txn.metadata) _
     txn.events.foldLeft(Map.empty[ID, Processor]) {
       case (fmap, evt: EVT) =>
         val mapping = join(evt)
@@ -80,9 +85,9 @@ trait JoinState[ID, EVT, S >: Null] {
 trait MonotonicJoinState[ID, EVT, S >: Null]
   extends MonotonicProcessor[ID, EVT, S]
   with JoinState[ID, EVT, S] {
-
-  protected final override def processAsync(txn: TXN, streamState: Option[S]): Future[S] = {
-    val processors: Map[ID, Processor] = this.join(txn, streamState)
+  
+  protected final override def process(txn: TXN, streamState: Option[S]): Future[S] = {
+    val processors: Map[ID, Processor] = prepareJoin(txn)
     val futureUpdates: Iterable[Future[Unit]] =
       processors.map {
         case (id, processor) =>
@@ -101,7 +106,7 @@ trait MonotonicJoinState[ID, EVT, S >: Null]
       }
     implicit val ec = processContext(txn.stream)
     Future.sequence(futureUpdates).flatMap { _ =>
-      super.processAsync(txn, streamState)
+      super.process(txn, streamState)
     }
   }
 }

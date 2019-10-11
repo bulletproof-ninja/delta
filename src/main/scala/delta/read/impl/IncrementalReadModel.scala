@@ -1,13 +1,14 @@
 package delta.read.impl
 
-import delta._
+import java.util.concurrent.atomic.AtomicBoolean
+
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import delta.process._
 import scala.reflect.ClassTag
 import scuff.Subscription
 import delta.read._
-import java.util.concurrent.atomic.AtomicBoolean
+import delta._
 
 /**
  * Incrementally built on-demand read-model, pull or push.
@@ -99,7 +100,8 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
       snapshotHub.publish(snapshotTopic, id -> update)
     protected def processStore = IncrementalReadModel.this.processStore
     protected def processContext(id: ESID) = IncrementalReadModel.this.processContext(id)
-    protected def process(txn: TXN, currState: Option[S]): S = txProjector(txn, currState)
+    protected def process(txn: TXN, currState: Option[S]): Future[S] = txProjector(txn, currState)
+      
   }
 
 }

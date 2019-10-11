@@ -11,23 +11,34 @@ import java.util.concurrent.ScheduledExecutorService
  */
 abstract class PersistentMonotonicJoinConsumer[ID, EVT: ClassTag, S >: Null](
     processStore: StreamProcessStore[ID, S],
+    replayPersistenceContext: ExecutionContext,
     scheduler: ScheduledExecutorService)
-  extends PersistentMonotonicConsumer(processStore, scheduler)
+  extends PersistentMonotonicConsumer(processStore, replayPersistenceContext, scheduler)
   with JoinState[ID, EVT, S] {
 
   override protected def replayProcessor(es: EventSource): StreamConsumer[TXN, Future[ReplayResult]] =
     new ReplayProcessor with MonotonicJoinState[ID, EVT, S] {
 
-      def join(streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String], streamState: Option[S])(evt: EVT): Map[ID, Processor] =
-        PersistentMonotonicJoinConsumer.this.join(streamId, streamRevision, tick, metadata, streamState)(evt)
+      def processStream(txn: TXN, currState: Option[S]) = 
+        PersistentMonotonicJoinConsumer.this.processStream(txn, currState)
+    
+      def prepareJoin(
+          streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String])(
+          evt: EVT): Map[ID, Processor] =
+        PersistentMonotonicJoinConsumer.this.prepareJoin(streamId, streamRevision, tick, metadata)(evt)
 
     }
 
   override protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any =
     new LiveProcessor(es) with MonotonicJoinState[ID, EVT, S] {
+    
+      def processStream(txn: TXN, currState: Option[S]) = 
+        PersistentMonotonicJoinConsumer.this.processStream(txn, currState)
 
-      def join(streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String], streamState: Option[S])(evt: EVT): Map[ID, Processor] =
-        PersistentMonotonicJoinConsumer.this.join(streamId, streamRevision, tick, metadata, streamState)(evt)
+      def prepareJoin(
+          streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String])(
+          evt: EVT): Map[ID, Processor] =
+        PersistentMonotonicJoinConsumer.this.prepareJoin(streamId, streamRevision, tick, metadata)(evt)
 
   }
 

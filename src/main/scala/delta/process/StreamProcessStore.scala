@@ -32,14 +32,62 @@ trait StreamProcessStore[K, S] extends SnapshotStore[K, S] {
    * Update/Insert.
    * @param key The key to update
    * @param updateThunk The update function. Return `None` if no insert/update is desired
-   * @param updateThunkEC Execution context for running the update thunk
+   * @param updateContext Execution context for running the update thunk
    * @return The result of the `updateThunk` function
    */
   def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
-      updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)]
+      updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)]
 
+}
+
+/**
+ * Trait supporting side-effecting stream
+ * processing.
+ * NOTE: Side-effects are always at-least-once semantics.
+ */
+trait SideEffects[K, S]
+  extends StreamProcessStore[K, S] {
+
+  /** Perform side-effect, if necessary, and return final state. */
+  protected def doSideEffect(state: S): Future[S]
+
+  @inline
+  private def replaceContent(snapshot: Snapshot, newContent: S): Snapshot = 
+    if (snapshot contentEquals newContent) snapshot
+    else new Snapshot(newContent, snapshot.revision, snapshot.tick)
+  
+  final abstract override def upsert[R](key: K)(
+      updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
+      implicit
+      updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
+    super.upsert(key) { optSnapshot =>
+      updateThunk(optSnapshot).flatMap {
+        case (Some(snapshot), r) => 
+          doSideEffect(snapshot.content)
+            .map(state => Some(replaceContent(snapshot, state)) -> r)(Threads.PiggyBack)
+        case t =>
+          Future successful t
+      }
+    }
+  }
+
+  final abstract override def write(key: K, snapshot: Snapshot): Future[Unit] = {
+    doSideEffect(snapshot.content).flatMap { state =>
+      super.write(key, replaceContent(snapshot, state))
+    }(Threads.PiggyBack)
+  }
+
+  final abstract override def writeBatch(batch: Map[K, Snapshot]): Future[Unit] = {
+    val futureWrites = batch.map {
+      case (key, snapshot) => write(key, snapshot)
+    }
+      implicit def ec = Threads.PiggyBack
+    Future.sequence(futureWrites).map(_ => ())
+  }
+  
+  
 }
 
 private[delta] object StreamProcessStore {
@@ -71,7 +119,7 @@ private[delta] object StreamProcessStore {
       def tickWatermark: Option[Long] = store.tickWatermark
       def upsert[R](key: K2)(updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
           implicit
-          updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = store.upsert(key)(updateThunk)
+          updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = store.upsert(key)(updateThunk)
       def writeBatch(batch: Map[K2, Snapshot]): Future[Unit] =
         store writeBatch batch.map {
           case (key, value) => (key: K1) -> value
@@ -94,13 +142,13 @@ trait NonBlockingRecursiveUpsert[K, V] {
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
       writeIfExpected: (K, Option[Snapshot], Snapshot) => Future[Either[ConflictingSnapshot, ContentUpdated]])(
       implicit
-      updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
+      updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
     updateThunk(existing).flatMap {
       case (result, payload) =>
         // If no result OR exact same content, revision, and tick
         if (result.isEmpty || result == existing) Future successful None -> payload
         else {
-          val Some(newSnapshot) = result // Known nonEmpty
+          val Some(newSnapshot) = result // ! isEmpty
           writeIfExpected(key, existing, newSnapshot) flatMap {
             case Right(contentUpdated) => Future successful Some(SnapshotUpdate( /*key,*/ newSnapshot, contentUpdated)) -> payload
             case Left(conflict) => upsertRecursive(key, Some(conflict), updateThunk, writeIfExpected)
@@ -132,14 +180,14 @@ trait BlockingRecursiveUpsert[K, V] {
       updateThunkTimeout: FiniteDuration,
       writeIfExpected: (K, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated])(
       implicit
-      updateThunkEC: ExecutionContext): (Option[SnapshotUpdate], R) = {
+      updateContext: ExecutionContext): (Option[SnapshotUpdate], R) = {
 
     val updated = Future(updateThunk(existing)).flatMap(identity)
     blocking(updated.await(updateThunkTimeout)) match {
       case (result, payload) =>
         if (result.isEmpty || result == existing) None -> payload
         else {
-          val Some(newSnapshot) = result // Known nonEmpty
+          val Some(newSnapshot) = result // ! isEmpty
           writeIfExpected(key, existing, newSnapshot) match {
             case Right(contentUpdated) => Some(SnapshotUpdate( /*key,*/ newSnapshot, contentUpdated)) -> payload
             case Left(conflict) => upsertRecursive(key, Some(conflict), updateThunk, updateThunkTimeout, writeIfExpected)
@@ -175,7 +223,7 @@ trait NonBlockingCASWrites[K, V] extends NonBlockingRecursiveUpsert[K, V] {
   def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
-      updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
+      updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
 
       // Write snapshot, if current expectation holds.
       def writeIfExpected(key: K, expected: Option[Snapshot], snapshot: Snapshot): Future[Either[ConflictingSnapshot, ContentUpdated]] = {
@@ -225,10 +273,12 @@ trait BlockingCASWrites[K, V, Conn] extends BlockingRecursiveUpsert[K, V] {
   def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
-      updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
+      updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
 
       // Write snapshot, if current expectation holds.
-      def writeIfExpected(conn: Conn)(key: K, expected: Option[Snapshot], snapshot: Snapshot): Either[ConflictingSnapshot, ContentUpdated] = {
+      def writeIfExpected(conn: Conn)(
+          key: K, expected: Option[Snapshot], snapshot: Snapshot)
+          : Either[ConflictingSnapshot, ContentUpdated] = {
         val contentUpdated = !expected.exists(_ contentEquals snapshot)
         if (contentUpdated) {
           val writeConflict: Option[Snapshot] = expected match {
@@ -310,7 +360,7 @@ class StreamProcessStoreAdapter[Ka, Va, Kb, Vb](
 
   def upsert[R](key: Ka)(updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
-      updateThunkEC: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
+      updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
     val result = underlying.upsert[R](this ~> key) { snapshotB =>
       val snapshotA = snapshotB.map(this.<~)
       updateThunk(snapshotA).map(t => t._1.map(this.~>) -> t._2)

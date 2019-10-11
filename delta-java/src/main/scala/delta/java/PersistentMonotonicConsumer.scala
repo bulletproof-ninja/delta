@@ -11,6 +11,7 @@ import delta.process.StreamProcessStore
 import delta.process.MonotonicJoinState
 import delta.process.MissingRevisionsReplay
 import delta.Transaction
+import scala.concurrent.ExecutionContext
 
 /**
  * [[delta.util.DefaultEventSourceConsumer]], adapted for Java.
@@ -22,16 +23,18 @@ import delta.Transaction
  */
 abstract class PersistentMonotonicConsumer[ID, EVT, S >: Null](
     processStore: StreamProcessStore[ID, S],
+    persistenceContext: ExecutionContext,
     scheduler: ScheduledExecutorService)(
     implicit
     evtTag: ClassTag[EVT])
-  extends delta.process.PersistentMonotonicConsumer[ID, EVT, S](processStore, scheduler) {
+  extends delta.process.PersistentMonotonicConsumer[ID, EVT, S](processStore, persistenceContext, scheduler) {
 
   def this(
       processStore: StreamProcessStore[ID, S],
+      persistenceContext: ExecutionContext,
       scheduler: ScheduledExecutorService,
       evtType: Class[_ <: EVT]) =
-    this(processStore, scheduler)(ClassTag(evtType))
+    this(processStore, persistenceContext, scheduler)(ClassTag(evtType))
 
   /** Turn Scala `List` into Java `Iterable`. */
   protected def iterable(list: List[_ >: EVT]): java.lang.Iterable[EVT] = {
@@ -44,18 +47,20 @@ abstract class PersistentMonotonicConsumer[ID, EVT, S >: Null](
 
 abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null](
     processStore: StreamProcessStore[ID, S],
+    persistenceContext: ExecutionContext,
     scheduler: ScheduledExecutorService)(
     implicit
     evtTag: ClassTag[EVT])
-  extends PersistentMonotonicConsumer[ID, EVT, S](processStore, scheduler)
+  extends PersistentMonotonicConsumer[ID, EVT, S](processStore, persistenceContext, scheduler)
   with MonotonicJoinState[ID, EVT, S]
   with MissingRevisionsReplay[ID, EVT] {
 
   def this(
       processStore: StreamProcessStore[ID, S],
+      persistenceContext: ExecutionContext,
       scheduler: ScheduledExecutorService,
       evtType: Class[_ <: EVT]) =
-    this(processStore, scheduler)(ClassTag(evtType))
+    this(processStore, persistenceContext, scheduler)(ClassTag(evtType))
 
   override type Snapshot = delta.Snapshot[S]
   override type SnapshotUpdate = delta.process.SnapshotUpdate[S]

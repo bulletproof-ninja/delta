@@ -70,7 +70,7 @@ class MongoStreamProcessStore[K: ClassTag, V](
     val futures = snapshots.map {
       case (key, snapshot) => write(key, snapshot)
     }
-    Future.sequence(futures).map(_ => Unit)
+    Future.sequence(futures).map(_ => ())
   }
 
   private def exactly(key: K, oldRev: Int, oldTick: Long): Document =
@@ -86,15 +86,13 @@ class MongoStreamProcessStore[K: ClassTag, V](
         new Document("revision", revision)
           .append("tick", tick))
       coll.updateOne(where(key, revision, tick), update, updateOnly, callback)
-    } map { _ =>
-      Unit
-    }
+    }.map(_ => ())
   }
   def refreshBatch(revisions: collection.Map[K, (Int, Long)]): Future[Unit] = {
     val futures = revisions.map {
       case (key, (revision, tick)) => refresh(key, revision, tick)
     }
-    Future.sequence(futures).map(_ => Unit)
+    Future.sequence(futures).map(_ => ())
   }
 
   protected def writeIfAbsent(key: K, snapshot: Snapshot): Future[Option[Snapshot]] = {

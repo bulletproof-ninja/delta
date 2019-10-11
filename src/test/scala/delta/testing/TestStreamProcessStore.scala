@@ -25,7 +25,10 @@ class TestStreamProcessStore {
 
   implicit val ec = RandomDelayExecutionContext
 
-  def newStore(): StreamProcessStore[Long, String] = new ConcurrentMapStore(new TrieMap[Long, Snapshot[String]], None)(_ => Future successful None)
+  type Value = ConcurrentMapStore.Value[String]
+
+  def newStore(): StreamProcessStore[Long, String] = 
+    new ConcurrentMapStore(new TrieMap[Long, Value], None)(_ => Future successful None)
 
   def newStore[S](implicit codec: Codec[S, String]): StreamProcessStore[Long, S] =
     new StreamProcessStoreAdapter(

@@ -48,9 +48,9 @@ import JdbcStreamProcessStore._
  * associated state.
  * NOTE: Pure processes (no processing side effects) should
  * generally use versioning for easier regeneration, BUT
- * side-effecting processing should *never* use versioning,
- * as a new version can trigger reprocessing with the
- * side-effects being repeated.
+ * side-effecting processing should generally not use versioning,
+ * unless the side effect is idempotent, as a new version will 
+ * trigger re-processing thus the side-effects being repeated.
  */
 class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
     streamColumnName: String, customIndexes: List[Index[S]],

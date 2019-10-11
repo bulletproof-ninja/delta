@@ -7,6 +7,10 @@ import scala.util.Try
 import scala.util.control.NonFatal
 import scuff.concurrent.Threads
 
+object ConcurrentMapStore {
+  case class Value[T](snapshot: delta.Snapshot[T], modified: Boolean = true)
+}
+
 /**
  * [[delta.process.StreamProcessStore]] implementation that stores snapshots in a
  * [[scala.collection.concurrent.Map]].
@@ -20,40 +24,42 @@ import scuff.concurrent.Threads
  * @param lookupFallback Persistent store fallback
  */
 final class ConcurrentMapStore[K, V](
-    cmap: collection.concurrent.Map[K, delta.Snapshot[V]],
-    val tickWatermark: Option[Long])(
-    readFallback: K => Future[Option[delta.Snapshot[V]]])
+  cmap: collection.concurrent.Map[K, ConcurrentMapStore.Value[V]],
+  val tickWatermark: Option[Long])(
+  readFallback: K => Future[Option[delta.Snapshot[V]]])
   extends StreamProcessStore[K, V] with NonBlockingCASWrites[K, V] {
 
   def this(
-      cmap: collection.concurrent.Map[K, delta.Snapshot[V]],
-      backingStore: StreamProcessStore[K, V]) =
+    cmap: collection.concurrent.Map[K, ConcurrentMapStore.Value[V]],
+    backingStore: StreamProcessStore[K, V]) =
     this(cmap, backingStore.tickWatermark)(
       backingStore.read)
 
   def this(
-      cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
-      backingStore: StreamProcessStore[K, V]) =
+    cmap: java.util.concurrent.ConcurrentMap[K, ConcurrentMapStore.Value[V]],
+    backingStore: StreamProcessStore[K, V]) =
     this(cmap.asScala, backingStore.tickWatermark)(
       backingStore.read)
 
   def this(
-      maxTick: Option[java.lang.Long],
-      cmap: java.util.concurrent.ConcurrentMap[K, delta.Snapshot[V]],
-      readFallback: K => Future[Option[delta.Snapshot[V]]]) =
+    maxTick: Option[java.lang.Long],
+    cmap: java.util.concurrent.ConcurrentMap[K, ConcurrentMapStore.Value[V]],
+    readFallback: K => Future[Option[delta.Snapshot[V]]]) =
     this(cmap.asScala, maxTick.map(_.longValue))(readFallback)
+
+  import ConcurrentMapStore.Value
 
   private[this] val unknownKeys = new collection.concurrent.TrieMap[K, Unit]
 
   @annotation.tailrec
   private def trySave(key: K, snapshot: Snapshot): Option[Snapshot] = {
-    cmap.putIfAbsent(key, snapshot) match {
+    cmap.putIfAbsent(key, Value(snapshot)) match {
       case None => // Success
         unknownKeys.remove(key)
         None
-      case Some(existing) =>
+      case Some(value @ Value(existing, _)) =>
         if (snapshot.revision > existing.revision || (snapshot.revision == existing.revision && snapshot.tick >= existing.tick)) { // replace with later revision
-          if (!cmap.replace(key, existing, snapshot)) {
+          if (!cmap.replace(key, value, Value(snapshot))) {
             trySave(key, snapshot)
           } else None
         } else {
@@ -73,20 +79,24 @@ final class ConcurrentMapStore[K, V](
   }
 
   def read(key: K): Future[Option[Snapshot]] = cmap.get(key) match {
-    case found @ Some(_) => Future successful found
+    case found @ Some(_) => Future successful found.map(_.snapshot)
     case None =>
       if (unknownKeys contains key) StreamProcessStore.NoneFuture
       else readFallback(key).map {
+  
         case fallbackSnapshot @ Some(snapshot) =>
-          cmap.putIfAbsent(key, snapshot) orElse fallbackSnapshot
+          cmap.putIfAbsent(key, Value(snapshot, modified = false))
+            .map(_.snapshot) orElse fallbackSnapshot
+            
         case None =>
           unknownKeys.update(key, ())
           None
+          
       }(Threads.PiggyBack)
   }
 
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] = {
-      implicit def ec = Threads.PiggyBack
+    implicit def ec = Threads.PiggyBack
     val readFutures: Seq[Future[Option[(K, Snapshot)]]] =
       keys.map { key =>
         read(key).map {
@@ -106,8 +116,9 @@ final class ConcurrentMapStore[K, V](
     StreamProcessStore.UnitFuture
   }
   def refresh(key: K, revision: Int, tick: Long): Future[Unit] = {
-    cmap.get(key).foreach { snapshot =>
-      trySave(key, snapshot.copy(revision = revision, tick = tick))
+    cmap.get(key).foreach {
+      case Value(snapshot, _) =>
+        trySave(key, snapshot.copy(revision = revision, tick = tick))
     }
     StreamProcessStore.UnitFuture
   }
@@ -119,13 +130,18 @@ final class ConcurrentMapStore[K, V](
   }
 
   def writeIfAbsent(key: K, snapshot: Snapshot): Future[Option[Snapshot]] = {
-    Future successful cmap.putIfAbsent(key, snapshot)
+    Future successful cmap.putIfAbsent(key, Value(snapshot)).map(_.snapshot)
   }
+
   def writeReplacement(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]] = {
-    if (cmap.replace(key, oldSnapshot, newSnapshot)) StreamProcessStore.NoneFuture
-    else cmap.get(key) match {
-      case existing @ Some(_) => Future successful existing
-      case _ => Future fromTry Try(sys.error(s"Cannot refresh non-existent key: $key"))
+    cmap.get(key) match {
+      case Some(oldValue) if (oldValue.snapshot eq oldSnapshot) &&
+        cmap.replace(key, oldValue, Value(newSnapshot)) =>
+        StreamProcessStore.NoneFuture
+      case Some(nonMatching) => 
+        Future successful Some(nonMatching.snapshot)
+      case None => 
+        Future fromTry Try(sys.error(s"Cannot refresh non-existent key: $key"))
     }
   }
 

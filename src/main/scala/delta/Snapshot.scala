@@ -20,12 +20,15 @@ case class Snapshot[+Content](
     }
   }
 
-  def contentEquals(that: Snapshot[_]): Boolean = (this.content == null && that.content == null) || {
+  def contentEquals(thatContent: Any): Boolean =
+    this.content.getClass == thatContent.getClass && {
     this.content match {
-      case bytes: Array[Byte] => Arrays.equals(bytes, that.content.asInstanceOf[Array[Byte]])
-      case _ => this.content == that.content
+      case bytes: Array[Byte] => Arrays.equals(bytes, thatContent.asInstanceOf[Array[Byte]])
+      case _ => this.content == thatContent
     }
   }
+
+  def contentEquals(that: Snapshot[_]): Boolean = contentEquals(that.content)
 
   override def equals(other: Any): Boolean = other match {
     case that: Snapshot[_] =>

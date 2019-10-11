@@ -20,9 +20,12 @@ object HzMonotonicReplayProcessor {
     }
     imap.submitToKey(id, EntryStateSnapshotReader, callback)
     callback.future
-  }
+  }    
+  
+  import ConcurrentMapStore.Value
+
   private def makeStore[ID, EVT: ClassTag, S](
-      cmap: collection.concurrent.Map[ID, delta.Snapshot[S]],
+      cmap: collection.concurrent.Map[ID, Value[S]],
       tickWatermark: Option[Long],
       imap: IMap[ID, EntryState[S, EVT]]): StreamProcessStore[ID, S] = {
     new ConcurrentMapStore(cmap, tickWatermark)(read(imap))
@@ -33,9 +36,9 @@ abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
     tickWatermark: Option[Long],
     imap: IMap[ID, EntryState[S, EVT]],
     finishProcessingTimeout: FiniteDuration,
-    protected val persistContext: ExecutionContext,
+    protected val persistenceContext: ExecutionContext,
     partitionThreads: PartitionedExecutionContext,
-    cmap: collection.concurrent.Map[ID, delta.Snapshot[S]])
+    cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]])
   extends MonotonicReplayProcessor[ID, EVT, S, Unit](
     finishProcessingTimeout, HzMonotonicReplayProcessor.makeStore(cmap, tickWatermark, imap))
   with ConcurrentMapReplayPersistence[ID, EVT, S, Unit] {
@@ -47,20 +50,21 @@ abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
       persistContext: ExecutionContext,
       failureReporter: Throwable => Unit,
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
-      cmap: collection.concurrent.Map[ID, delta.Snapshot[S]] = new collection.concurrent.TrieMap[ID, delta.Snapshot[S]]) =
+      cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]] = 
+        new collection.concurrent.TrieMap[ID, ConcurrentMapStore.Value[S]]) =
     this(tickWatermark, imap, finishProcessingTimeout, persistContext,
       PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor", failureReporter)),
       cmap)
 
   protected def processContext(id: ID): ExecutionContext = partitionThreads.singleThread(id.##)
-  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Snapshot]] =
-    partitionThreads.shutdown().map(_ => cmap)(persistContext)
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Value]] =
+    partitionThreads.shutdown().map(_ => cmap)(persistenceContext)
 
-  protected def persist(snapshots: collection.concurrent.Map[ID, Snapshot]): Future[Unit] = {
-      implicit def ec = persistContext
+  protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[Unit] = {
+      implicit def ec = persistenceContext
     val updater = EntryStateUpdater[ID, EVT, S](imap) _
-    val persisted: Iterable[Future[Unit]] = snapshots.map {
-      case (id, snapshot) => updater(id, snapshot)
+    val persisted: Iterator[Future[Unit]] = snapshots.flatMap {
+      case (id, snapshot) => updater(id, snapshot) :: Nil
     }
     Future.sequence(persisted).map(_ => ())
   }
