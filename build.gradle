@@ -14,6 +14,7 @@ ext {
     vScuff = '5.0.1'
     vScalaTest = '3.0.6'
     vScalaJava8Compat = '0.9.0'
+    vSilencer = '1.4.3'
 }
 
 if (version == '') {
@@ -44,11 +45,21 @@ allprojects {
         mavenLocal()
         jcenter()
     }
+    
+    configurations {
+	    scalacPlugin {
+	        transitive = false
+	    }
+    }
     dependencies {
         compile "org.scala-lang:scala-reflect:$vScalaFull"
         testCompile "org.scala-lang:scala-reflect:$vScalaFull"
         testCompile "junit:junit:4.12"
         testCompile "org.slf4j:slf4j-simple:1.7.26"
+
+        compileOnly "com.github.ghik:silencer-lib_$vScalaFull:$vSilencer"
+        testCompileOnly "com.github.ghik:silencer-lib_$vScalaFull:$vSilencer"
+        scalacPlugin "com.github.ghik:silencer-plugin_$vScalaFull:$vSilencer"    
     }
 
 	tasks.withType(Jar) {
