@@ -5,13 +5,13 @@ plugins {
 ext {
     getScalaFull = [
         '2.11': '2.11.12',
-        '2.12': '2.12.9',
+        '2.12': '2.12.10',
         '2.13': '2.13.0'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '5.0.1'
+    vScuff = '6.1.0'
     vScalaTest = '3.0.6'
     vScalaJava8Compat = '0.9.0'
     vSilencer = '1.4.3'
@@ -136,12 +136,12 @@ subprojects {
 }
 
 wrapper {
-    gradleVersion = '5.4.1'
+    gradleVersion = '5.6.2'
 }
 
 project(':delta-cassandra') {
     dependencies {
-        compile "com.datastax.cassandra:cassandra-driver-core:3.6.0"
+        compile "com.datastax.cassandra:cassandra-driver-core:3.7.2"
     }
 }
 
@@ -175,13 +175,11 @@ if (vScala != '2.11') {
     }
 }
 
-// TODO: Include when 'mongo-scala-bson' is available for 2.13
-if (vScala != '2.13') {
-    project(':delta-mongodb') {
-        dependencies {
-            compile "org.mongodb:mongodb-driver-async:3.10.1"
-            compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.6.0"
-            // compile "org.mongodb:mongodb-driver-reactivestreams:1.11.0"
-        }
+project(':delta-mongodb') {
+    dependencies {
+        compile "org.mongodb:mongodb-driver-async:3.11.0"
+        compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.7.0"
+        // compile "org.mongodb:mongodb-driver-reactivestreams:1.11.0"
     }
 }
+

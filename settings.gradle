@@ -7,14 +7,6 @@ switch (System.properties.scalaVersion) {
                         'delta-redis'
                         // No delta-java
                 break
-        case '2.13':
-                include 'delta-cassandra',
-                        'delta-jdbc',
-                        'delta-hazelcast',
-                        'delta-redis',
-                        'delta-java'
-                        // No delta-mongodb
-                break
         default:
                 include 'delta-cassandra',
                         'delta-jdbc',
