@@ -12,6 +12,10 @@ import scala.reflect.{ ClassTag, classTag }
  * The subscription implementation is left out, but can be
  * easily augmented by adding [[delta.read.MessageHubSupport]]
  * trait to an instance of this class.
+ * @tparam ID The specific identifier type
+ * @tparam ESID The more general EventSource identifier type
+ * @tparam SS The snapshot store state type
+ * @tparam S The read model type, often the same as `SS`
  */
 abstract class PrebuiltReadModel[ID, ESID, SS, S >: SS: ClassTag](
     protected val snapshotStore: SnapshotStore[ESID, SS],
