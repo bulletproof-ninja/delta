@@ -141,7 +141,7 @@ final class ConcurrentMapStore[K, V](
       case Some(nonMatching) => 
         Future successful Some(nonMatching.snapshot)
       case None => 
-        Future fromTry Try(sys.error(s"Cannot refresh non-existent key: $key"))
+        Future failed new IllegalStateException(s"Cannot refresh non-existent key: $key")
     }
   }
 
