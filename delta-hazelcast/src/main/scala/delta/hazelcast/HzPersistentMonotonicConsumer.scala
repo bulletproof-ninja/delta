@@ -9,7 +9,7 @@ import scala.reflect.ClassTag
 
 import com.hazelcast.core.IMap
 
-import delta.{ Projector, TransactionProjector }
+import delta.TransactionProjector
 import delta.process.EventSourceConsumer
 import scuff.concurrent.PartitionedExecutionContext
 
@@ -21,7 +21,7 @@ import scuff.concurrent.PartitionedExecutionContext
  */
 abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag](
     protected val imap: IMap[ID, EntryState[S, EVT]],
-    projector: Projector[S, EVT],
+    txnProjector: TransactionProjector[S, EVT],
     protected val tickWatermark: Option[Long],
     finishReplayProcessingTimeout: FiniteDuration,
     executionContext: ExecutionContext,
@@ -72,7 +72,6 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     * [[delta.util.MonotonicReplayProcessor]] here.
     */
 
-  private[this] val project = TransactionProjector(projector)
   protected def replayProcessor(es: EventSource) =
     new HzMonotonicReplayProcessor[ID, EVT, S](
       tickWatermark,
@@ -81,14 +80,14 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
       executionContext,
       newPartitionedExecutionContext,
       newReplayMap) {
-    def process(txn: TXN, currState: Option[S]) = project(txn, currState)
+    def process(txn: TXN, currState: Option[S]) = txnProjector(txn, currState)
   }
 
   protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis
 
   protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any = {
     new HzMonotonicProcessor[ID, EVT, S](
-      es, imap, projector, reportFailure,
+      es, imap, txnProjector, reportFailure,
       scheduler, missingRevisionsReplayDelay)
   }
 
