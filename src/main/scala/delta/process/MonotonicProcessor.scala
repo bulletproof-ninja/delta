@@ -2,13 +2,12 @@ package delta.process
 
 import scala.collection.concurrent.TrieMap
 import scala.reflect.ClassTag
-import scuff.concurrent.AsyncStreamConsumer
-import scala.concurrent.duration.FiniteDuration
 import scala.util.Failure
 import scala.collection.immutable.TreeMap
 import java.util.concurrent.TimeoutException
 
-import scala.concurrent._
+import scuff.concurrent._
+import scala.concurrent._, duration.FiniteDuration
 import delta._
 
 private object MonotonicProcessor {
@@ -35,15 +34,16 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
   private type Unapplied = TreeMap[Revision, TXN]
 
   sealed private abstract class StreamStatus {
+    def revision: Revision
     def isActive: Boolean
     def unapplied: Unapplied
     def promise: Promise[Unit]
   }
   /** Currently being processed. */
-  private final class Active(val unapplied: Unapplied, val promise: Promise[Unit])
+  private final class Active(val unapplied: Unapplied, val promise: Promise[Unit], val revision: Revision = -1)
     extends StreamStatus { def isActive = true }
   /** Not currently being processed. */
-  private final class Inactive(val unapplied: Unapplied, val promise: Promise[Unit])
+  private final class Inactive(val unapplied: Unapplied, val promise: Promise[Unit], val revision: Revision = -1)
     extends StreamStatus { def isActive = false }
 
   /** Set active. A non-empty map indicates success. */
@@ -69,18 +69,20 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
         } else setActive(txn)
     }
   }
-  private def forceInactive(stream: ID, unapplied: Unapplied): Unit = {
+  private def forceInactive(stream: ID, unapplied: Unapplied, cause: Throwable): Unit = {
     assert(unapplied.nonEmpty)
     val status = streamStatus(stream)
     val allUnapplied = unapplied ++ status.unapplied
     val inactive = new Inactive(allUnapplied, status.promise)
-    if (!streamStatus.replace(stream, status, inactive)) {
-      forceInactive(stream, allUnapplied)
+    if (streamStatus.replace(stream, status, inactive)) {
+      inactive.promise tryFailure cause
+    } else {
+      forceInactive(stream, allUnapplied, cause)
     }
   }
 
   /** Set inactive. An empty list indicates success. */
-  private def setInactive(stream: ID, stillUnapplied: Unapplied): (Unapplied, Future[Unit]) = {
+  private def setInactive(stream: ID, stillUnapplied: Unapplied, currRevision: Int): (Unapplied, Future[Unit]) = {
     streamStatus(stream) match {
       case active: Active =>
         val promise = active.promise
@@ -89,16 +91,16 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
             if (streamStatus.remove(stream, active)) {
               promise.success(())
               Empty -> promise.future
-            } else setInactive(stream, stillUnapplied)
+            } else setInactive(stream, stillUnapplied, currRevision)
           } else { // Still has unapplied
-            if (streamStatus.replace(stream, active, new Inactive(stillUnapplied, promise))) {
+            if (streamStatus.replace(stream, active, new Inactive(stillUnapplied, promise, currRevision))) {
               Empty -> promise.future
-            } else setInactive(stream, stillUnapplied)
+            } else setInactive(stream, stillUnapplied, currRevision)
           }
         } else {
-          if (streamStatus.replace(stream, active, new Active(Empty, promise))) {
+          if (streamStatus.replace(stream, active, new Active(Empty, promise, currRevision))) {
             active.unapplied ++ stillUnapplied -> promise.future
-          } else setInactive(stream, stillUnapplied)
+          } else setInactive(stream, stillUnapplied, currRevision)
         }
       case _ => ???
     }
@@ -106,9 +108,11 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
 
   private[this] val streamStatus = new TrieMap[ID, StreamStatus]
 
-  private[process] case class IncompleteStream(id: ID, stillActive: Boolean)
+  private[process] case class IncompleteStream(
+      id: ID, stillActive: Boolean, expectedRevision: Revision, unappliedRevisions: Range,
+      status: Future[Unit])
   protected def incompleteStreams: Iterable[IncompleteStream] = streamStatus.map {
-    case (id, status) => IncompleteStream(id, status.isActive)
+    case (id, status) => IncompleteStream(id, status.isActive, status.revision + 1, status.unapplied.head._1 to status.unapplied.last._1, status.promise.future)
   }
 
   protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit
@@ -146,24 +150,27 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
       implicit
       ec: ExecutionContext): Future[Unit] = {
 
-    val upsertResult: Future[(Option[SnapshotUpdate], Unapplied)] =
+    val upsertResult =
       processStore.upsert(stream) { existingSnapshot =>
-        applyTransactions(unapplied, existingSnapshot)
+        applyTransactions(unapplied, existingSnapshot).map {
+          case (latestSnapshot, stillUnapplied) =>
+            latestSnapshot -> (stillUnapplied -> (latestSnapshot.map(_.revision) getOrElse -1))
+        }
       }
 
     val inactiveFuture = upsertResult.flatMap {
-      case (maybeUpdate, stillUnapplied) =>
-        maybeUpdate.foreach(upd => onSnapshotUpdate(stream, upd))
-        setInactive(stream, stillUnapplied) match {
+      case (maybeUpdate, (stillUnapplied, currRevision)) =>
+        maybeUpdate.foreach(onSnapshotUpdate(stream, _))
+        setInactive(stream, stillUnapplied, currRevision) match {
           case (Empty, future) => future
           case (moreUnapplied, _) => upsertUntilInactive(stream, moreUnapplied)
         }
     }
 
     inactiveFuture.andThen {
-      case Failure(th) =>
-        forceInactive(stream, unapplied)
-        ec.reportFailure(th)
+      case Failure(cause) =>
+        forceInactive(stream, unapplied, cause)
+        ec.reportFailure(cause)
     }
   }
 
@@ -198,18 +205,38 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, BR](
   override def onDone(): Future[BR] = {
     // Reminder: Once `super.onDone()` future completes, `whenDone()` has already run.
     super.onDone().recover {
-      case te: TimeoutException =>
+      case timeout: TimeoutException =>
         val incompletes = incompleteStreams
         if (incompletes.exists(_.stillActive)) { // This is inherently racy, but if we catch an active stream, we can provide a more accurate error message.
-          throw new IllegalStateException(s"Stream processing still active. Timeout of $completionTimeout is possibly too tight", te)
+          throw new IllegalStateException(s"Stream processing still active. Timeout of $completionTimeout is possibly too tight", timeout)
         } else {
+          val cause = incompletes
+            .map(_.status.failed)
+            .find(_.isCompleted)
+            .map(_.value.get.get)
+            .getOrElse(timeout)
+          val firstIncomplete = incompletes.headOption.map { incomplete =>
+            val unapplied = incomplete.unappliedRevisions
+            val missing = incomplete.expectedRevision until unapplied.start
+            val textMissing = if (incomplete.status.failed.isCompleted) {
+              s"nothing, but failed processing. See stack trace below."
+            } else if (missing.isEmpty) {
+              s"... nothing? Expecting revision ${incomplete.expectedRevision}, but have revisions ${unapplied.start}-${unapplied.last} unapplied, yet inactive."
+            } else if (missing.start == missing.last) {
+              s"revision ${missing.start}"
+            } else {
+              s"revisions ${missing.start}-${missing.last}"
+            }
+            s"First one, stream ${incomplete.id}, is missing $textMissing"
+          } getOrElse "(unable to elaborate)"
           val incompleteIds = incompletes.map(_.id).mkString(", ")
           val errMsg = s"""Replay processing timed out after $completionTimeout, due to incomplete stream processing of ids: $incompleteIds
+$firstIncomplete
 Possible causes:
     - Insufficient tick skew window. Resolve by increasing max tick skew.
     - Incomplete process store content, i.e. partial deletion has occurred. For side-effecting processes, resolve by restoring from backup. For pure processes, either resolve by restoring from backup, or restart processing from scratch."
 """
-          throw new IllegalStateException(errMsg, te)
+          throw new IllegalStateException(errMsg, cause)
         }
     }(scuff.concurrent.Threads.PiggyBack)
   }
@@ -249,9 +276,9 @@ trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, BR] {
     onReplayCompletion()
       .flatMap { cmap =>
         require(incompleteStreams.isEmpty, s"Incomplete streams are present. This code should not execute. This is a bug.")
-        val snapshots = cmap.iterator
-          .filter(_._2.modified)
-          .map(t => t._1 -> t._2.snapshot)
+        val snapshots = cmap.iterator.collect {
+          case (id, ConcurrentMapStore.Value(snapshot, true)) => id -> snapshot
+        }
         persistReplayState(snapshots).andThen {
           case _ => cmap.clear()
         }

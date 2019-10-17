@@ -29,7 +29,7 @@ class ConcurrentMapRepository[K, V <: AnyRef](
       case None => id
       case _ =>
         val newId = generateId
-        if (newId == id) throw new DuplicateIdException(id)
+        if (newId == id) throw new DuplicateIdException(id, metadata)
         else insertImpl(newId, generateId, entity, metadata)
     }
   }

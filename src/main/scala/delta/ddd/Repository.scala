@@ -103,4 +103,9 @@ trait ImmutableEntity[E] {
 }
 
 final case class UnknownIdException(id: Any) extends RuntimeException(s"Unknown id: $id")
-final case class DuplicateIdException(id: Any) extends RuntimeException(s"Id already exists: $id")
+final case class DuplicateIdException(id: Any, metadata: Map[String, String]) 
+  extends RuntimeException(s"Id already exists: $id${DuplicateIdException.errorMessageSuffix(metadata)}")
+private object DuplicateIdException {
+  def errorMessageSuffix(metadata: Map[String, String]): String = 
+    if (metadata.isEmpty) "" else s", failed transaction metadata: ${metadata.mkString(", ")}"
+}

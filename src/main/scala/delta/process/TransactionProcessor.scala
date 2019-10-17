@@ -12,7 +12,7 @@ import scala.util.control.NonFatal
 trait TransactionProcessor[ID, EVT, S >: Null] {
 
   protected type TXN = Transaction[ID, _ >: EVT]
-  
+
   /**
    *  Transaction processing.
    *  @param txn Transaction to process
@@ -20,11 +20,16 @@ trait TransactionProcessor[ID, EVT, S >: Null] {
    *  @return New state
    */
   protected def process(txn: TXN, currState: Option[S]): Future[S]
-  
+
   @inline
   private[process] final def callProcess(txn: TXN, currState: Option[S]): Future[S] =
     try process(txn, currState) catch {
-      case NonFatal(cause) => Future failed cause
+      case NonFatal(cause) => 
+        Future failed new IllegalStateException(
+s"""Failed processing of transaction ${txn.stream}:${txn.revision}
+Preprocess state: $currState
+Transaction: $txn
+""", cause)
     }
   
   /** Convenience wrapping of state into `Future`. */

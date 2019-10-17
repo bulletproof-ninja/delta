@@ -125,7 +125,7 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
                   Future successful id
                 } else {
                   val newId = generateId
-                  if (newId == id || retries == 0) Future failed new DuplicateIdException(id)
+                  if (newId == id || retries == 0) Future failed new DuplicateIdException(id, metadata)
                   else insertImpl(newId, generateId, tick, stEvt, metadata, retries - 1)
                 }
             }

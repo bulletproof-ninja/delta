@@ -35,5 +35,11 @@ final class State[S >: Null, EVT] private[ddd] (projector: Projector[S, EVT], pr
   /** Current state. */
   def curr: S = _state
 
-  override def toString = s"${_state} with ${_applied.length} events"
+  override def toString = 
+    if (_state == null) "<uninitialized>" 
+    else _applied.length match {
+      case 1 =>   s"After 1 event: ${_state}"
+      case len => s"After $len events: ${_state}"
+    }
+
 }
