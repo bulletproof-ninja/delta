@@ -28,7 +28,7 @@ class TestStreamProcessStore {
   type Value = ConcurrentMapStore.Value[String]
 
   def newStore(): StreamProcessStore[Long, String] = 
-    new ConcurrentMapStore(new TrieMap[Long, Value], None)(_ => Future successful None)
+    ConcurrentMapStore(new TrieMap[Long, Value], None)(_ => Future successful None)
 
   def newStore[S](implicit codec: Codec[S, String]): StreamProcessStore[Long, S] =
     new StreamProcessStoreAdapter(

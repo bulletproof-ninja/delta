@@ -28,7 +28,7 @@ object HzMonotonicReplayProcessor {
       cmap: collection.concurrent.Map[ID, Value[S]],
       tickWatermark: Option[Long],
       imap: IMap[ID, EntryState[S, EVT]]): StreamProcessStore[ID, S] = {
-    new ConcurrentMapStore(cmap, tickWatermark)(read(imap))
+    ConcurrentMapStore(cmap, tickWatermark)(read(imap))
   }
 }
 
@@ -53,7 +53,8 @@ abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
       cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]] = 
         new collection.concurrent.TrieMap[ID, ConcurrentMapStore.Value[S]]) =
     this(tickWatermark, imap, finishProcessingTimeout, persistContext,
-      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor", failureReporter)),
+      PartitionedExecutionContext(
+          processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor", failureReporter)),
       cmap)
 
   protected def processContext(id: ID): ExecutionContext = partitionThreads.singleThread(id.##)

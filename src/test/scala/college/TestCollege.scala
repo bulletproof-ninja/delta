@@ -305,7 +305,7 @@ class TestCollege {
     class ModelBuilder(memMap: TrieMap[Int, Value])
       extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Unit](
         10.seconds,
-        new ConcurrentMapStore(memMap, None)(_ => Future successful None))
+        ConcurrentMapStore(memMap, None)(_ => Future successful None))
       with MonotonicJoinState[Int, SemesterEvent, Model] {
 
       protected def prepareJoin(

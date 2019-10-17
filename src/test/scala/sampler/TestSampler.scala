@@ -54,7 +54,7 @@ class TestSampler {
     emp.apply(UpdateSalary(40000))
     Try(EmployeeRepo.insert(id, emp).await) match {
       case Success(revision) => fail(s"Should fail, but inserted revision $revision")
-      case Failure(DuplicateIdException(dupe)) => assertEquals(id, dupe)
+      case Failure(dupe: DuplicateIdException) => assertEquals(id, dupe.id)
       case Failure(th) => fail(s"Should have thrown ${classOf[DuplicateIdException].getSimpleName}, not $th")
     }
   }

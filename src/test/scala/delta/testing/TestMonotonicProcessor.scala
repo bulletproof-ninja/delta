@@ -35,7 +35,7 @@ class TestMonotonicProcessor {
     class Mono(ec: ExecutionContext)
       extends MonotonicReplayProcessor[Int, Char, String, Unit](
         20.seconds,
-        new ConcurrentMapStore(Tracker.snapshotMap, None)(NoFallback)) {
+        ConcurrentMapStore(Tracker.snapshotMap, None)(NoFallback)) {
       def whenDone() = Future successful (())
       override def onSnapshotUpdate(id: Int, update: SnapshotUpdate) = {
         //        println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
@@ -122,7 +122,7 @@ class TestMonotonicProcessor {
         val snapshotMap = new TrieMap[Int, Value]
         val processor = new MonotonicReplayProcessor[Int, Char, String, Unit](
           20.seconds,
-          new ConcurrentMapStore(snapshotMap, None)(NoFallback)) {
+          ConcurrentMapStore(snapshotMap, None)(NoFallback)) {
           protected def processContext(id: Int): ExecutionContext = ec match {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
@@ -156,6 +156,7 @@ class TestMonotonicProcessor {
         val allProcessed = Future.sequence(processFutures)
         allProcessed.await
         val ConcurrentMapStore.Value(Snapshot(string, revision, _), modified) = snapshotMap(id)
+        assertTrue(modified)
         assertEquals(expectedString, string)
         assertEquals(txnCount - 1, revision)
       }

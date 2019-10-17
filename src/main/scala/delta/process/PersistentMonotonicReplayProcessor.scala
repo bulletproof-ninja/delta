@@ -16,7 +16,7 @@ abstract class PersistentMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
     cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]])
   extends MonotonicReplayProcessor[ID, EVT, S, Unit](
       whenDoneCompletionTimeout,
-      new ConcurrentMapStore(cmap, persistentStore.tickWatermark)(persistentStore.read))
+      ConcurrentMapStore(cmap, persistentStore.tickWatermark)(persistentStore.read))
   with ConcurrentMapReplayPersistence[ID, EVT, S, Unit] {
 
   def this(
