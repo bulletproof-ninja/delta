@@ -24,15 +24,15 @@ class IMapEntryStateReadModel[ID, S, EVT](
 
   protected def reportFailure(th: Throwable) = failureReporter(th)
 
-  protected def readStrict(id: ID, expected: Either[Long, Int])(
+  protected def readAgain(id: ID, expected: Either[Long, Int])(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
     expected match {
-      case Right(minRev) => readLatest(id).flatMap(verifyRevision(id, _, minRev))
-      case Left(minTick) => readLatest(id).flatMap(verifyTick(id, _, minTick))
+      case Right(minRev) => read(id).flatMap(verifyRevision(id, _, minRev))
+      case Left(minTick) => read(id).flatMap(verifyTick(id, _, minTick))
     }
 
-  def readLatest(id: ID)(
+  def read(id: ID)(
       implicit
       ec: ExecutionContext): Future[Snapshot] = {
     val promise = Promise[Option[Snapshot]]
@@ -43,7 +43,11 @@ class IMapEntryStateReadModel[ID, S, EVT](
       }
       def onFailure(t: Throwable): Unit = promise failure t
     }
-    imap.getAsync(id).andThen(callback, new Executor { def execute(r: Runnable) = ec execute r })
+    val exec = ec match {
+      case exec: Executor => exec
+      case _ => new Executor { def execute(r: Runnable) = ec execute r }
+    }
+    imap.getAsync(id).andThen(callback, exec)
     promise.future.flatMap {
       verify(id, _)
     }

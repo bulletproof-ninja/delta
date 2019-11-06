@@ -21,7 +21,7 @@ trait BasicReadModel[ID, S] {
    *
    * @return Latest accessible snapshot, or [[delta.read.UnknownIdRequested]] if unknown id
    */
-  def readLatest(id: ID)(
+  def read(id: ID)(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 

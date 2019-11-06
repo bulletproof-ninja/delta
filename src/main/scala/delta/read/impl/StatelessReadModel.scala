@@ -30,18 +30,18 @@ class StatelessReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
       idConv: ID => ESID) =
         this(TransactionProjector[S, EVT](projector), es)
 
-  def readLatest(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
+  def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
     replayToComplete(None, id).flatMap {
       verify(id, _)
     }
 
   def readMinRevision(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
-    readLatest(id).flatMap {
+    read(id).flatMap {
       verifyRevision(id, _, minRevision)
     }
 
   def readMinTick(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] = {
-    readLatest(id).flatMap {
+    read(id).flatMap {
       verifyTick(id, _, minTick)
     }
   }

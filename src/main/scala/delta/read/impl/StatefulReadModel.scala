@@ -41,7 +41,7 @@ abstract class StatefulReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
 
   protected def idConv(id: ID): ESID = convId(id)
 
-  def readLatest(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
+  def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
     readAndUpdate(id).flatMap {
       verify(id, _)
     }

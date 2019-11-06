@@ -91,13 +91,13 @@ trait SubscriptionSupport[ID, S] {
         doCallback(Right(update), update.snapshot.tick)
     }
     // Piggy-back on reader thread. Don't use potentially single threaded callbackCtx, which could possibly deadlock.
-    readLatest(id)(Threads.PiggyBack).map { snapshot =>
+    read(id)(Threads.PiggyBack).map { snapshot =>
       doCallback(Left(snapshot), snapshot.tick)
       subscription
     }(Threads.PiggyBack)
   }
 
-  protected def readStrict(id: ID, tickOrRevision: Either[Long, Int])(
+  protected def readAgain(id: ID, tickOrRevision: Either[Long, Int])(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 
@@ -110,7 +110,7 @@ trait SubscriptionSupport[ID, S] {
           snapshot.revision >= minRevision
         case Left(minTick) => snapshot.tick >= minTick
       }
-    val latest = readLatest(id).map(Some(_)).recover { case _: UnknownIdRequested => None }
+    val latest = read(id).map(Some(_)).recover { case _: UnknownIdRequested => None }
     latest flatMap {
       case Some(snapshot) if matchesTickOrRevision(snapshot) =>
         Future successful snapshot
@@ -130,7 +130,7 @@ trait SubscriptionSupport[ID, S] {
             }
           }
           // Unfortunately we have to try another read, to eliminate the race condition
-          readStrict(id, tickOrRevision) andThen {
+          readAgain(id, tickOrRevision) andThen {
             case Success(snapshot) if matchesTickOrRevision(snapshot) =>
               promise trySuccess snapshot
             case Failure(th) =>

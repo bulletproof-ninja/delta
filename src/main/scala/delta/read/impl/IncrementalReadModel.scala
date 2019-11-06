@@ -39,7 +39,7 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
       convId: ID => ESID) =
     this(TransactionProjector[S, EVT](projector), eventSource)
 
-  protected def readStrict(id: ID, expected: Either[Long, Int])(
+  protected def readAgain(id: ID, expected: Either[Long, Int])(
       implicit
       ec: ExecutionContext): Future[Snapshot] = {
     expected match {
@@ -72,7 +72,7 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
     eventSource.subscribe(selector.toStreamsSelector)(onTxnUpdate)
   }
 
-  def readLatest(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] = {
+  def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] = {
     val esid = idConv(id)
     processStore.read(esid).flatMap {
       case Some(snapshot) => Future successful snapshot
@@ -101,7 +101,7 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
     protected def processStore = IncrementalReadModel.this.processStore
     protected def processContext(id: ESID) = IncrementalReadModel.this.processContext(id)
     protected def process(txn: TXN, currState: Option[S]): Future[S] = txProjector(txn, currState)
-      
+
   }
 
 }

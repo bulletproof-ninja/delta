@@ -10,7 +10,7 @@ trait SnapshotStoreSupport[ID, SSID, SS, S >: SS] {
   protected def snapshotStore: delta.SnapshotStore[SSID, SS]
   protected def idConv(id: ID): SSID
 
-  def readLatest(id: ID)(implicit ec: ExecutionContext): Future[delta.Snapshot[S]] = {
+  def read(id: ID)(implicit ec: ExecutionContext): Future[delta.Snapshot[S]] = {
     snapshotStore.read(idConv(id)).map {
       case Some(snapshot) =>
         if (stateClass.isInstance(snapshot.content)) snapshot.asInstanceOf[Snapshot]
