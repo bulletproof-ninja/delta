@@ -19,11 +19,13 @@ abstract class AbstractStore(
   protected def createTickIndex(conn: Connection): Unit
 
   /** Ensure table. */
-  def ensureTable(): this.type =
-    cs.forUpdate { conn =>
-      ensureTable(conn)
-      this
-    }
+  def ensureTable(ensureTable: Boolean = true): this.type = {
+    if (ensureTable)
+      cs.forUpdate { conn =>
+        ensureTable(conn)
+      }
+    this
+  }
 
   protected def ensureTable(conn: Connection): Unit = {
     createTable(conn)

@@ -97,7 +97,13 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
 
   import CassandraEventStore._
 
-  ensureTable[ID, SF](session, td.keyspace, td.table, td.replication)
+  /** Create table definition, if not already exists. */
+  def ensureTable(ensureTable: Boolean = true): this.type = {
+    if (ensureTable) {
+      ensureTable[ID, SF](session, td.keyspace, td.table, td.replication)
+    }
+    this
+  }
 
   private def ct[T: ColumnType] = implicitly[ColumnType[T]]
 

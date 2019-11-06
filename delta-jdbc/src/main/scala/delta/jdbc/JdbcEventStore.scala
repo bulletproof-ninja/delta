@@ -30,8 +30,8 @@ class JdbcEventStore[ID, EVT, SF](
 
   @inline implicit private def ef = evtFmt
 
-  def ensureSchema(): this.type = {
-    cs.forUpdate { conn =>
+  def ensureSchema(ensureSchema: Boolean = true): this.type = {
+    if (ensureSchema) cs.forUpdate { conn =>
       dialect.createSchema(conn)
       dialect.createStreamTable(conn)
       dialect.createChannelIndex(conn)
