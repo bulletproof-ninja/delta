@@ -61,9 +61,9 @@ CREATE TABLE IF NOT EXISTS $streamTable (
   def createStreamTable(conn: Connection): Unit = executeDDL(conn, streamTableDDL)
 
   protected def channelIndexDDL: String = s"""
-    CREATE INDEX IF NOT EXISTS $channelIndex
-      ON $streamTable (channel)
-  """
+CREATE INDEX IF NOT EXISTS $channelIndex
+  ON $streamTable (channel)
+"""
   def createChannelIndex(conn: Connection): Unit = executeDDL(conn, channelIndexDDL)
 
   protected def transactionTableDDL: String = s"""
@@ -76,13 +76,13 @@ CREATE TABLE IF NOT EXISTS $transactionTable (
   FOREIGN KEY (stream_id)
     REFERENCES $streamTable (stream_id)
 )
-  """
+"""
   def createTransactionTable(conn: Connection): Unit = executeDDL(conn, transactionTableDDL)
 
   protected def tickIndexDDL: String = s"""
-    CREATE INDEX IF NOT EXISTS $tickIndex
-      ON $transactionTable (tick)
-  """
+CREATE INDEX IF NOT EXISTS $tickIndex
+  ON $transactionTable (tick)
+"""
   def createTickIndex(conn: Connection): Unit = executeDDL(conn, tickIndexDDL)
 
   protected def channelType = "VARCHAR(255)"
@@ -100,13 +100,13 @@ CREATE TABLE IF NOT EXISTS $eventTable (
   FOREIGN KEY (stream_id, revision)
     REFERENCES $transactionTable (stream_id, revision)
 )
-  """
+"""
   def createEventTable(conn: Connection): Unit = executeDDL(conn, eventTableDDL)
 
   protected def eventNameIndexDDL: String = s"""
 CREATE INDEX IF NOT EXISTS $eventNameIndex
   ON $eventTable (event_name)
-  """
+"""
   def createEventNameIndex(conn: Connection): Unit = executeDDL(conn, eventNameIndexDDL)
 
   protected def metadataKeyType = "VARCHAR(255)"
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS $metadataTable (
   FOREIGN KEY (stream_id, revision)
     REFERENCES $transactionTable (stream_id, revision)
 )
-  """
+"""
   def createMetadataTable(conn: Connection): Unit = executeDDL(conn, metadataTableDDL)
 
   private def prepareStatement[R](sql: String)(thunk: PreparedStatement => R)(
@@ -136,10 +136,10 @@ CREATE TABLE IF NOT EXISTS $metadataTable (
     try thunk(rs) finally rs.close()
   }
   protected val streamInsert: String = s"""
-    INSERT INTO $streamTable
-      (stream_id, channel)
-      VALUES (?, ?)
-  """
+INSERT INTO $streamTable
+  (stream_id, channel)
+  VALUES (?, ?)
+"""
   def insertStream(stream: ID, channel: Channel)(
       implicit conn: Connection): Unit = {
     prepareStatement(streamInsert) { ps =>
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS $metadataTable (
 INSERT INTO $transactionTable
   (stream_id, revision, tick)
   VALUES (?, ?, ?)
-  """
+"""
   def insertTransaction(stream: ID, rev: Int, tick: Long)(
       implicit conn: Connection): Unit = {
     prepareStatement(transactionInsert) { ps =>
@@ -166,7 +166,7 @@ INSERT INTO $transactionTable
 INSERT INTO $eventTable
   (stream_id, revision, event_idx, event_name, event_version, event_data)
   VALUES (?, ?, ?, ?, ?, ?)
-  """
+"""
   def insertEvents(stream: ID, rev: Int, events: List[EVT])(
       implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
     prepareStatement(eventInsert) { ps =>
@@ -190,7 +190,7 @@ INSERT INTO $eventTable
 INSERT INTO $metadataTable
   (stream_id, revision, metadata_key, metadata_val)
   VALUES (?, ?, ?, ?)
-  """
+"""
   def insertMetadata(stream: ID, rev: Int, metadata: Map[String, String])(
       implicit conn: Connection) = if (metadata.nonEmpty) {
     prepareStatement(metadataInsert) { ps =>
@@ -367,7 +367,7 @@ AND (t.stream_id, t.revision) IN (
   FROM $eventTable e2
   $whereEventName
 )
-    """
+"""
     if (chCount == 1) {
       s"s.channel = ? $andEventMatch"
     } else {
@@ -381,7 +381,7 @@ SELECT $StreamColumnsSelect
 $FromJoin
 WHERE t.stream_id = ? $AND
 ORDER BY e.revision, e.event_idx
-  """
+"""
 
   private val streamQueryFull = makeStreamQuery()
   def selectStreamFull(stream: ID)(thunk: (ResultSet, Columns) => Unit)(

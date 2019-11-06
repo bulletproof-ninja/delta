@@ -27,7 +27,7 @@ class JdbcEventStore[ID, EVT, SF](
   extends EventStore[ID, EVT] {
 
   lazy val ticker = initTicker(this)
-  
+
   @inline implicit private def ef = evtFmt
 
   def ensureSchema(): this.type = {
