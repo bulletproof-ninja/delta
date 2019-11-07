@@ -45,7 +45,7 @@ allprojects {
         mavenLocal()
         jcenter()
     }
-    
+
     configurations {
 	    scalacPlugin {
 	        transitive = false
@@ -59,7 +59,7 @@ allprojects {
 
         compileOnly "com.github.ghik:silencer-lib_$vScalaFull:$vSilencer"
         testCompileOnly "com.github.ghik:silencer-lib_$vScalaFull:$vSilencer"
-        scalacPlugin "com.github.ghik:silencer-plugin_$vScalaFull:$vSilencer"    
+        scalacPlugin "com.github.ghik:silencer-plugin_$vScalaFull:$vSilencer"
     }
 
 	tasks.withType(Jar) {
@@ -182,4 +182,3 @@ project(':delta-mongodb') {
         // compile "org.mongodb:mongodb-driver-reactivestreams:1.11.0"
     }
 }
-

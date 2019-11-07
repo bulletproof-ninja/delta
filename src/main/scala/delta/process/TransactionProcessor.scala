@@ -24,14 +24,14 @@ trait TransactionProcessor[ID, EVT, S >: Null] {
   @inline
   private[process] final def callProcess(txn: TXN, currState: Option[S]): Future[S] =
     try process(txn, currState) catch {
-      case NonFatal(cause) => 
+      case NonFatal(cause) =>
         Future failed new IllegalStateException(
 s"""Failed processing of transaction ${txn.stream}:${txn.revision}
 Preprocess state: $currState
 Transaction: $txn
 """, cause)
     }
-  
+
   /** Convenience wrapping of state into `Future`. */
   implicit protected final def toFuture(state: S): Future[S] = Future successful state
 

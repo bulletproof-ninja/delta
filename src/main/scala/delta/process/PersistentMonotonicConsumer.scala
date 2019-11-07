@@ -82,10 +82,10 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
 
   protected class ReplayProcessor
     extends PersistentMonotonicReplayProcessor[ID, EVT, S](
-        processStore, 
-        replayProcessorCompletionTimeout, 
-        persistenceContext, 
-        replayProcessorWriteBatchSize, 
+        processStore,
+        replayProcessorCompletionTimeout,
+        persistenceContext,
+        replayProcessorWriteBatchSize,
         newPartitionedExecutionContext, newReplayMap) {
     override protected def process(tx: TXN, state: Option[S]): Future[S] =
       PersistentMonotonicConsumer.this.process(tx, state)
@@ -93,7 +93,7 @@ abstract class PersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null](
 
   protected class LiveProcessor(es: EventSource)
     extends PersistentMonotonicProcessor[ID, EVT, S](
-        es, processStore, 
+        es, processStore,
         replayMissingRevisionsDelay, scheduler,
         newPartitionedExecutionContext) {
     protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate) =
