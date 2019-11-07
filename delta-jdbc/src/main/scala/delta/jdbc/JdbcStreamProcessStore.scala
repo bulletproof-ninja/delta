@@ -377,7 +377,15 @@ CREATE INDEX IF NOT EXISTS $indexName
     } finally Try(ps.close)
   }
 
-  protected def querySnapshot(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
+  /**
+   * Query for snapshots matching column values.
+   * Uses `AND` semantics, so multiple column
+   * queries should not use mutually exclusive
+   * values.
+   */
+  protected def querySnapshot(
+    indexColumnMatch: (String, Any), more: (String, Any)*)
+    : Future[Map[PK, Snapshot]] = {
     val queryValues: List[(IndexColumn[S], Any)] = (indexColumnMatch :: more.toList).map {
       case (name, value) => indexColumns(name.toLowerCase).asInstanceOf[IndexColumn[S]] -> value
     }
@@ -410,7 +418,10 @@ $WHERE $where
     }
   }
 
-  protected def queryTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
+  /** Lighter version of `querySnapshot` if only existence needed. */
+  protected def queryTick(
+    indexColumnMatch: (String, Any), more: (String, Any)*)
+    : Future[Map[PK, Long]] = {
     val queryValues: List[(IndexColumn[S], Any)] = (indexColumnMatch :: more.toList).map {
       case (name, value) => indexColumns(name.toLowerCase).asInstanceOf[IndexColumn[S]] -> value
     }
