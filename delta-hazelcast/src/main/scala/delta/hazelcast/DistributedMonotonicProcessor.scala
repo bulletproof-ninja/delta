@@ -11,7 +11,6 @@ import delta.{ Snapshot, Transaction, TransactionProjector }
 import com.hazelcast.core.IMap
 import scala.concurrent.Future
 import scala.reflect.{ ClassTag, classTag }
-import scuff._
 
 case class EntryState[S, EVT](
   snapshot: Snapshot[S],
@@ -32,7 +31,7 @@ object DistributedMonotonicProcessor {
       imap: IMap[K, EntryState[S, EVT]], txnProjector: TransactionProjector[S, EVT])(
       txn: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
     val verifiedTxn: Transaction[K, EVT] = {
-      txn.events.collectAs[EVT] match {
+      txn.events.collect { case evt: EVT => evt } match {
         case Nil => sys.error(s"${txn.channel} transaction ${txn.stream}(rev:${txn.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
         case events => txn.copy(events = events)
       }
