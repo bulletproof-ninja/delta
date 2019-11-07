@@ -33,7 +33,6 @@ private abstract class EventStoreProxy[ID, EVT, M](
 
   protected def toTopic(ch: Channel) = Topic(ch2tp(ch.toString))
 
-  import language.implicitConversions
   implicit private def adapt(selector: this.Selector): evtStore.Selector = selector match {
     case Everything => evtStore.Everything
     case ChannelSelector(channels) => evtStore.ChannelSelector(channels)

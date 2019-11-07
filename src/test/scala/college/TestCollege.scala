@@ -13,7 +13,6 @@ import scuff.concurrent._
 import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
 
-import language.implicitConversions
 import scala.collection.concurrent.TrieMap
 import delta.MessageHubPublishing
 import delta.testing.RandomDelayExecutionContext
@@ -38,15 +37,15 @@ object TestCollege {
 class TestCollege {
 
   val Scheduler = Threads.newScheduledThreadPool(8, Threads.factory(Threads.SystemThreadGroup), _.printStackTrace)
-  
+
   import TestCollege._
 
   implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
 
   protected def initTicker(es: EventSource[Int, CollegeEvent]) = LamportTicker(es)
-  
+
   lazy val eventStore: EventStore[Int, CollegeEvent] =
-    new TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker) 
+    new TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker)
         with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
       val txnHub = new LocalHub[TXN](txn => toTopic(txn.channel), RandomDelayExecutionContext)
@@ -311,7 +310,7 @@ class TestCollege {
       protected def prepareJoin(
           semesterId: Int, semesterRev: Int, tick: Long, md: Map[String, String])(
           evt: SemesterEvent): Map[Int, Processor] = {
-        
+
         val semester = new SemesterRev(semesterId, semesterRev)
         evt match {
           case StudentEnrolled(studentId) => Map {
@@ -342,7 +341,7 @@ class TestCollege {
         case _ => // Ignore
       }
 
-      protected def processStream(txn: TXN, currState: Option[Model]) = 
+      protected def processStream(txn: TXN, currState: Option[Model]) =
         txn.events.foldLeft(currState getOrElse SemesterModel()) {
           case (model @ SemesterModel(students), StudentEnrolled(studentId)) => model.copy(students = students + studentId)
           case (model @ SemesterModel(students), StudentCancelled(studentId)) => model.copy(students = students - studentId)

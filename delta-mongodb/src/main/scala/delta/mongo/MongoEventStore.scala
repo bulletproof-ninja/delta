@@ -1,7 +1,6 @@
 package delta.mongo
 
 import scala.concurrent.Future
-import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
 import org.bson.{ Document, BsonValue }
@@ -88,11 +87,11 @@ class MongoEventStore[ID: BsonCodec, EVT](
     extends delta.EventStore[ID, EVT] {
 
   def this(
-      docCollection: MongoCollection[Document], 
+      docCollection: MongoCollection[Document],
       evtFmt: EventFormat[EVT, BsonValue])(
       initTicker: MongoEventStore[ID, EVT] => Ticker) =
     this(docCollection, evtFmt, null)(initTicker)
-    
+
   lazy val ticker = initTicker(this)
 
   protected val txnCollection: MongoCollection[TXN] = {

@@ -18,8 +18,6 @@ import scala.collection.JavaConverters._
 
 package object mongo {
 
-  import language.implicitConversions
-
   implicit def tuple2Codec[A: Codec, B: Codec] = new Codec[(A, B)] {
     def getEncoderClass = classOf[Tuple2[_, _]].asInstanceOf[Class[Tuple2[A, B]]]
     def encode(writer: BsonWriter, value: (A, B), encoderContext: EncoderContext): Unit = {

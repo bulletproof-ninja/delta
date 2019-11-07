@@ -8,8 +8,6 @@ import sampler.aggr.Department
 import scala.util.Random
 import scala.concurrent._, duration._
 
-import language.implicitConversions
-
 package sampler {
   case class Id[T](int: Int = Random.nextInt)
 

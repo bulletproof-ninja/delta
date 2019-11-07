@@ -1,6 +1,4 @@
 
-import language.implicitConversions
-
 import delta._
 import scuff.JavaSerializer
 

@@ -17,7 +17,7 @@ class TestRepository {
     thunk(latch)
     assertTrue(latch.await(5, TimeUnit.SECONDS))
   }
-  import language.implicitConversions
+
   implicit def toFut[T](t: T) = Future successful t
   case class Customer(name: String, postCode: String)
 

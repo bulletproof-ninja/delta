@@ -22,7 +22,7 @@ abstract class AbstractStore(
   def ensureTable(ensureTable: Boolean = true): this.type = {
     if (ensureTable)
       cs.forUpdate { conn =>
-        ensureTable(conn)
+        this.ensureTable(conn)
       }
     this
   }
