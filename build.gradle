@@ -67,7 +67,7 @@ allprojects {
 	}
 
 	tasks.withType(ScalaCompile) {
-	    def args = System.properties.compilerArgs ?: "-feature -deprecation -explaintypes -unchecked -Xlint -language:implicitConversions -Ywarn-unused -Ywarn-unused-import"
+	    def args = System.properties.compilerArgs ?: "-feature -deprecation -explaintypes -unchecked -Xlint -language:implicitConversions,existentials -Ywarn-unused -Ywarn-unused-import"
 	    scalaCompileOptions.additionalParameters = args.split(" ").toList()
 	}
 
