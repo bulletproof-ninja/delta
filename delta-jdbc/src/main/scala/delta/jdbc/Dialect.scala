@@ -406,12 +406,15 @@ ORDER BY e.revision, e.event_idx
     }
   }
   private val streamQueryRevisionRange = makeStreamQuery("AND t.revision BETWEEN ? AND ?")
+  private val streamQueryFromRevision = makeStreamQuery("AND t.revision >= ?")
   def selectStreamRange(stream: ID, range: Range)(thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
-    prepareStatement(streamQueryRevisionRange) { ps =>
+    val bounded = range.last != Int.MaxValue
+    val query = if (bounded) streamQueryRevisionRange else streamQueryFromRevision
+    prepareStatement(query) { ps =>
       ps.setValue(1, stream)
       ps.setInt(2, range.head)
-      ps.setInt(3, range.last)
+      if (bounded) ps.setInt(3, range.last)
       executeQuery(ps) { rs =>
         thunk(rs, StreamColumnsIdx)
       }
