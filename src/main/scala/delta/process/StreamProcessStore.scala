@@ -48,7 +48,7 @@ trait StreamProcessStore[K, S] extends SnapshotStore[K, S] {
  * processing.
  * NOTE: Side-effects are always at-least-once semantics.
  */
-trait SideEffects[K, S]
+trait SideEffects[K, S <: AnyRef]
   extends StreamProcessStore[K, S] {
 
   /** Perform side-effect, if necessary, and return final state. */
@@ -56,8 +56,8 @@ trait SideEffects[K, S]
 
   @inline
   private def replaceContent(snapshot: Snapshot, newContent: S): Snapshot =
-    if (snapshot contentEquals newContent) snapshot
-    else new Snapshot(newContent, snapshot.revision, snapshot.tick)
+    if (snapshot.content eq newContent) snapshot
+    else snapshot.copy(content = newContent)
 
   final abstract override def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
