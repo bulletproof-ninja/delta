@@ -21,6 +21,7 @@ import delta.jdbc.ColumnType
 import delta.testing.Foo
 import scala.util.Random
 import scala.concurrent.Future
+import scuff.SysProps
 
 object TestJdbcStreamProcessStore {
 
@@ -40,6 +41,7 @@ object TestJdbcStreamProcessStore {
     ds setCharacterEncoding "UTF-8"
     ds setDatabaseName db
     ds setUser "root"
+    ds setPassword SysProps.required("delta.mysql.password")
     ds setUseSSL false
 //    ds setLoggerClassName classOf[Slf4JLogger].getName
     ds setLogger classOf[Slf4JLogger].getName

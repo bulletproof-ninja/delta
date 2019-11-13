@@ -18,12 +18,14 @@ import delta.MessageHubPublishing
 import scuff.jdbc.ConnectionSource
 import college.CollegeEventFormat
 import college.jdbc.StudentEmailsStore
+import scuff.SysProps
 
 object TestCollege {
   val db = "delta_testing_college"
   val ds = {
     val ds = new MysqlDataSource
     ds setUser "root"
+    ds setPassword SysProps.required("delta.mysql.password")
     ds setURL s"jdbc:mysql://localhost/$db"
     ds setCreateDatabaseIfNotExist true
     ds setUseSSL true

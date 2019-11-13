@@ -16,12 +16,14 @@ import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
 import delta.MessageHubPublishing
 import scuff.jdbc.ConnectionSource
+import scuff.SysProps
 
 object TestSampler {
   val db = "delta_testing_sampler"
   val ds = {
     val ds = new MysqlConnectionPoolDataSource
     ds.setUser("root")
+    ds setPassword SysProps.required("delta.mysql.password")
     ds setUrl s"jdbc:mysql://localhost/$db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&autoReconnect=true&useSSL=false"
     ds
   }
