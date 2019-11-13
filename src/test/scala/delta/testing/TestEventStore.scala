@@ -33,7 +33,7 @@ class TestEventStore {
   }
 
   private[this] val es = new util.TransientEventStore[Symbol, Event, Array[Byte]](
-      RandomDelayExecutionContext, EvtFmt)(_ => SysClockTicker) 
+      RandomDelayExecutionContext, EvtFmt)(_ => SysClockTicker)
       with MessageHubPublishing[Symbol, Event] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
@@ -44,8 +44,9 @@ class TestEventStore {
 
   @Test
   def serialization(): Unit = {
+    val id12 = Symbol("id12")
     val wallClock = System.currentTimeMillis
-    val txn = new es.TXN(99, Channel, 'id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
+    val txn = new es.TXN(99, Channel, id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
     val objOut = new ObjectOutputStream(out)
     objOut.writeObject(txn)
