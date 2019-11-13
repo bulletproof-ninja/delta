@@ -9,6 +9,8 @@ import java.util.concurrent.TimeoutException
 import scuff.concurrent._
 import scala.concurrent._, duration.FiniteDuration
 import delta._
+import scala.annotation.tailrec
+import scala.util.Try
 
 private object MonotonicProcessor {
 
@@ -69,19 +71,24 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
         } else setActive(txn)
     }
   }
-  private def forceInactive(stream: ID, unapplied: Unapplied, cause: Throwable): Unit = {
-    assert(unapplied.nonEmpty)
-    val status = streamStatus(stream)
-    val allUnapplied = unapplied ++ status.unapplied
-    val inactive = new Inactive(allUnapplied, status.promise)
-    if (streamStatus.replace(stream, status, inactive)) {
-      inactive.promise tryFailure cause
-    } else {
-      forceInactive(stream, allUnapplied, cause)
+
+  @tailrec
+  private def ensureInactive(stream: ID, unapplied: Unapplied, cause: Throwable): Unit = {
+    streamStatus.get(stream) match {
+      case None => // Already processed, thus inactive
+      case Some(status) =>
+        val allUnapplied = unapplied ++ status.unapplied
+        val inactive = new Inactive(allUnapplied, status.promise)
+        if (streamStatus.replace(stream, status, inactive)) {
+          inactive.promise tryFailure cause
+        } else {
+          ensureInactive(stream, allUnapplied, cause)
+        }
     }
   }
 
   /** Set inactive. An empty list indicates success. */
+  @tailrec
   private def setInactive(stream: ID, stillUnapplied: Unapplied, currRevision: Int): (Unapplied, Future[Unit]) = {
     streamStatus(stream) match {
       case active: Active =>
@@ -160,7 +167,7 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
 
     val inactiveFuture = upsertResult.flatMap {
       case (maybeUpdate, (stillUnapplied, currRevision)) =>
-        maybeUpdate.foreach(onSnapshotUpdate(stream, _))
+        Try(maybeUpdate.foreach(onSnapshotUpdate(stream, _))).failed.foreach(ec.reportFailure)
         setInactive(stream, stillUnapplied, currRevision) match {
           case (Empty, future) => future
           case (moreUnapplied, _) => upsertUntilInactive(stream, moreUnapplied)
@@ -168,9 +175,10 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
     }
 
     inactiveFuture.andThen {
-      case Failure(cause) =>
-        forceInactive(stream, unapplied, cause)
-        ec.reportFailure(cause)
+      case Failure(cause) => // Unknown cause, but most likely from applying Transaction
+        try ec.reportFailure(cause) finally {
+          ensureInactive(stream, unapplied, cause)
+        }
     }
   }
 
