@@ -8,6 +8,7 @@ import scuff.concurrent._
 import scala.Right
 import scuff.Codec
 import scala.reflect.{ classTag, ClassTag }
+import scala.annotation.tailrec
 
 trait StreamProcessStore[K, S] extends SnapshotStore[K, S] {
 
@@ -130,17 +131,35 @@ private[delta] object StreamProcessStore {
 
 }
 
-trait NonBlockingRecursiveUpsert[K, V] {
+sealed trait RecursiveUpsert[K, V] {
   store: StreamProcessStore[K, V] =>
-
+  /** Retry limit. `0` means no retry (generally not recommneded). */
+  protected def upsertRetryLimit: Int = 10
   protected type ConflictingSnapshot = Snapshot
   protected type ContentUpdated = Boolean
 
+  protected def retriesExhausted(key: K, curr: Snapshot, upd: Snapshot): Nothing = {
+    val retryLimit = upsertRetryLimit min 0
+    val retryMsg = retryLimit match {
+      case 0 => "no retries attempted."
+      case 1 => "after 1 retry."
+      case _ => s"after $retryLimit retries."
+    }
+    throw new IllegalStateException(
+      s"Unable to update existing snapshot for key $key, from rev:${curr.revision}/tick:${curr.tick} to rev:${upd.revision}/tick:${upd.tick}, $retryMsg")
+  }
+}
+
+trait NonBlockingRecursiveUpsert[K, V]
+  extends RecursiveUpsert[K, V] {
+  store: StreamProcessStore[K, V] =>
+
   /** Update and return updated snapshot, if any. */
-  protected def upsertRecursive[R](
+  final protected def upsertRecursive[R](
       key: K, existing: Option[Snapshot],
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
-      writeIfExpected: (K, Option[Snapshot], Snapshot) => Future[Either[ConflictingSnapshot, ContentUpdated]])(
+      writeIfExpected: (K, Option[Snapshot], Snapshot) => Future[Either[ConflictingSnapshot, ContentUpdated]],
+      retries: Int)(
       implicit
       updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
     updateThunk(existing).flatMap {
@@ -150,8 +169,12 @@ trait NonBlockingRecursiveUpsert[K, V] {
         else {
           val Some(newSnapshot) = result // ! isEmpty
           writeIfExpected(key, existing, newSnapshot) flatMap {
-            case Right(contentUpdated) => Future successful Some(SnapshotUpdate( /*key,*/ newSnapshot, contentUpdated)) -> payload
-            case Left(conflict) => upsertRecursive(key, Some(conflict), updateThunk, writeIfExpected)
+            case Right(contentUpdated) =>
+              Future successful Some(SnapshotUpdate(newSnapshot, contentUpdated)) -> payload
+            case Left(conflict) =>
+              if (retries > 0) {
+                upsertRecursive(key, Some(conflict), updateThunk, writeIfExpected, retries - 1)
+              } else retriesExhausted(key, conflict, newSnapshot)
           }
         }
     }
@@ -159,11 +182,10 @@ trait NonBlockingRecursiveUpsert[K, V] {
 
 }
 
-trait BlockingRecursiveUpsert[K, V] {
+trait BlockingRecursiveUpsert[K, V]
+  extends RecursiveUpsert[K, V] {
   store: StreamProcessStore[K, V] =>
 
-  protected type ConflictingSnapshot = Snapshot
-  protected type ContentUpdated = Boolean
   protected def blockingCtx: ExecutionContext
 
   /**
@@ -174,11 +196,13 @@ trait BlockingRecursiveUpsert[K, V] {
    * this method, by blocking and awaiting
    * `updateThunk`.
    */
-  protected def upsertRecursive[R](
+  @tailrec
+  final protected def upsertRecursive[R](
       key: K, existing: Option[Snapshot],
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
       updateThunkTimeout: FiniteDuration,
-      writeIfExpected: (K, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated])(
+      writeIfExpected: (K, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated],
+      retries: Int)(
       implicit
       updateContext: ExecutionContext): (Option[SnapshotUpdate], R) = {
 
@@ -189,8 +213,14 @@ trait BlockingRecursiveUpsert[K, V] {
         else {
           val Some(newSnapshot) = result // ! isEmpty
           writeIfExpected(key, existing, newSnapshot) match {
-            case Right(contentUpdated) => Some(SnapshotUpdate( /*key,*/ newSnapshot, contentUpdated)) -> payload
-            case Left(conflict) => upsertRecursive(key, Some(conflict), updateThunk, updateThunkTimeout, writeIfExpected)
+            case Right(contentUpdated) => Some(SnapshotUpdate(newSnapshot, contentUpdated)) -> payload
+            case Left(conflict) =>
+              if (retries > 0) {
+                upsertRecursive(
+                  key, Some(conflict),
+                  updateThunk, updateThunkTimeout,
+                  writeIfExpected, retries - 1)
+              } else retriesExhausted(key, conflict, newSnapshot)
           }
         }
     }
@@ -239,7 +269,7 @@ trait NonBlockingCASWrites[K, V] extends NonBlockingRecursiveUpsert[K, V] {
         }
       }
 
-    read(key).flatMap(upsertRecursive(key, _, updateThunk, writeIfExpected))
+    read(key).flatMap(upsertRecursive(key, _, updateThunk, writeIfExpected, upsertRetryLimit))
   }
 
 }
@@ -276,7 +306,7 @@ trait BlockingCASWrites[K, V, Conn] extends BlockingRecursiveUpsert[K, V] {
       updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
 
       // Write snapshot, if current expectation holds.
-      def writeIfExpected(conn: Conn)(
+      def tryWriteSnapshot(conn: Conn)(
           key: K, expected: Option[Snapshot], snapshot: Snapshot)
           : Either[ConflictingSnapshot, ContentUpdated] = {
         val contentUpdated = !expected.exists(_ contentEquals snapshot)
@@ -295,7 +325,7 @@ trait BlockingCASWrites[K, V, Conn] extends BlockingRecursiveUpsert[K, V] {
     Future {
       readForUpdate(key) {
         case (conn, existing) =>
-          upsertRecursive(key, existing, updateThunk, updateThunkTimeout, writeIfExpected(conn))
+          upsertRecursive(key, existing, updateThunk, updateThunkTimeout, tryWriteSnapshot(conn), upsertRetryLimit)
       }
     }(blockingCtx) // <- MUST run on the blocking context, otherwise will dead-lock
   }
