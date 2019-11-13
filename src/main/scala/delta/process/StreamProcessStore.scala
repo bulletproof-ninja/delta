@@ -54,17 +54,17 @@ trait SideEffects[K, S]
   protected def doSideEffect(state: S): Future[S]
 
   @inline
-  private def replaceContent(snapshot: Snapshot, newContent: S): Snapshot = 
+  private def replaceContent(snapshot: Snapshot, newContent: S): Snapshot =
     if (snapshot contentEquals newContent) snapshot
     else new Snapshot(newContent, snapshot.revision, snapshot.tick)
-  
+
   final abstract override def upsert[R](key: K)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
       updateContext: ExecutionContext): Future[(Option[SnapshotUpdate], R)] = {
     super.upsert(key) { optSnapshot =>
       updateThunk(optSnapshot).flatMap {
-        case (Some(snapshot), r) => 
+        case (Some(snapshot), r) =>
           doSideEffect(snapshot.content)
             .map(state => Some(replaceContent(snapshot, state)) -> r)(Threads.PiggyBack)
         case t =>
@@ -86,8 +86,8 @@ trait SideEffects[K, S]
       implicit def ec = Threads.PiggyBack
     Future.sequence(futureWrites).map(_ => ())
   }
-  
-  
+
+
 }
 
 private[delta] object StreamProcessStore {

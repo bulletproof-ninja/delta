@@ -25,7 +25,7 @@ object ConcurrentMapStore {
     temp: java.util.concurrent.ConcurrentMap[K, ConcurrentMapStore.Value[V]],
     readFallback: K => Future[Option[delta.Snapshot[V]]]) =
       new ConcurrentMapStore(temp.asScala, maxTick.map(_.longValue), readFallback)
-    
+
   def apply[K, V](
     temp: collection.concurrent.Map[K, ConcurrentMapStore.Value[V]],
     tickWatermark: Option[Long])(
@@ -47,15 +47,15 @@ object ConcurrentMapStore {
  */
 final class ConcurrentMapStore[K, V] private (
   cmap: collection.concurrent.Map[K, ConcurrentMapStore.Value[V]],
-  val tickWatermark: Option[Long], 
+  val tickWatermark: Option[Long],
   readFallback: K => Future[Option[delta.Snapshot[V]]])
   extends StreamProcessStore[K, V] with NonBlockingCASWrites[K, V] {
 
   import ConcurrentMapStore.Value
 
   private[this] val unknownKeys = new collection.concurrent.TrieMap[K, Unit]
-  
-  def modifiedSnapshots: Iterator[(K, Snapshot)] = 
+
+  def modifiedSnapshots: Iterator[(K, Snapshot)] =
     cmap.iterator
       .collect {
         case (key, Value(snapshot, true)) => key -> snapshot
@@ -98,15 +98,15 @@ final class ConcurrentMapStore[K, V] private (
     case None =>
       if (unknownKeys contains key) StreamProcessStore.NoneFuture
       else readFallback(key).map {
-  
+
         case fallbackSnapshot @ Some(snapshot) =>
           cmap.putIfAbsent(key, Value(snapshot, modified = false))
             .map(_.snapshot) orElse fallbackSnapshot
-            
+
         case None =>
           unknownKeys.update(key, ())
           None
-          
+
       }(Threads.PiggyBack)
   }
 
@@ -153,9 +153,9 @@ final class ConcurrentMapStore[K, V] private (
       case Some(oldValue) if (oldValue.snapshot eq oldSnapshot) &&
         cmap.replace(key, oldValue, Value(newSnapshot)) =>
         StreamProcessStore.NoneFuture
-      case Some(nonMatching) => 
+      case Some(nonMatching) =>
         Future successful Some(nonMatching.snapshot)
-      case None => 
+      case None =>
         Future failed new IllegalStateException(s"Cannot refresh non-existent key: $key")
     }
   }
