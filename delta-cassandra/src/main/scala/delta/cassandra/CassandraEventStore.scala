@@ -200,7 +200,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     (types, typeVers, data)
   }
 
-  private val CurrRevision = {
+  private lazy val CurrRevision = {
     val ps = session.prepare(s"""
       SELECT revision
       FROM $TableName
@@ -213,7 +213,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     execute(CurrRevision(streamId))(rs => Option(rs.one).map(_.getInt(0)))
   }
 
-  private val GetLastTick = {
+  private lazy val GetLastTick = {
     val ps = session.prepare(s"SELECT MAX(tick) FROM $TableName")
     () => ps.bind()
   }
@@ -222,14 +222,14 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       Option(rs.one).map(_.getLong(0))
     }
 
-  private val ReplayEverything: () => BoundStatement = {
+  private lazy val ReplayEverything: () => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $txnColumns
       FROM $TableName
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     () => ps.bind()
   }
-  private val ReplayEverythingSince: Long => BoundStatement = {
+  private lazy val ReplayEverythingSince: Long => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $txnColumns
       FROM $TableName
@@ -307,7 +307,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
 
-  private val ReplayStream: ID => BoundStatement = {
+  private lazy val ReplayStream: ID => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID) => ps.bind(ct[ID].writeAs(id))
@@ -317,7 +317,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     queryAsync(Some(stream), callback, stm)
   }
 
-  private val ReplayStreamFrom: (ID, Int) => BoundStatement = {
+  private lazy val ReplayStreamFrom: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision >= ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, fromRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
@@ -331,7 +331,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
 
-  private val ReplayStreamTo: (ID, Int) => BoundStatement = {
+  private lazy val ReplayStreamTo: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision <= ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, toRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
@@ -341,7 +341,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     queryAsync(Some(stream), callback, stm)
   }
 
-  private val ReplayStreamRange: (ID, Range) => BoundStatement = {
+  private lazy val ReplayStreamRange: (ID, Range) => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $streamColumns
       FROM $TableName
@@ -369,7 +369,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
 
-  private val ReplayStreamRevision: (ID, Int) => BoundStatement = {
+  private lazy val ReplayStreamRevision: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"""
       SELECT $streamColumns
       FROM $TableName
@@ -382,7 +382,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     queryAsync(Some(stream), callback, stm)
   }
 
-  private val RecordFirstRevision = {
+  private lazy val RecordFirstRevision = {
     val ps = session.prepare(s"""
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, channel, revision)
@@ -397,7 +397,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
         channel)
     }
   }
-  private val RecordLaterRevision = {
+  private lazy val RecordLaterRevision = {
     val ps = session.prepare(s"""
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, revision)
