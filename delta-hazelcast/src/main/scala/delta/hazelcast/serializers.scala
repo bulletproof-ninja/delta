@@ -10,6 +10,7 @@ import delta.hazelcast.Updated
 import scala.reflect.ClassTag
 import delta.hazelcast.EntryState
 import scala.collection.immutable.TreeMap
+import delta.process.SnapshotUpdate
 
 trait TransactionSerializer
   extends StreamSerializer[delta.Transaction[Any, Any]] {
@@ -53,6 +54,19 @@ trait SnapshotSerializer
       revision = inp.readInt,
       tick = inp.readLong)
   }
+}
+
+trait SnapshotUpdateSerializer
+  extends StreamSerializer[SnapshotUpdate[Any]] {
+
+  def write(out: ObjectDataOutput, s: SnapshotUpdate[Any]): Unit = {
+    out writeObject s.snapshot
+    out writeBoolean s.contentUpdated
+  }
+  def read(inp: ObjectDataInput) =
+    new SnapshotUpdate(
+      snapshot = inp.readObject[Snapshot[Any]],
+      contentUpdated = inp.readBoolean)
 }
 
 trait DistributedMonotonicProcessorSerializer
