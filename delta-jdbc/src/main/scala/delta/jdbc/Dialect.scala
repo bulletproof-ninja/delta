@@ -37,14 +37,23 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
 
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
-  protected def schemaPrefix = schema.map(_ + ".") getOrElse ""
-  protected def streamTable = s"${schemaPrefix}delta_stream"
-  protected def transactionTable = s"${schemaPrefix}delta_transaction"
-  protected def eventTable = s"${schemaPrefix}delta_event"
-  protected def metadataTable = s"${schemaPrefix}delta_metadata"
-  protected def channelIndex = s"${streamTable.replace(".", "_")}_channel_idx"
-  protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
-  protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
+  private[this] val _schemaPrefix = schema.map(_ + ".") getOrElse ""
+  protected def schemaPrefix = _schemaPrefix
+  private[this] val _streamTable = s"${schemaPrefix}delta_stream"
+  protected def streamTable = _streamTable
+  private[this] val _transactionTable = s"${schemaPrefix}delta_transaction"
+  protected def transactionTable = _transactionTable
+  private[this] val _eventTable = s"${schemaPrefix}delta_event"
+  protected def eventTable = _eventTable
+  private[this] val _metadataTable = s"${schemaPrefix}delta_metadata"
+  protected def metadataTable = _metadataTable
+  private[this] val _channelIndex = s"${streamTable.replace(".", "_")}_channel_idx"
+  protected def channelIndex = _channelIndex
+  private[this] val _eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
+  protected def eventNameIndex = _eventNameIndex
+  private[this] val _tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
+  protected def tickIndex = _tickIndex
+
   protected def byteDataType = "TINYINT"
 
   protected def schemaDDL(name: String): String = s"CREATE SCHEMA IF NOT EXISTS $name"
@@ -213,10 +222,10 @@ INSERT INTO $metadataTable
     "e.event_idx", "e.event_name", "e.event_version", "e.event_data",
     "m.metadata_key", "m.metadata_val")
   private val TxnColumnsPrefixed = "s.stream_id" +: StreamColumnsPrefixed
-  private def StreamColumnsSelect: String = StreamColumnsPrefixed.map { colName =>
+  private val StreamColumnsSelect: String = StreamColumnsPrefixed.map { colName =>
     s"$colName AS ${colName.substring(2)}"
   }.mkString(",")
-  private def TxnColumnsSelect: String = TxnColumnsPrefixed.map { colName =>
+  private val TxnColumnsSelect: String = TxnColumnsPrefixed.map { colName =>
     s"$colName AS ${colName.substring(2)}"
   }.mkString(",")
   private val StreamColumnsIdx = Columns(StreamColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
@@ -274,8 +283,8 @@ FROM $transactionTable
     }
   }
 
-  protected def FromJoin = s"""
-FROM $streamTable s
+  protected val FromJoin =
+s"""FROM $streamTable s
 JOIN $transactionTable t
   ON t.stream_id = s.stream_id
 JOIN $eventTable e
@@ -283,8 +292,8 @@ JOIN $eventTable e
   AND e.revision = t.revision
 LEFT OUTER JOIN $metadataTable m
   ON m.stream_id = t.stream_id
-  AND m.revision = t.revision
-"""
+  AND m.revision = t.revision"""
+
   protected def makeTxnQuery(WHERE: String = ""): String = s"""
 SELECT $TxnColumnsSelect
 $FromJoin
