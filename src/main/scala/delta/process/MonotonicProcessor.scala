@@ -116,10 +116,17 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
   private[this] val streamStatus = new TrieMap[ID, StreamStatus]
 
   private[process] case class IncompleteStream(
-      id: ID, stillActive: Boolean, expectedRevision: Revision, unappliedRevisions: Range,
+      id: ID, stillActive: Boolean, expectedRevision: Revision, unappliedRevisions: Option[Range],
       status: Future[Unit])
   protected def incompleteStreams: Iterable[IncompleteStream] = streamStatus.map {
-    case (id, status) => IncompleteStream(id, status.isActive, status.revision + 1, status.unapplied.head._1 to status.unapplied.last._1, status.promise.future)
+    case (id, status) =>
+      val unappliedRevisions = for {
+        (first, _) <- status.unapplied.headOption
+        (last, _) <- status.unapplied.lastOption
+      } yield {
+        first to last
+      }
+      IncompleteStream(id, status.isActive, status.revision + 1, unappliedRevisions, status.promise.future)
   }
 
   protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit
@@ -225,11 +232,16 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, BR](
             .getOrElse(timeout)
           val firstIncomplete = incompletes.headOption.map { incomplete =>
             val unapplied = incomplete.unappliedRevisions
-            val missing = incomplete.expectedRevision until unapplied.start
+            val unappliedStart = unapplied.map(_.start)
+            val missing = incomplete.expectedRevision until unappliedStart.getOrElse(incomplete.expectedRevision)
             val textMissing = if (incomplete.status.failed.isCompleted) {
               s"nothing, but failed processing. See stack trace below."
             } else if (missing.isEmpty) {
-              s"... nothing? Expecting revision ${incomplete.expectedRevision}, but have revisions ${unapplied.start}-${unapplied.last} unapplied, yet inactive."
+              val unappliedMsg = unapplied match {
+                case Some(unapplied) => s"revisions ${unapplied.start}-${unapplied.last} unapplied"
+                case None => s"all revisions applied"
+              }
+              s"... nothing? Expecting revision ${incomplete.expectedRevision}, but have $unappliedMsg, yet inactive."
             } else if (missing.start == missing.last) {
               s"revision ${missing.start}"
             } else {
