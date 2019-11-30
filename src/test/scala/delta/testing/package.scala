@@ -17,12 +17,4 @@ package object testing {
 
   implicit def unit2fut(unit: Unit) = Future successful unit
 
-  implicit class JsonString(private val json: String) extends AnyVal {
-    def field(name: String): String = {
-      val m = s""""$name"\\s*:\\s*([^,}]+)""".r.findFirstMatchIn(json).get
-      val value = m.group(1).trim
-      if (value.startsWith("\"") && value.endsWith("\"")) value.substring(1, value.length-1)
-      else value
-    }
-  }
 }

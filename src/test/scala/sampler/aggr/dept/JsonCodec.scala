@@ -2,7 +2,7 @@ package sampler.aggr.dept
 
 import sampler._
 import delta.util.ReflectiveDecoder
-import delta.testing._
+import scuff.json._, JsVal._
 
 trait JsonCodec
     extends DeptEventHandler {
@@ -10,34 +10,28 @@ trait JsonCodec
 
   type Return = JSON
 
-  def on(evt: DeptCreated): Return = s"""{
-    "name": "${evt.name}"
-  }"""
+  def on(evt: DeptCreated): Return = JsStr(evt.name).toJson
   def onDeptCreated(enc: Encoded): DeptCreated = enc.version match {
-    case 1 => new DeptCreated(name = enc.data.field("name"))
+    case 1 => new DeptCreated(name = JsVal.parse(enc.data).asStr)
   }
 
-  def on(evt: EmployeeAdded): Return = s"""{
-    "employee": ${evt.id.int}
-  }"""
+  def on(evt: EmployeeAdded): Return = evt.id.int.toString
   def onEmployeeAdded(enc: Encoded): EmployeeAdded = enc.version match {
-    case 1 => new EmployeeAdded(id = new EmpId(enc.data.field("employee").toInt))
+    case 1 => new EmployeeAdded(id = new EmpId(enc.data.toInt))
   }
 
-  def on(evt: EmployeeRemoved): Return = s"""{
-    "employee": ${evt.id.int}
-  }"""
+  def on(evt: EmployeeRemoved): Return = evt.id.int.toString
   def onEmployeeRemoved(enc: Encoded): EmployeeRemoved = enc.version match {
-    case 1 => new EmployeeRemoved(id = new EmpId(enc.data.field("employee").toInt))
+    case 1 => new EmployeeRemoved(id = new EmpId(enc.data.toInt))
   }
 
-  def on(evt: NameChanged): Return = s"""{
-    "name": "${evt.newName}",
-    "reason": "${evt.reason}"
-  }"""
-  def onNameChanged(enc: Encoded): NameChanged = enc.version match {
-    case 1 => new archive.NameChanged_v1(newName = enc.data.field("name")).upgrade()
-    case 2 => new NameChanged(newName = enc.data.field("name"), reason = enc.data.field("reason"))
+  def on(evt: NameChanged): Return = JsVal(evt).toJson
+  def onNameChanged(enc: Encoded): NameChanged = {
+    val jsObj = JsVal.parse(enc.data).asObj
+    enc.version match {
+      case 1 => new archive.NameChanged_v1(newName = jsObj.newName.asStr).upgrade()
+      case 2 => new NameChanged(newName = jsObj.newName.asStr, reason = jsObj.reason.asStr)
+    }
   }
 
 }

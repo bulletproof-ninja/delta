@@ -11,6 +11,7 @@ import delta._
 import delta.testing._
 import delta.Transaction.Channel
 import scuff.Codec
+import scuff.json._, JsVal._
 
 class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStoreRepositoryTest {
 
@@ -28,22 +29,19 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
 
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
-    def on(evt: AggrCreated) = s"""{"status":"${evt.status}"}"""
-    val FindStatus = """\{"status":"(\w+)"\}""".r
+    def on(evt: AggrCreated) = JsStr(evt.status).toJson
     def aggrCreated(enc: Encoded): AggrCreated = enc.version match {
-      case 1 => FindStatus.findFirstMatchIn(enc.data).map(m => AggrCreated(m group 1)).getOrElse(throw new IllegalArgumentException(enc.data))
+      case 1 => AggrCreated((JsVal parse enc.data).asStr)
     }
 
-    def on(evt: NewNumberWasAdded) = s"""{"number":${evt.n}}"""
-    val FindNumber = """\{"number":(\d+)\}""".r
+    def on(evt: NewNumberWasAdded) = evt.n.toString
     def newNumberWasAdded(enc: Encoded): NewNumberWasAdded = enc.version match {
-      case 1 => FindNumber.findFirstMatchIn(enc.data).map(m => NewNumberWasAdded(m.group(1).toInt)).getOrElse(throw new IllegalArgumentException(enc.data))
+      case 1 => NewNumberWasAdded(enc.data.toInt)
     }
 
-    def on(evt: StatusChanged) = s"""{"newStatus":"${evt.newStatus}"}"""
-    val FindNewStatus = """\{"newStatus":"(\w*)"\}""".r
+    def on(evt: StatusChanged) = JsStr(evt.newStatus).toJson
     def statusChanged(enc: Encoded): StatusChanged = enc.version match {
-      case 1 => FindNewStatus.findFirstMatchIn(enc.data).map(m => StatusChanged(m group 1)).getOrElse(throw new IllegalArgumentException(enc.data))
+      case 1 => StatusChanged((JsVal parse enc.data).asStr)
     }
   }
 
@@ -64,14 +62,14 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   def setup(): Unit = {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
-    es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor, 
-      AggrEventFormat, RandomDelayExecutionContext)(_ => ticker) 
+    es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor,
+      AggrEventFormat, RandomDelayExecutionContext)(_ => ticker)
       with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"txn:$ch")
       val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txnChannels = Set(Channel("any"))
       val txnCodec = Codec.noop[TXN]
-    }
+    }.ensureTable()
     repo = new EntityRepository(TheOneAggr, ec)(es)
   }
   private def deleteAll(session: Session): Unit = {

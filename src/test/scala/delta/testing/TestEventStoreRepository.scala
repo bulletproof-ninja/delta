@@ -18,6 +18,7 @@ import delta.ddd._
 import delta.util._
 import scala.{ SerialVersionUID => version }
 import delta.process.ConcurrentMapStore
+import scuff.json.JsVal
 
 trait AggrEventHandler {
   type Return
@@ -149,7 +150,7 @@ abstract class AbstractEventStoreRepositoryTest {
                 repo.update("Foo", Some(0)) {
                   case (foo, rev) =>
                     assertEquals(1, rev)
-                    assertTrue(foo.mergeEvents.contains(NewNumberWasAdded(44)))
+                    assertTrue(foo.mergeEvents contains NewNumberWasAdded(44))
                     assertEquals("New", foo.aggr.status)
                     foo(AddNewNumber(44))
                 }.onComplete {
@@ -336,16 +337,16 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
     def getName(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
-      case AggrCreated(status) => s""" { "status": "$status" } """
-      case NewNumberWasAdded(num) => s""" { "num": $num } """
-      case StatusChanged(newStatus) => s""" { "status": "$newStatus" } """
+      case AggrCreated(status) => s""" "$status" """
+      case NewNumberWasAdded(num) => num.toString
+      case StatusChanged(newStatus) => s""" "$newStatus" """
     }
     def decode(encoded: Encoded): AggrEvent = {
       val json = encoded.data
       encoded.name match {
-        case "AggrCreated" => AggrCreated(status = json.field("status"))
-        case "NewNumberWasAdded" => NewNumberWasAdded(n = json.field("num").toInt)
-        case "StatusChanged" => StatusChanged(newStatus = json.field("status"))
+        case "AggrCreated" => AggrCreated(status = (JsVal parse json).asStr)
+        case "NewNumberWasAdded" => NewNumberWasAdded(n = json.toInt)
+        case "StatusChanged" => StatusChanged(newStatus = (JsVal parse json).asStr)
       }
     }
   }
@@ -354,7 +355,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
   def setup(): Unit = {
 
     es = new TransientEventStore[String, AggrEvent, String](
-          RandomDelayExecutionContext, EvtFmt)(_ => ticker) 
+          RandomDelayExecutionContext, EvtFmt)(_ => ticker)
         with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
@@ -387,16 +388,17 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
-    def on(evt: AggrCreated): Return = s""" { "status": "${evt.status}" } """
+    def on(evt: AggrCreated): Return = s""" "${evt.status}" """
     def `testing.AggrCreated`(encoded: Encoded): AggrCreated =
-      new AggrCreated(status = encoded.data.field("status"))
+      new AggrCreated(status = JsVal.parse(encoded.data).asStr)
 
-    def on(evt: NewNumberWasAdded): Return = s""" { "num": ${evt.n} } """
+    def on(evt: NewNumberWasAdded): Return = evt.n.toString
     def `testing.NewNumberWasAdded`(encoded: Encoded): NewNumberWasAdded =
-      new NewNumberWasAdded(n = encoded.data.field("num").toInt)
+      new NewNumberWasAdded(n = encoded.data.toInt)
 
-    def on(evt: StatusChanged): Return = s""" { "status": "${evt.newStatus}" } """
-    def `testing.StatusChanged`(encoded: Encoded): StatusChanged = new StatusChanged(newStatus = encoded.data.field("status"))
+    def on(evt: StatusChanged): Return = s""" "${evt.newStatus}" """
+    def `testing.StatusChanged`(encoded: Encoded): StatusChanged =
+      new StatusChanged(newStatus = JsVal.parse(encoded.data).asStr)
   }
 
   case class Metrics(id: String, duration: Long, timestamp: Long)
@@ -406,7 +408,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   def setup(): Unit = {
     metrics = Nil
     es = new TransientEventStore[String, AggrEvent, String](
-           RandomDelayExecutionContext, EvtFmt)(_ => ticker) 
+           RandomDelayExecutionContext, EvtFmt)(_ => ticker)
          with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)
