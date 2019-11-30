@@ -14,6 +14,12 @@ object IndexTables {
   }
 }
 
+/**
+ * Enable indexed lookup for many-to-one associations,
+ * by creating one or more index tables.
+ * NOTE: For simple one-to-one associations,
+ * use [[delta.jdbc.JdbcStreamProcessStore.Index]]
+ */
 trait IndexTables[PK, S]
   extends JdbcStreamProcessStore[PK, S] {
 
@@ -237,51 +243,6 @@ $WHERE i.${table.indexColumn} = ?
         val stream = streamColumn.colType.readFrom(rs, 4)
         stream -> snapshot
       }
-  //    val columnMatches = (indexColumnMatch :: more.toList).map(e => e._1.toLowerCase -> e._2).toMap
-  //    val useIndexTables = columnMatches.toList.flatMap {
-  //      case (columnName, matchValue) =>
-  //        indexTablesByColumn.get(columnName).map(t => t -> matchValue)
-  //    }
-  //    if (useIndexTables.isEmpty) {
-  //      // No use of index tables, just delegate to super
-  //      store.querySnapshot(indexColumnMatch, more: _*)
-  //    } else {
-  //      // Use index table(s); ensure AND semantics if also using index columns
-  //      val useIndexColumns = (columnMatches -- useIndexTables.map(_._1.indexColumn.toLowerCase)).toList
-  //      val indexColumnsResult: Future[PK => Boolean] =
-  //        if (useIndexColumns.isEmpty) Future successful Function.const(true) _
-  //        else store.queryTick(useIndexColumns.head, useIndexColumns.tail: _*).map(_.keySet)
-  //      val indexTablesResult: List[Future[Map[PK, Snapshot]]] = useIndexTables.map {
-  //        case (table, matchValue) => futureQuery { conn =>
-  //          val ps = conn.prepareStatement(selectSnapshotSQL(table))
-  //          try {
-  //            ps.setValue(1, matchValue)(table.colType)
-  //            val rs = ps.executeQuery()
-  //            var map = Map.empty[PK, Snapshot]
-  //            try {
-  //              while (rs.next) {
-  //                val snapshot = store.getSnapshot(rs)
-  //                val stream = streamColumn.colType.readFrom(rs, 4)
-  //                map = map.updated(stream, snapshot)
-  //              }
-  //              map
-  //            } finally {
-  //              Try(rs.close)
-  //            }
-  //          } finally {
-  //            Try(ps.close)
-  //          }
-  //        }
-  //      }
-  //      for {
-  //        list <- Future.sequence(indexTablesResult)
-  //        retainKeys <- indexColumnsResult
-  //      } yield {
-  //        list.reduce(_ ++ _)
-  //          .filterKeys(retainKeys)
-  //      }
-  //    }
-  //  }
 
   override protected def queryTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] =
     query(

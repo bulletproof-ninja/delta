@@ -77,11 +77,11 @@ trait EventSourceConsumer[ID, EVT] {
   protected def tickWatermark: Option[Long]
 
   /**
-   * Start consumption of transactions, either from beginning
-   * of time, or from the tick watermark.
+   * Start consumption of transactions, either from the
+   * very beginning or from the tick watermark.
    * @param eventSource The [[EventSource]] to process.
    * @return A future subscription to live events.
-   * This will be available when historic processing is done,
+   * This will be available when replay processing is done,
    * thus state is considered current. Or `None` if publishiing
    * is not supported by event source.
    */

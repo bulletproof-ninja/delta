@@ -223,7 +223,7 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, BR](
       case timeout: TimeoutException =>
         val incompletes = incompleteStreams
         if (incompletes.exists(_.stillActive)) { // This is inherently racy, but if we catch an active stream, we can provide a more accurate error message.
-          throw new IllegalStateException(s"Stream processing still active. Timeout of $completionTimeout is possibly too tight", timeout)
+          throw new IllegalStateException(s"Stream processing still active. Timeout of $completionTimeout is too tight", timeout)
         } else {
           val cause = incompletes
             .map(_.status.failed)
@@ -253,8 +253,13 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, BR](
           val errMsg = s"""Replay processing timed out after $completionTimeout, due to incomplete stream processing of ids: $incompleteIds
 $firstIncomplete
 Possible causes:
-    - Insufficient tick skew window. Resolve by increasing max tick skew.
-    - Incomplete process store content, i.e. partial deletion has occurred. For side-effecting processes, resolve by restoring from backup. For pure processes, either resolve by restoring from backup, or restart processing from scratch."
+    - Insufficient tick window. Resolve by increasing max tick skew.
+    - Incomplete process store content; possible causes:
+        - An earlier attempt at replay persistence was interrupted or killed
+        - Replay persistence actively running on the same data set
+        - Partial/incomplete deletion of entries.
+      For side-effecting processes, resolve by restoring from backup.
+      For pure processes, either resolve by restoring from backup, or restart processing from scratch.
 """
           throw new IllegalStateException(errMsg, cause)
         }
