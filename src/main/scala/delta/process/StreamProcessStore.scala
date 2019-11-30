@@ -139,14 +139,14 @@ sealed trait RecursiveUpsert[K, V] {
   protected type ContentUpdated = Boolean
 
   protected def retriesExhausted(key: K, curr: Snapshot, upd: Snapshot): Nothing = {
-    val retryLimit = upsertRetryLimit min 0
+    val retryLimit = upsertRetryLimit max 0
     val retryMsg = retryLimit match {
       case 0 => "no retries attempted."
       case 1 => "after 1 retry."
       case _ => s"after $retryLimit retries."
     }
     throw new IllegalStateException(
-      s"Unable to update existing snapshot for key $key, from rev:${curr.revision}/tick:${curr.tick} to rev:${upd.revision}/tick:${upd.tick}, $retryMsg")
+      s"Failed to update existing snapshot for key $key, from rev:${curr.revision}/tick:${curr.tick} to rev:${upd.revision}/tick:${upd.tick}, $retryMsg")
   }
 }
 
