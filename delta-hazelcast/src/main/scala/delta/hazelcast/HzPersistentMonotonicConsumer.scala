@@ -41,7 +41,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
   }
 
   import delta.process.ConcurrentMapStore.Value
-  
+
   /**
     * Instantiate new concurrent map used to hold state during
     * replay processing. This can be overridden to provide a
@@ -71,7 +71,6 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     * It is highly recommended to return an instance of
     * [[delta.util.MonotonicReplayProcessor]] here.
     */
-
   protected def replayProcessor(es: EventSource) =
     new HzMonotonicReplayProcessor[ID, EVT, S](
       tickWatermark,

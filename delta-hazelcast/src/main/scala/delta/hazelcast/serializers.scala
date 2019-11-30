@@ -4,11 +4,8 @@ import java.io.{ ObjectInputStream, ObjectOutputStream }
 import com.hazelcast.nio.{ ObjectDataInput, ObjectDataOutput }
 import com.hazelcast.nio.serialization.StreamSerializer
 import delta.{ Snapshot, Transaction, TransactionProjector }
-import delta.hazelcast.IgnoredDuplicate
-import delta.hazelcast.MissingRevisions
-import delta.hazelcast.Updated
+import delta.hazelcast._
 import scala.reflect.ClassTag
-import delta.hazelcast.EntryState
 import scala.collection.immutable.TreeMap
 import delta.process.SnapshotUpdate
 
@@ -136,16 +133,43 @@ trait EntryUpdateResultSerializer
 }
 
 trait EntryStateSerializer
-  extends StreamSerializer[EntryState[Any, Any]] {
-    def write(out: ObjectDataOutput, es: EntryState[Any, Any]) = {
-      out writeObject es.snapshot
-      out writeBoolean es.contentUpdated
-      out writeObject es.unapplied
-    }
-    def read(inp: ObjectDataInput): EntryState[Any, Any] = {
-      val snapshot = inp.readObject[Snapshot[Any]]
-      val contentUpdated= inp.readBoolean()
-      val unapplied = inp.readObject[TreeMap[Int, Transaction[Any, Any]]]
-      new EntryState[Any, Any](snapshot, contentUpdated, unapplied)
+    extends StreamSerializer[EntryState[Any, Any]] {
+  def write(out: ObjectDataOutput, es: EntryState[Any, Any]) = {
+    out writeObject es.snapshot
+    out writeBoolean es.contentUpdated
+    out writeObject es.unapplied
+  }
+  def read(inp: ObjectDataInput): EntryState[Any, Any] = {
+    val snapshot = inp.readObject[Snapshot[Any]]
+    val contentUpdated= inp.readBoolean()
+    val unapplied = inp.readObject[TreeMap[Int, Transaction[Any, Any]]]
+    new EntryState[Any, Any](snapshot, contentUpdated, unapplied)
+  }
+}
+
+trait StreamProcessStoreUpdaterSerializer
+    extends StreamSerializer[IMapStreamProcessStore.Updater[Any, Any]] {
+  type Updater = IMapStreamProcessStore.Updater[Any, Any]
+  def write(out: ObjectDataOutput, updater: Updater): Unit = updater match {
+    case IMapStreamProcessStore.WriteReplacement(rev, tick, snapshot) =>
+      out writeByte 0
+      out writeInt rev
+      out writeLong tick
+      out writeObject snapshot
+    case IMapStreamProcessStore.WriteIfAbsent(snapshot) =>
+      out writeByte 1
+      out writeObject snapshot
+  }
+  def read(inp: ObjectDataInput): Updater = {
+    inp.readByte match {
+      case 0 =>
+        val rev = inp.readInt
+        val tick = inp.readLong
+        val snapshot = inp.readObject[Snapshot[Any]]
+        new IMapStreamProcessStore.WriteReplacement[Any, Any](rev, tick, snapshot)
+      case 1 =>
+        val snapshot = inp.readObject[Snapshot[Any]]
+        new IMapStreamProcessStore.WriteIfAbsent[Any, Any](snapshot)
     }
   }
+}
