@@ -25,10 +25,10 @@ trait SubscriptionSupport[ID, S] {
    * @param timeout Read timeout. This timeout is only used if `minRevision` doesn't match
    * @return Snapshot >= `minRevision` or [[delta.read.ReadRequestFailure]] cannot fullfil
    */
-  def readMinRevision(id: ID, minRevision: Int, timeout: FiniteDuration)(
+  def read(id: ID, minRevision: Int, timeout: FiniteDuration)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
-    readOrSubscribe(id, Right(minRevision), timeout)
+    readOrSubscribe(id, timeout, minRevision = minRevision)
 
   /**
    * Read snapshot, ensuring it's at least the given tick,
@@ -38,10 +38,10 @@ trait SubscriptionSupport[ID, S] {
    * @param timeout Lookup timeout. This timeout is only used if `afterTick` doesn't match
    * @return Snapshot >= `minTick` or [[delta.read.ReadRequestFailure]] cannot fullfil
    */
-  def readMinTick(id: ID, minTick: Long, timeout: FiniteDuration)(
+  def read(id: ID, minTick: Long, timeout: FiniteDuration)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
-    readOrSubscribe(id, Left(minTick), timeout)
+    readOrSubscribe(id, timeout, minTick = minTick)
 
   private final class Callback(id: ID, snapshot: Either[Snapshot, SnapshotUpdate], callback: Either[Snapshot, SnapshotUpdate] => Unit)
     extends Runnable {
@@ -97,41 +97,41 @@ trait SubscriptionSupport[ID, S] {
     }(Threads.PiggyBack)
   }
 
-  protected def readAgain(id: ID, tickOrRevision: Either[Long, Int])(
+  protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 
-  private def readOrSubscribe(id: ID, tickOrRevision: Either[Long, Int], timeout: FiniteDuration)(
+  private def readOrSubscribe(id: ID, timeout: FiniteDuration, minRevision: Int = -1, minTick: Long = Long.MinValue)(
       implicit
       ec: ExecutionContext): Future[Snapshot] = {
-      def matchesTickOrRevision(snapshot: Snapshot): Boolean = tickOrRevision match {
-        case Right(minRevision) =>
-          if (snapshot.revision < 0) throw new IllegalArgumentException(s"Snapshots do not support revision (possibly because of joined streams). Use `tick` instead.")
-          snapshot.revision >= minRevision
-        case Left(minTick) => snapshot.tick >= minTick
+      def matches(snapshot: Snapshot): Boolean = {
+        if (snapshot.revision < 0 && minRevision >= 0) {
+          throw new IllegalArgumentException(s"Snapshots do not support revision (possibly because of joined streams). Use `tick` instead.")
+        }
+        snapshot.revision >= minRevision && snapshot.tick >= minTick
       }
     val latest = read(id).map(Some(_)).recover { case _: UnknownIdRequested => None }
     latest flatMap {
-      case Some(snapshot) if matchesTickOrRevision(snapshot) =>
+      case Some(snapshot) if matches(snapshot) =>
         Future successful snapshot
       case maybeSnapshot => // Earlier revision or tick than expected, or unknown id
         if (timeout.length == 0) {
-          Future failed Timeout(id, maybeSnapshot, tickOrRevision, timeout)
+          Future failed Timeout(id, maybeSnapshot, minRevision, minTick, timeout)
         } else {
           val promise = Promise[Snapshot]
           val subscription = this.subscribe(id) {
-            case delta.process.SnapshotUpdate(snapshot, _) if matchesTickOrRevision(snapshot) =>
+            case delta.process.SnapshotUpdate(snapshot, _) if matches(snapshot) =>
               promise trySuccess snapshot
           }
           promise.future.onComplete(_ => subscription.cancel)
           scheduler.schedule(timeout) {
             if (!promise.isCompleted) {
-              promise tryFailure Timeout(id, maybeSnapshot, tickOrRevision, timeout)
+              promise tryFailure Timeout(id, maybeSnapshot, minRevision, minTick, timeout)
             }
           }
           // Unfortunately we have to try another read, to eliminate the race condition
-          readAgain(id, tickOrRevision) andThen {
-            case Success(snapshot) if matchesTickOrRevision(snapshot) =>
+          readAgain(id, minRevision, minTick) andThen {
+            case Success(snapshot) if matches(snapshot) =>
               promise trySuccess snapshot
             case Failure(th) =>
               promise tryFailure th

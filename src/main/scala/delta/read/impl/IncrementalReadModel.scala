@@ -39,16 +39,10 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
       convId: ID => ESID) =
     this(TransactionProjector[S, EVT](projector), eventSource)
 
-  protected def readAgain(id: ID, expected: Either[Long, Int])(
+  protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
       implicit
-      ec: ExecutionContext): Future[Snapshot] = {
-    expected match {
-      case Right(minRevision) =>
-        readAndUpdate(id, minRev = minRevision).flatMap(verifyRevision(id, _, minRevision))
-      case Left(minTick) =>
-        readAndUpdate(id, minTick = minTick).flatMap(verifyTick(id, _, minTick))
-    }
-  }
+      ec: ExecutionContext): Future[Snapshot] =
+    readAndUpdate(id, minRevision, minTick).map(verifySnapshot(id, _, minRevision, minTick))
 
   protected def idConv(id: ID): ESID = convId(id)
 
@@ -77,17 +71,17 @@ abstract class IncrementalReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag
     processStore.read(esid).flatMap {
       case Some(snapshot) => Future successful snapshot
       case _ => // id was not found, so read and update manually
-        readAndUpdate(id).flatMap {
-          verify(id, _)
+        readAndUpdate(id).map {
+          verifySnapshot(id, _)
         }
     }
   }
 
-  def readMinRevision(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
-    readMinRevision(id, minRevision, DefaultReadTimeout)
+  def read(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
+    read(id, minRevision, DefaultReadTimeout)
 
-  def readMinTick(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] =
-    readMinTick(id, minTick, DefaultReadTimeout)
+  def read(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] =
+    read(id, minTick, DefaultReadTimeout)
 
   protected def replayDelayOnMissing: FiniteDuration = 2.seconds
 

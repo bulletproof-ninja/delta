@@ -24,13 +24,10 @@ class IMapEntryStateReadModel[ID, S, EVT](
 
   protected def reportFailure(th: Throwable) = failureReporter(th)
 
-  protected def readAgain(id: ID, expected: Either[Long, Int])(
+  protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
-    expected match {
-      case Right(minRev) => read(id).flatMap(verifyRevision(id, _, minRev))
-      case Left(minTick) => read(id).flatMap(verifyTick(id, _, minTick))
-    }
+    read(id).map(verifySnapshot(id, _, minRevision, minTick))
 
   def read(id: ID)(
       implicit
@@ -48,18 +45,18 @@ class IMapEntryStateReadModel[ID, S, EVT](
       case _ => new Executor { def execute(r: Runnable) = ec execute r }
     }
     imap.getAsync(id).andThen(callback, exec)
-    promise.future.flatMap {
-      verify(id, _)
+    promise.future.map {
+      verifySnapshot(id, _)
     }
   }
 
-  def readMinTick(id: ID, minTick: Long)(
+  def read(id: ID, minTick: Long)(
       implicit
-      ec: ExecutionContext): Future[Snapshot] = readMinTick(id, minTick, defaultReadTimeout)
+      ec: ExecutionContext): Future[Snapshot] = read(id, minTick, defaultReadTimeout)
 
-  def readMinRevision(id: ID, minRevision: Int)(
+  def read(id: ID, minRevision: Int)(
       implicit
-      ec: ExecutionContext): Future[Snapshot] = readMinRevision(id, minRevision, defaultReadTimeout)
+      ec: ExecutionContext): Future[Snapshot] = read(id, minRevision, defaultReadTimeout)
 
   protected def subscribe(id: ID)(pf: PartialFunction[SnapshotUpdate, Unit]): Subscription = {
     val entryListener = new EntryAddedListener[ID, EntryState] with EntryUpdatedListener[ID, EntryState] {

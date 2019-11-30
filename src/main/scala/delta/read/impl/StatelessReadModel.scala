@@ -31,17 +31,17 @@ class StatelessReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
         this(TransactionProjector[S, EVT](projector), es)
 
   def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
-    replayToComplete(None, id).flatMap {
-      verify(id, _)
+    replayToComplete(None, id).map {
+      verifySnapshot(id, _)
     }
 
-  def readMinRevision(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
-    read(id).flatMap {
+  def read(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
+    read(id).map {
       verifyRevision(id, _, minRevision)
     }
 
-  def readMinTick(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] = {
-    read(id).flatMap {
+  def read(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] = {
+    read(id).map {
       verifyTick(id, _, minTick)
     }
   }

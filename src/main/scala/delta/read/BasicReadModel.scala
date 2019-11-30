@@ -15,9 +15,7 @@ trait BasicReadModel[ID, S] {
    * Read latest snapshot. This is intended
    * to get *some* revision fast. This
    * may, or may not, be the latest written
-   * revision. Use `readMinRevision` or
-   * `readMinTick` if specific revision/tick
-   * is needed, i.e. after a write.
+   * revision.
    *
    * @return Latest accessible snapshot, or [[delta.read.UnknownIdRequested]] if unknown id
    */
@@ -28,10 +26,10 @@ trait BasicReadModel[ID, S] {
   /**
    * Read snapshot, ensuring it's at at least the given tick.
    * @param id The lookup identifier
-   * @param afterTick The tick value the snapshot must succeed
+   * @param minTick The minimum tick of snapshot
    * @return Snapshot >= `minTick` or [[delta.read.UnknownTickRequested]]
    */
-  def readMinTick(id: ID, minTick: Long)(
+  def read(id: ID, minTick: Long)(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 
@@ -39,10 +37,10 @@ trait BasicReadModel[ID, S] {
    * Read snapshot, ensuring it's at least the given revision,
    * waiting the default timeout if current revision is stale.
    * @param id The lookup identifier
-   * @param minRevision The minimum revision to lookup
+   * @param minRevision The minimum revision of snapshot
    * @return Snapshot >= `minRevision` or [[delta.read.UnknownRevisionRequested]]
    */
-  def readMinRevision(id: ID, minRevision: Int)(
+  def read(id: ID, minRevision: Int)(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 

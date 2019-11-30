@@ -3,6 +3,7 @@ package delta
 import scala.util.control.NoStackTrace
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.control.NonFatal
 
 package read {
 
@@ -39,62 +40,84 @@ package read {
 
 package object read {
 
-  private[delta] val DefaultReadTimeout = 4444.millis
+  private[delta] val DefaultReadTimeout = 5555.millis
 
   private[read] def UnknownIdRequested[ID](snapshotId: ID) =
     new IllegalArgumentException(s"Unknown id: $snapshotId") with UnknownIdRequested { def id = snapshotId }
 
   private[read] def Timeout[ID](
       id: ID, snapshot: Option[Snapshot[_]],
-      minTickOrRevision: Either[Long, Int], timeout: FiniteDuration): ReadRequestFailure = {
+      minRevision: Int, minTick: Long, timeout: FiniteDuration): ReadRequestFailure = {
     snapshot match {
       case None =>
         val errMsg = s"Failed to find $id, within timeout of $timeout"
         new Timeout(id, timeout, errMsg) with UnknownIdRequested
-      case Some(snapshot) => minTickOrRevision match {
-        case Left(minTick) =>
-          val errMsg = s"Failed to find $id with tick >= $minTick, within timeout of $timeout"
+      case Some(snapshot) =>
+        assert(minRevision != -1 || minTick != Long.MinValue)
+        val revText = if (minRevision != -1) s"revision >= $minRevision" else ""
+        val tickText = if (minTick != Long.MinValue) s"tick >= $minTick" else ""
+        val failedCondition =
+          if (revText == "") tickText
+          else if (tickText == "") revText
+          else s"BOTH $revText AND $tickText"
+        val errMsg = s"Failed to find $id with $failedCondition, within timeout of $timeout"
+        if (minRevision != -1)
+          if (minTick != Long.MinValue)
+            new Timeout(id, timeout, errMsg) with UnknownRevisionRequested with UnknownTickRequested {
+              def knownRevision = snapshot.revision; def knownTick = snapshot.tick
+            }
+          else
+            new Timeout(id, timeout, errMsg) with UnknownRevisionRequested { def knownRevision = snapshot.revision }
+        else
           new Timeout(id, timeout, errMsg) with UnknownTickRequested { def knownTick = snapshot.tick }
-        case Right(minRevision) =>
-          val errMsg = s"Failed to find $id with revision >= $minRevision, within timeout of $timeout"
-          new Timeout(id, timeout, errMsg) with UnknownRevisionRequested { def knownRevision = snapshot.revision }
-      }
     }
   }
 
   private[delta] def verify[ID, S](
-      snapshotId: ID, snapshot: Option[Snapshot[S]]): Future[Snapshot[S]] =
+    id: ID, snapshot: Option[Snapshot[S]]): Snapshot[S] =
     snapshot match {
-      case Some(snapshot) => Future successful snapshot
-      case None => Future failed UnknownIdRequested(snapshotId)
+      case None =>
+        throw UnknownIdRequested(id)
+      case Some(snapshot) => snapshot
     }
 
-  private[delta] def verifyRevision[ID, S](
-      snapshotId: ID, snapshot: Option[Snapshot[S]],
-      minRevision: Int): Future[Snapshot[S]] =
-    snapshot match {
-      case Some(snapshot) => verifyRevision(snapshotId, snapshot, minRevision)
-      case None => Future failed UnknownIdRequested(snapshotId)
-    }
-  private[delta] def verifyRevision[ID, S](
+  private[delta] def verifySnapshot[ID, S](
+      id: ID, optSnapshot: Option[Snapshot[S]],
+      minRevision: Int = -1, minTick: Long = Long.MinValue): Snapshot[S] =
+    verifySnapshot(id, verify(id, optSnapshot), minRevision, minTick)
+
+  private[delta] def verifySnapshot[ID, S](
       snapshotId: ID, snapshot: Snapshot[S],
-      minRevision: Int): Future[Snapshot[S]] =
-    if (snapshot.revision >= minRevision) Future successful snapshot
-    else Future failed
-      new IllegalArgumentException(s"Unknown revision: $minRevision") with UnknownRevisionRequested { def id = snapshotId; def knownRevision = snapshot.revision }
+      minRev: Int, minTick: Long): snapshot.type = {
+    verifyRevision(snapshotId, snapshot, minRev)
+    verifyTick(snapshotId, snapshot, minTick)
+  }
+
+  private[delta] def verifyRevision[ID, S](
+      snapshotId: ID, snapshot: Snapshot[S], revision: Int): snapshot.type = {
+    if (snapshot.revision < revision)
+      throw new IllegalArgumentException(
+        s"Unknown revision: $revision") with UnknownRevisionRequested {
+          def id = snapshotId; def knownRevision = snapshot.revision
+        }
+    snapshot
+  }
 
   private[delta] def verifyTick[ID, S](
+      snapshotId: ID, snapshot: Snapshot[S], tick: Long): snapshot.type = {
+    if (snapshot.tick < tick)
+      throw new IllegalArgumentException(
+        s"Unknown tick: $tick") with UnknownTickRequested {
+          def id = snapshotId; def knownTick = snapshot.tick
+        }
+    snapshot
+  }
+
+  private[delta] def verify[ID, S](
       snapshotId: ID, snapshot: Option[Snapshot[S]],
-      minTick: Long): Future[Snapshot[S]] =
-    snapshot match {
-      case Some(snapshot) => verifyTick(snapshotId, snapshot, minTick)
-      case None => Future failed UnknownIdRequested(snapshotId)
+      minRev: Int, minTick: Long): Future[Snapshot[S]] =
+    try Future successful verifySnapshot(snapshotId, snapshot, minRev, minTick) catch {
+      case NonFatal(cause) => Future failed cause
     }
-  private[delta] def verifyTick[ID, S](
-      snapshotId: ID, snapshot: Snapshot[S],
-      minTick: Long): Future[Snapshot[S]] =
-    if (snapshot.tick >= minTick) Future successful snapshot
-    else Future failed
-      new IllegalArgumentException(s"Unknown tick: $minTick") with UnknownTickRequested { def id = snapshotId; def knownTick = snapshot.tick }
 
 }

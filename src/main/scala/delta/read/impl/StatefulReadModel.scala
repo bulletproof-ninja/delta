@@ -42,18 +42,18 @@ abstract class StatefulReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
   protected def idConv(id: ID): ESID = convId(id)
 
   def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
-    readAndUpdate(id).flatMap {
-      verify(id, _)
+    readAndUpdate(id).map {
+      verifySnapshot(id, _)
     }
 
-  def readMinRevision(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
-    readAndUpdate(id, minRevision).flatMap {
-      verifyRevision(id, _, minRevision)
+  def read(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
+    readAndUpdate(id, minRevision).map {
+      verifySnapshot(id, _, minRevision = minRevision)
     }
 
-  def readMinTick(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] = {
-    readAndUpdate(id, minTick = minTick).flatMap {
-      verifyTick(id, _, minTick)
+  def read(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] = {
+    readAndUpdate(id, minTick = minTick).map {
+      verifySnapshot(id, _, minTick = minTick)
     }
   }
 

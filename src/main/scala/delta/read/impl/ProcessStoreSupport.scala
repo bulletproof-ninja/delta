@@ -13,12 +13,14 @@ private[impl] trait ProcessStoreSupport[ID, ESID, S >: Null] {
 
   private type SnapshotUpdate = delta.process.SnapshotUpdate[S]
 
-  protected def readAndUpdate(id: ID, minRev: Int = 0, minTick: Long = Long.MinValue)(implicit ec: ExecutionContext): Future[Option[Snapshot]] = {
+  protected def readAndUpdate(id: ID, minRevision: Int = -1, minTick: Long = Long.MinValue)(
+      implicit
+      ec: ExecutionContext): Future[Option[Snapshot]] = {
     val esid: ESID = idConv(id)
     val future: Future[(Option[SnapshotUpdate], _)] =
       processStore.upsert(esid) { existing =>
         val goodEnough = existing.exists { snapshot =>
-          snapshot.tick >= minTick && snapshot.revision >= minRev
+          snapshot.tick >= minTick && snapshot.revision >= minRevision
         }
         val latestSnapshot: Future[Option[Snapshot]] =
           if (goodEnough) Future successful existing
