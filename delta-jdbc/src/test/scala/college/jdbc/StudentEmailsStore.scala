@@ -23,13 +23,13 @@ private object StudentEmailsStore {
 import StudentEmailsStore._
 
 class StudentEmailsStore(
-    cs: ConnectionSource, version: Short,
+    cs: ConnectionSource, version: Short, withTimestamp: WithTimestamp,
     blockingCtx: ExecutionContext)(
         implicit colType: ColumnType[Array[Byte]])
   extends JdbcStreamProcessStore[Int, StudentEmails](
-    streamColumnName = "student_id", cs, Some(version),
+    "student_id", cs, version,
     table = "student_email_lookup", None,
-    blockingCtx)
+    blockingCtx, withTimestamp)
   with IndexTables[Int, StudentEmails] {
 
   protected val indexTables = Table(EmailColumn)(_.emails) :: Nil

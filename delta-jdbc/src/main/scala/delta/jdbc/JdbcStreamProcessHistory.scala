@@ -17,22 +17,23 @@ import scuff.jdbc.ConnectionSource
  */
 class JdbcStreamProcessHistory[ID: ColumnType, D: ColumnType](
     jdbcCtx: ExecutionContext,
-    cs: ConnectionSource,
-    version: Short,
+    protected val cs: ConnectionSource,
+    version: Short, withTimestamp: WithTimestamp,
     table: String, schema: Option[String] = None)
-  extends AbstractStore(cs, Some(version), table, schema)(jdbcCtx)
+  extends AbstractStore(Some(version), table, schema)(jdbcCtx)
   with StreamProcessStore[ID, D] with BlockingCASWrites[ID, D, Connection] {
 
   def this(
       jdbcCtx: ExecutionContext,
       cs: ConnectionSource,
-      version: Short, table: String, schema: String) =
-    this(jdbcCtx, cs, version, table, schema.optional)
+      version: Short, withTimestamp: WithTimestamp,
+      table: String, schema: String) =
+    this(jdbcCtx, cs, version, withTimestamp, table, schema.optional)
 
   private def insertTransaction(withData: Boolean): String = s"""
 INSERT INTO $tableRef
-(version, $idColName, tick, revision, $timestampColName, data)
-VALUES($version, ?, ?, ?, """ + (if (withData) timestampNowFunction + ", ?)" else "NULL, NULL)")
+(version, $idColName, tick, revision, ${withTimestamp.colName}, data)
+VALUES($version, ?, ?, ?, ${withTimestamp.sqlFunction}, ${if (withData) "?" else "NULL"})"""
   protected val insertTransactionSQL = insertTransaction(withData = false)
   protected val insertSnapshotSQL = insertTransaction(withData = true)
 
@@ -48,7 +49,7 @@ AND data is NULL
 
   protected val updateSnapshotSQL: String = s"""
 UPDATE $tableRef
-SET $timestampColName = $timestampNowFunction, data = ?, revision = ?
+SET ${withTimestamp.colName} = ${withTimestamp.sqlFunction}, data = ?, revision = ?
 WHERE version = $version
 AND $idColName = ?
 AND tick = ?
@@ -56,9 +57,6 @@ AND revision = ?
 """
 
   protected def idColName: String = "id"
-  protected def timestampColName: String = "since"
-  protected def timestampColType: String = "TIMESTAMP"
-  protected def timestampNowFunction: String = "NOW()"
 
   protected def createTableDDL = s"""
 CREATE TABLE IF NOT EXISTS $tableRef (
@@ -66,7 +64,7 @@ CREATE TABLE IF NOT EXISTS $tableRef (
   $idColName ${implicitly[ColumnType[ID]].typeName} NOT NULL,
   tick BIGINT NOT NULL,
   revision INT NOT NULL,
-  $timestampColName $timestampColType NULL,
+  ${withTimestamp.colName} ${withTimestamp.sqlType} NOT NULL,
   data ${implicitly[ColumnType[D]].typeName} NULL,
 
   PRIMARY KEY (version, $idColName, tick)

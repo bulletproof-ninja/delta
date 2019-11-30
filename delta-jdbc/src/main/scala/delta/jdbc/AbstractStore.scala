@@ -9,12 +9,12 @@ import scala.concurrent._
 import scuff.jdbc.ConnectionSource
 
 abstract class AbstractStore(
-    cs: ConnectionSource,
     protected val version: Option[Short],
     table: String, schema: Option[String])(
     implicit
     protected val blockingCtx: ExecutionContext) {
 
+  protected def cs: ConnectionSource
   protected def createTable(conn: Connection): Unit
   protected def createTickIndex(conn: Connection): Unit
 

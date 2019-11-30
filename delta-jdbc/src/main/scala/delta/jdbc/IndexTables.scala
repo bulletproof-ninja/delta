@@ -37,10 +37,10 @@ trait IndexTables[PK, S]
   protected def indexTableRef(table: Table): String = s"${tableRef}_${table.indexColumn}"
 
   protected def createIndexTableDDL(table: Table): String = {
-    val pkColumns = versionColumn.toList :+ PkColumn(table.indexColumn, table.colType) :+ streamColumn
+    val pkColumns = versionColumn.toList :+ PkColumn(table.indexColumn, table.colType) :+ pkColumn
     val pkColumnDefs = pkColumnDefsDDL(pkColumns)
     val pkNames = pkColumns.map(_.name).mkString(", ")
-    val fkNames = (versionColumn.map(_.name).toList :+ streamColumn.name).mkString(", ")
+    val fkNames = (versionColumn.map(_.name).toList :+ pkColumn.name).mkString(", ")
     s"""
 CREATE TABLE IF NOT EXISTS ${indexTableRef(table)} (
   $pkColumnDefs,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS ${indexTableRef(table)} (
     }
     s"""
 DELETE FROM ${indexTableRef(table)}
-$WHERE ${streamColumn.name} = ?
+$WHERE ${pkColumn.name} = ?
 AND ${table.indexColumn} $matchPart
 """
   }
@@ -67,7 +67,7 @@ AND ${table.indexColumn} $matchPart
     val (vCol, vQ) = version.map(version => "version, " -> s"$version, ") getOrElse "" -> ""
     s"""
 INSERT INTO ${indexTableRef(table)}
-($vCol${table.indexColumn}, ${streamColumn.name})
+($vCol${table.indexColumn}, ${pkColumn.name})
 VALUES ($vQ?,?)
 """
   }
@@ -76,7 +76,7 @@ VALUES ($vQ?,?)
 
   private def deleteRowsAsBatch(ps: PreparedStatement, stream: PK, table: Table, keys: Set[Any]): Unit = {
     keys.foreach { key =>
-      ps.setValue(1, stream)(streamColumn.colType)
+      ps.setValue(1, stream)(pkColumn.colType)
       ps.setValue(2, key)(table.colType)
       ps.addBatch()
     }
@@ -84,7 +84,7 @@ VALUES ($vQ?,?)
   }
 
   private def deleteRowsAsOne(ps: PreparedStatement, stream: PK, table: Table, keys: Set[Any]): Unit = {
-    ps.setValue(1, stream)(streamColumn.colType)
+    ps.setValue(1, stream)(pkColumn.colType)
     keys.iterator.zipWithIndex.foreach {
       case (key, idx) => ps.setValue(2 + idx, key)(table.colType)
     }
@@ -110,7 +110,7 @@ VALUES ($vQ?,?)
     try {
       keys.foreach { key =>
         ps.setValue(1, key)(table.colType)
-        ps.setValue(2, stream)(streamColumn.colType)
+        ps.setValue(2, stream)(pkColumn.colType)
         if (isBatch) ps.addBatch()
       }
       if (isBatch) ps.executeBatch()
@@ -163,10 +163,10 @@ VALUES ($vQ?,?)
       def WHERE = indexTableWHERE
       def ON = joinON
     s"""
-SELECT s.tick, s.${streamColumn.name}
+SELECT s.tick, s.${pkColumn.name}
 FROM ${indexTableRef(table)} AS i
 JOIN ${tableRef} AS s
-  $ON i.${streamColumn.name} = s.${streamColumn.name}
+  $ON i.${pkColumn.name} = s.${pkColumn.name}
 $WHERE i.${table.indexColumn} = ?
 """
   }
@@ -174,10 +174,10 @@ $WHERE i.${table.indexColumn} = ?
       def WHERE = indexTableWHERE
       def ON = joinON
     s"""
-SELECT s.data, s.revision, s.tick, s.${streamColumn.name}
+SELECT s.data, s.revision, s.tick, s.${pkColumn.name}
 FROM ${indexTableRef(table)} AS i
 JOIN ${tableRef} AS s
-  $ON i.${streamColumn.name} = s.${streamColumn.name}
+  $ON i.${pkColumn.name} = s.${pkColumn.name}
 $WHERE i.${table.indexColumn} = ?
 """
   }
@@ -240,7 +240,7 @@ $WHERE i.${table.indexColumn} = ?
       kv => this.queryTick(kv.head, kv.tail: _*).map(_.keySet),
       selectSnapshotSQL) { rs =>
         val snapshot = this.getSnapshot(rs)
-        val stream = streamColumn.colType.readFrom(rs, 4)
+        val stream = pkColumn.colType.readFrom(rs, 4)
         stream -> snapshot
       }
 
@@ -251,7 +251,7 @@ $WHERE i.${table.indexColumn} = ?
       kv => super.queryTick(kv.head, kv.tail: _*).map(_.keySet),
       selectStreamTickSQL) { rs =>
         val tick = rs.getLong(1)
-        val stream = streamColumn.colType.readFrom(rs, 2)
+        val stream = pkColumn.colType.readFrom(rs, 2)
         stream -> tick
       }
 

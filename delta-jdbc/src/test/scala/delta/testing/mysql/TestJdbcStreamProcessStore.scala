@@ -10,7 +10,7 @@ import com.mysql.cj.log.Slf4JLogger
 import com.mysql.cj.jdbc.MysqlDataSource
 
 import delta.Snapshot
-import delta.jdbc.{ JdbcStreamProcessHistory, JdbcStreamProcessStore, VarCharColumn }
+import delta.jdbc.{ JdbcStreamProcessHistory, JdbcStreamProcessStore, VarCharColumn, WithTimestamp }
 import delta.jdbc.mysql.MySQLSyntax
 import delta.testing.{ RandomDelayExecutionContext, TestStreamProcessStore }
 import delta.process.StreamProcessStore
@@ -74,8 +74,8 @@ class TestJdbcStreamProcessStore
   }
 
   override def newStore(): StreamProcessStore[Long, String] = {
-    val store = new JdbcStreamProcessStore[Long, String](
-      cs, None, readModelName, None, RandomDelayExecutionContext) with MySQLSyntax
+    val store = new JdbcStreamProcessStore[Long, String]("id",
+      cs, None, readModelName, None, RandomDelayExecutionContext, WithTimestamp("last_updated")) with MySQLSyntax
     store.ensureTable()
   }
 
@@ -85,14 +85,14 @@ class TestJdbcStreamProcessStore
 
   object FooProcessStore {
     import JdbcStreamProcessStore._
-    val qryColumns = List(
+    val indexColumns = List(
       Index(Nullable("foo_text")((foo: Foo) => Option(foo.text))),
       Index(NotNull("foo_num")((foo: Foo) => foo.num)))
     implicit val FooColumn = ColumnType(Foo)
   }
   class FooProcessStore(cs: ConnectionSource, version: Short)(implicit fooCol: ColumnType[Foo])
     extends JdbcStreamProcessStore[Long, Foo](
-      FooProcessStore.qryColumns, cs, Some(version), fooTable, None, RandomDelayExecutionContext) {
+      "id", cs, version, fooTable, None, RandomDelayExecutionContext, WithTimestamp(), FooProcessStore.indexColumns) {
     def queryText(text: String): Future[Map[Long, Snapshot]] = {
       this.querySnapshot("foo_text" -> text)
     }
@@ -127,7 +127,7 @@ class TestJdbcStreamProcessHistory
     val cs = new ConnectionSource with DataSourceConnection {
       def dataSource = ds
     }
-    val store = new JdbcStreamProcessHistory[Long, String](RandomDelayExecutionContext, cs, v.toShort, readModelName) with MySQLSyntax
+    val store = new JdbcStreamProcessHistory[Long, String](RandomDelayExecutionContext, cs, v.toShort, WithTimestamp(), readModelName) with MySQLSyntax
     store.ensureTable()
   }
 

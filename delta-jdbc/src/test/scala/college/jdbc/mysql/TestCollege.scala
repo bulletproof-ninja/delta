@@ -12,7 +12,6 @@ import delta.jdbc._
 import delta.jdbc.mysql._
 import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalHub
-import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
 import delta.MessageHubPublishing
 import scuff.jdbc.ConnectionSource
@@ -35,14 +34,6 @@ object TestCollege {
     ds setContinueBatchOnError false
     ds
   }
-  @AfterClass
-  def dropDb(): Unit = {
-    val conn = ds.getConnection
-    try {
-      val stm = conn.createStatement()
-      try stm.execute(s"drop database if exists $db") finally stm.close()
-    } finally conn.close()
-  }
 
   implicit def DataColumn = BlobColumn
 }
@@ -51,21 +42,14 @@ class TestCollege extends college.jdbc.TestCollege {
 
   import TestCollege._
 
-  @Before
-  def dropDb(): Unit = {
-    TestCollege.dropDb()
-    eventStore match {
-      case es: JdbcEventStore[_, _, _] => es.ensureSchema()
-    }
-  }
   lazy val connSource = new ConnectionSource with DataSourceConnection {
     val dataSource = ds
   }
 
   override def newLookupServiceProcStore =
-    (new StudentEmailsStore(connSource, 1, ec) with MySQLSyntax).ensureTable()
+    (new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec) with MySQLSyntax).ensureTable()
 
-  override lazy val eventStore: EventStore[Int, CollegeEvent] = {
+  override def newEventStore: EventStore[Int, CollegeEvent] = {
     val sql = new MySQLDialect[Int, CollegeEvent, Array[Byte]]
     new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
     with MessageHubPublishing[Int, CollegeEvent] {

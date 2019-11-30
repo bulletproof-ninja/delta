@@ -44,7 +44,7 @@ class TestCollege {
 
   protected def initTicker(es: EventSource[Int, CollegeEvent]) = LamportTicker(es)
 
-  lazy val eventStore: EventStore[Int, CollegeEvent] =
+  def newEventStore: EventStore[Int, CollegeEvent] =
     new TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker)
         with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
@@ -53,18 +53,24 @@ class TestCollege {
       val txnCodec = Codec.noop[TXN]
     }
 
+  @volatile var eventStore: EventStore[Int, CollegeEvent] = null
+
   implicit val md = Metadata.empty
   implicit def ec = RandomDelayExecutionContext
-
-  type TXN = eventStore.TXN
 
   protected var StudentRepository: EntityRepository[Int, StudentEvent, StudentState, Student.Id, student.Student] = _
   protected var SemesterRepository: EntityRepository[Int, SemesterEvent, SemesterState, Semester.Id, semester.Semester] = _
 
   @Before
   def setup(): Unit = {
+    eventStore = newEventStore
     StudentRepository = new EntityRepository(Student, ec)(eventStore)
     SemesterRepository = new EntityRepository(Semester, ec)(eventStore)
+  }
+
+  @After
+  def after(): Unit = {
+    eventStore.ticker.close()
   }
 
   private def randomName(): String = (
@@ -217,6 +223,9 @@ class TestCollege {
   @Test
   def `many-to-many relationship`(): Unit = {
 
+    val eventStore = this.eventStore
+    type TXN = eventStore.TXN
+
     case class StudentModel(name: String, emails: Set[String] = Set.empty)
 
     val Unknown = StudentModel("<unknown>")
@@ -289,6 +298,8 @@ class TestCollege {
 
   @Test
   def `with join state`(): Unit = {
+
+    val eventStore = this.eventStore
 
     case class SemesterRev(id: Semester.Id, rev: Int) {
       def this(id: Int, rev: Int) = this(new Semester.Id(id), rev)
@@ -398,6 +409,7 @@ class TestCollege {
 
   @Test
   def `lookup by email`(): Unit = {
+
     val procStore = newLookupServiceProcStore
     val lookup = lookupService(procStore)
     object ServiceBuilder

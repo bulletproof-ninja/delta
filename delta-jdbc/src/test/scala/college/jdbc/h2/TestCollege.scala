@@ -41,11 +41,11 @@ class TestCollege extends college.jdbc.TestCollege {
     dataSource.setURL(s"jdbc:h2:./${h2Name}")
   }
 
-  override def newLookupServiceProcStore = new StudentEmailsStore(connSource, 1, ec).ensureTable()
+  override def newLookupServiceProcStore = new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec).ensureTable()
 
-  override lazy val eventStore: EventStore[Int, CollegeEvent] = {
+  override def newEventStore: EventStore[Int, CollegeEvent] = {
     val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
-    new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker) 
+    new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
     with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions:$ch")
       def toTopic(txn: TXN): Topic = toTopic(txn.channel)

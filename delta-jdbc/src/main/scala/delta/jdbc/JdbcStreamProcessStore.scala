@@ -39,6 +39,7 @@ object JdbcStreamProcessStore {
     def nullable = true
     def colType = implicitly[ColumnType[C]].asInstanceOf[ColumnType[Any]]
   }
+
 }
 
 import JdbcStreamProcessStore._
@@ -53,41 +54,58 @@ import JdbcStreamProcessStore._
  * trigger re-processing thus the side-effects being repeated.
  */
 class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
-    streamColumnName: String, customIndexes: List[Index[S]],
-    cs: ConnectionSource,
+    pkColumnName: String,
+    protected val cs: ConnectionSource,
     version: Option[Short],
     table: String, schema: Option[String],
-    blockingCtx: ExecutionContext)
-  extends AbstractStore(cs, version, table, schema)(blockingCtx)
+    blockingCtx: ExecutionContext,
+    withTimestamp: Option[WithTimestamp] = None,
+    indexes: List[Index[S]] = Nil)
+  extends AbstractStore(version, table, schema)(blockingCtx)
   with StreamProcessStore[PK, S] with BlockingCASWrites[PK, S, Connection] {
 
   def this(
-      streamColumnName: String,
+      pkColumnName: String,
       cs: ConnectionSource,
-      version: Option[Short],
       table: String, schema: Option[String],
-      blockingCtx: ExecutionContext) =
-    this(streamColumnName, Nil, cs, version, table, schema, blockingCtx)
+      blockingCtx: ExecutionContext,
+      withTimestamp: WithTimestamp,
+      indexes: List[Index[S]]) =
+    this(pkColumnName, cs, None, table, schema, blockingCtx, Option(withTimestamp), indexes)
 
   def this(
+      pkColumnName: String,
       cs: ConnectionSource,
-      version: Option[Short],
+      version: Short,
       table: String, schema: Option[String],
-      blockingCtx: ExecutionContext) =
-    this("stream", Nil, cs, version, table, schema, blockingCtx)
+      blockingCtx: ExecutionContext,
+      withTimestamp: WithTimestamp,
+      indexes: List[Index[S]]) =
+    this(pkColumnName, cs, Some(version), table, schema, blockingCtx, Option(withTimestamp), indexes)
 
   def this(
-      customIndexes: List[Index[S]],
+      pkColumnName: String,
+      cs: ConnectionSource,
+      version: Short,
+      table: String, schema: Option[String],
+      blockingCtx: ExecutionContext,
+      withTimestamp: WithTimestamp) =
+    this(pkColumnName, cs, Some(version), table, schema, blockingCtx, Option(withTimestamp), Nil)
+
+  def this(
+      pkColumnName: String,
       cs: ConnectionSource,
       version: Option[Short],
       table: String, schema: Option[String],
-      blockingCtx: ExecutionContext) =
-    this("stream", customIndexes, cs, version, table, schema, blockingCtx)
+      blockingCtx: ExecutionContext,
+      withTimestamp: WithTimestamp) =
+    this(pkColumnName, cs, version, table, schema, blockingCtx, Option(withTimestamp))
 
-  protected val WHERE: String = version.map(version => s"WHERE version = $version\nAND") getOrElse "WHERE"
+  private[this] val setTS: String = withTimestamp.map(col => s", ${col.colName} = ${col.sqlFunction}") getOrElse ""
 
-  final protected val streamColumn = PkColumn(streamColumnName, implicitly[ColumnType[PK]])
-  final protected val indexColumns: Map[String, IndexColumn[S]] = customIndexes.flatMap(_.columns).map(c => c.name.toLowerCase -> c).toMap
+  final protected val WHERE: String = version.map(version => s"WHERE version = $version\nAND") getOrElse "WHERE"
+  final protected val pkColumn = PkColumn(pkColumnName, implicitly[ColumnType[PK]])
+  final protected val indexColumns: Map[String, IndexColumn[S]] = indexes.flatMap(_.columns).map(c => c.name.toLowerCase -> c).toMap
   protected def versionColType: ColumnType[Short] = ShortColumn
   protected def versionColumn: Option[PkColumn[_]] = version.map(_ => PkColumn("version", versionColType))
   protected def pkColumnDefsDDL(pkColumns: List[PkColumn[_]]): String = {
@@ -97,7 +115,7 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
   }
 
   protected def createTableDDL = {
-    val pkColumns = versionColumn.toList :+ streamColumn
+    val pkColumns = versionColumn.toList :+ pkColumn
     val pkColumnDefs = pkColumnDefsDDL(pkColumns)
 
     val pkNames = pkColumns.map(_.name).mkString(",")
@@ -108,13 +126,15 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
       }.mkString("\n  ", ",\n  ", ",")
     }
 
+    val timestampColDef = withTimestamp.map(col => s"""${col.colName} ${col.sqlType} NOT NULL,""") getOrElse ""
+
     s"""
 CREATE TABLE IF NOT EXISTS $tableRef (
   $pkColumnDefs,$qryColumnDefs
   data ${implicitly[ColumnType[S]].typeName},
   revision INT NOT NULL,
   tick BIGINT NOT NULL,
-
+  $timestampColDef
   PRIMARY KEY ($pkNames)
 )"""
   }
@@ -124,7 +144,7 @@ CREATE TABLE IF NOT EXISTS $tableRef (
     s"""
 SELECT data, revision, tick
 FROM $tableRef
-$WHERE $streamColumnName = ?
+$WHERE $pkColumnName = ?
 """
 
   protected def insertSnapshotSQL = _insertSnapshotSQL
@@ -134,10 +154,11 @@ $WHERE $streamColumnName = ?
         indexColumns.map(_ => "?").mkString("", ",", ",")
     }
     val (vCol, vQ) = version.map(version => "version, " -> s"$version, ") getOrElse "" -> ""
+    val (tCol, tQ) = withTimestamp.map(col => s"${col.colName}, " -> s"${col.sqlFunction}, ") getOrElse "" -> ""
     s"""
 INSERT INTO $tableRef
-(${vCol}data, revision, tick, $qryNames$streamColumnName)
-VALUES ($vQ?,?,?,$qryQs?)
+(${tCol}${vCol}data, revision, tick, $qryNames$pkColumnName)
+VALUES ($tQ$vQ?,?,?,$qryQs?)
 """
   }
   protected def setParmsOnInsert(ps: PreparedStatement, key: PK, snapshot: Snapshot): Int = {
@@ -158,8 +179,8 @@ VALUES ($vQ?,?,?,$qryQs?)
     val matches = if (exact) "=" else "<="
     s"""
 UPDATE $tableRef
-SET data = ?, revision = ?, tick = ?$qryColumns
-$WHERE $streamColumnName = ?
+SET data = ?, revision = ?, tick = ?$setTS$qryColumns
+$WHERE $pkColumnName = ?
 AND revision $matches ? AND tick $matches ?
 """
   }
@@ -168,8 +189,8 @@ AND revision $matches ? AND tick $matches ?
   private[this] val _refreshRevTickDefensiveSQL =
     s"""
 UPDATE $tableRef
-SET revision = ?, tick = ?
-$WHERE $streamColumnName = ?
+SET revision = ?, tick = ?$setTS
+$WHERE $pkColumnName = ?
 AND revision <= ? AND tick <= ?
 """
 
@@ -189,7 +210,7 @@ CREATE INDEX IF NOT EXISTS $indexName
 
   override protected def ensureTable(conn: Connection): Unit = {
     super.ensureTable(conn)
-    customIndexes.foreach { index =>
+    indexes.foreach { index =>
       createCustomIndex(conn)(index)
     }
   }
@@ -394,7 +415,7 @@ CREATE INDEX IF NOT EXISTS $indexName
     }.mkString(" AND ")
     val select =
       s"""
-SELECT data, revision, tick, $streamColumnName
+SELECT data, revision, tick, $pkColumnName
 FROM $tableRef
 $WHERE $where
 """
@@ -410,7 +431,7 @@ $WHERE $where
           var map = Map.empty[PK, Snapshot]
           while (rs.next) {
             val snapshot = getSnapshot(rs)
-            map = map.updated(streamColumn.colType.readFrom(rs, 4), snapshot)
+            map = map.updated(pkColumn.colType.readFrom(rs, 4), snapshot)
           }
           map
         } finally Try(rs.close)
@@ -430,7 +451,7 @@ $WHERE $where
     }.mkString(" AND ")
     val select =
       s"""
-SELECT tick, $streamColumnName
+SELECT tick, $pkColumnName
 FROM $tableRef
 $WHERE $where
 """

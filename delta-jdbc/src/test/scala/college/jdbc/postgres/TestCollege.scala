@@ -5,10 +5,9 @@ import org.junit._
 
 import college.CollegeEvent
 import delta.EventStore
-import delta.jdbc._
+import delta.jdbc.JdbcEventStore
 import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalHub
-import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
 import delta.MessageHubPublishing
 import org.postgresql.ds.PGSimpleDataSource
@@ -27,28 +26,12 @@ object TestCollege {
     ds setUrl s"jdbc:postgresql://localhost/"
     ds
   }
-  @AfterClass
-  def dropDb(): Unit = {
-    val conn = ds.getConnection
-    try {
-      val stm = conn.createStatement()
-      try stm.execute(s"drop schema if exists $schema cascade") finally stm.close()
-    } finally conn.close()
-  }
 
   implicit def Blob = ByteaColumn
 
 }
 
 class TestCollege extends college.jdbc.TestCollege {
-
-  @Before
-  def dropDb(): Unit = {
-    TestCollege.dropDb()
-    eventStore match {
-      case es: JdbcEventStore[_, _, _] => es.ensureSchema()
-    }
-  }
 
   import TestCollege._
 
@@ -57,9 +40,9 @@ class TestCollege extends college.jdbc.TestCollege {
   }
 
   override def newLookupServiceProcStore =
-    (new StudentEmailsStore(connSource, 1, ec)).ensureTable()
+    (new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec)).ensureTable()
 
-  override lazy val eventStore: EventStore[Int, CollegeEvent] = {
+  override def newEventStore: EventStore[Int, CollegeEvent] = {
     val sql = new PostgreSQLDialect[Int, CollegeEvent, Array[Byte]](schema)
     new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
     with MessageHubPublishing[Int, CollegeEvent] {
