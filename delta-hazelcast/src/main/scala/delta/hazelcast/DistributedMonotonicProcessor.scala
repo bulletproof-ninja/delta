@@ -4,23 +4,19 @@ import java.util.Map.Entry
 
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
-
-import com.hazelcast.map.AbstractEntryProcessor
-
-import delta.{ Snapshot, Transaction, TransactionProjector }
-import com.hazelcast.core.IMap
-import scala.concurrent.Future
+import scala.concurrent._, duration._
 import scala.reflect.{ ClassTag, classTag }
 
-case class EntryState[S, EVT](
-  snapshot: Snapshot[S],
-  contentUpdated: Boolean = false,
-  unapplied: TreeMap[Int, Transaction[_, EVT]] = TreeMap.empty[Int, Transaction[_, EVT]])
+import delta.{ Snapshot, Transaction, Projector }
 
-sealed abstract class EntryUpdateResult
-case object IgnoredDuplicate extends EntryUpdateResult
-case class MissingRevisions(range: Range) extends EntryUpdateResult
-case class Updated[S](snapshot: Snapshot[S]) extends EntryUpdateResult
+import com.hazelcast.core._
+import com.hazelcast.map.AbstractEntryProcessor
+
+import delta.process.AsyncCodec
+
+import scuff.Codec
+import scuff.concurrent._
+import delta.process.Update
 
 object DistributedMonotonicProcessor {
 
@@ -28,17 +24,51 @@ object DistributedMonotonicProcessor {
     * Process transaction, ensuring proper sequencing.
     */
   def apply[K, EVT: ClassTag, S >: Null: ClassTag](
-      imap: IMap[K, EntryState[S, EVT]], txnProjector: TransactionProjector[S, EVT])(
-      txn: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
-    val verifiedTxn: Transaction[K, EVT] = {
-      txn.events.collect { case evt: EVT => evt } match {
-        case Nil => sys.error(s"${txn.channel} transaction ${txn.stream}(rev:${txn.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
-        case events => txn.copy(events = events)
+      imap: IMap[K, _ <: EntryState[S, EVT]], projector: Projector[S, EVT])(
+      tx: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] =
+    this.apply(Codec.noop[S], imap, projector)(tx)
+
+  /**
+    * Process transaction, ensuring proper sequencing.
+    */
+  def apply[K, EVT: ClassTag, W >: Null: ClassTag, S](
+      stateCodec: Codec[W, S],
+      imap: IMap[K, _ <: EntryState[S, EVT]], projector: Projector[W, EVT])(
+      tx: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
+
+    val verifiedTx: Transaction[K, EVT] = {
+      tx.events.collect { case evt: EVT => evt } match {
+        case Nil => sys.error(s"${tx.channel} transaction ${tx.stream}(rev:${tx.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
+        case events => tx.copy(events = events)
       }
     }
-    val processor = new DistributedMonotonicProcessor[K, EVT, S](verifiedTxn, txnProjector)
+    val processor = new DistributedMonotonicProcessor[K, EVT, W, S](
+      AsyncCodec(stateCodec), Offloadable.NO_OFFLOADING, verifiedTx, projector)
     val callback = CallbackPromise[EntryUpdateResult]
-    imap.submitToKey(txn.stream, processor, callback)
+    imap.submitToKey(tx.stream, processor, callback)
+    callback.future
+  }
+
+  /**
+    * Process transaction, ensuring proper sequencing.
+    */
+  def apply[K, EVT: ClassTag, W >: Null: ClassTag, S](
+      stateCodec: AsyncCodec[W, S],
+      stateCodecExecutor: IExecutorService,
+      imap: IMap[K, _ <: EntryState[S, EVT]],
+      projector: Projector[W, EVT])(
+      tx: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
+
+    val verifiedTx: Transaction[K, EVT] = {
+      tx.events.collect { case evt: EVT => evt } match {
+        case Nil => sys.error(s"${tx.channel} transaction ${tx.stream}(rev:${tx.revision}) events does not conform to ${classTag[EVT].runtimeClass.getName}")
+        case events => tx.copy(events = events)
+      }
+    }
+    val processor = new DistributedMonotonicProcessor[K, EVT, W, S](
+      stateCodec, stateCodecExecutor.getName, verifiedTx, projector)
+    val callback = CallbackPromise[EntryUpdateResult]
+    imap.submitToKey(tx.stream, processor, callback)
     callback.future
   }
 
@@ -48,63 +78,109 @@ object DistributedMonotonicProcessor {
  *  Distributed monotonic [[delta.Transaction]] entry processor, ensuring
  *  monotonic stream revision ordering.
  */
-final class DistributedMonotonicProcessor[K, EVT, S >: Null] private[hazelcast] (
-  val txn: Transaction[K, EVT],
-  val txnProjector: TransactionProjector[S, EVT])(implicit val evtTag: ClassTag[EVT], val stateTag: ClassTag[S])
-    extends AbstractEntryProcessor[K, EntryState[S, EVT]](true) {
+final class DistributedMonotonicProcessor[K, EVT, W >: Null, S] private[hazelcast] (
+  val stateCodec: AsyncCodec[W, S], val getExecutorName: String,
+  val tx: delta.Transaction[K, EVT],
+  val projector: Projector[W, EVT])
+extends AbstractEntryProcessor[K, EntryState[S, EVT]](/* applyOnBackup */ true)
+with Offloadable {
 
   type EntryState = delta.hazelcast.EntryState[S, EVT]
-  type TXN = Transaction[_, EVT]
+  type Transaction = delta.Transaction[_, EVT]
 
-  def process(entry: Entry[K, EntryState]): Object = processTransaction(entry, this.txn)
+  def process(entry: Entry[K, EntryState]): Object = processTransaction(entry, this.tx)
 
-  @tailrec
-  private def processTransaction(entry: Entry[K, EntryState], txn: TXN): EntryUpdateResult = {
+  private def processTransaction(entry: Entry[K, EntryState], tx: Transaction): EntryUpdateResult = {
+
+      def updateEntry(entryState: EntryState): EntryUpdateResult = {
+
+        entry setValue entryState
+
+        if (entryState.unapplied.isEmpty) { // No unapplied, so must have snapshot
+          val snapshot = entryState.snapshot
+          val updContent = if (entryState.contentUpdated) Some(snapshot.content) else None
+          Updated(Update(updContent, snapshot.revision, snapshot.tick))
+        } else { // Have unapplied, so revisions still missing
+          val firstMissingRev = entryState.snapshot match {
+            case null => 0
+            case snapshot => snapshot.revision + 1
+          }
+          val range = firstMissingRev until entryState.unapplied.head._1
+          assert(range.nonEmpty)
+          MissingRevisions(range)
+        }
+      }
+
     entry.getValue match {
 
       case null => // First transaction seen
-        if (txn.revision == 0) { // First transaction, as expected
-          val snapshot = new Snapshot(txnProjector(txn, None), txn.revision, txn.tick)
-          entry setValue new EntryState(snapshot, contentUpdated = true)
-          Updated(snapshot)
+        val currUnapplied = TreeMap(tx.revision -> tx)
+        if (tx.revision == 0) { // First transaction, as expected
+          val entryState = processTransactions(currUnapplied)
+          updateEntry(entryState)
         } else { // Not first, so missing some
-          entry setValue new EntryState(null, contentUpdated = false, TreeMap(txn.revision -> txn))
-          MissingRevisions(0 until txn.revision)
+          val entryState = new EntryState(null, contentUpdated = false, currUnapplied)
+          updateEntry(entryState)
         }
 
-      case EntryState(null, _, unapplied) => // Un-applied transactions exists, no snapshot yet
-        if (txn.revision == 0) { // This transaction is first, so apply
-          val snapshot = new Snapshot(txnProjector(txn, None), txn.revision, txn.tick)
-          entry setValue new EntryState(snapshot, contentUpdated = true, unapplied.tail)
-          processTransaction(entry, unapplied.head._2)
+      case EntryState(null, _, unapplied) =>
+        assert(unapplied.nonEmpty) // No snapshot, so unapplied transactions must exist
+        val currUnapplied = unapplied.updated(tx.revision, tx)
+        if (tx.revision == 0) { // This transaction is first, so apply
+          val entryState = processTransactions(currUnapplied)
+          updateEntry(entryState)
         } else { // Still not first transaction
-          val state = new EntryState(null, contentUpdated = false, unapplied.updated(txn.revision, txn))
-          entry setValue state
-          MissingRevisions(0 until state.unapplied.head._1)
+          val entryState = new EntryState(null, contentUpdated = false, currUnapplied)
+          updateEntry(entryState)
         }
 
       case EntryState(snapshot, _, unapplied) =>
-        val expectedRev = snapshot.revision + 1
-        if (txn.revision == expectedRev) { // Expected revision, apply
-          val updSnapshot = new Snapshot(txnProjector(txn, Some(snapshot.content)), txn.revision, txn.tick)
-          unapplied.headOption match {
-            case None =>
-              val contentUpdated = !(snapshot contentEquals updSnapshot)
-              entry setValue new EntryState(updSnapshot, contentUpdated)
-              Updated(updSnapshot)
-            case Some((_, unappliedTxn)) =>
-              entry setValue new EntryState(updSnapshot, contentUpdated = false, unapplied.tail)
-              processTransaction(entry, unappliedTxn)
-          }
-        } else if (txn.revision > expectedRev) { // Future revision, missing some
-          val state = new EntryState(snapshot, contentUpdated = false, unapplied.updated(txn.revision, txn))
-          entry setValue state
-          MissingRevisions(expectedRev until state.unapplied.head._1)
-        } else {
-          IgnoredDuplicate
+        if (snapshot.revision >= tx.revision) IgnoredDuplicate
+        else {
+          val currUnapplied = unapplied.updated(tx.revision, tx)
+          val entryState = processTransactions(currUnapplied, snapshot)
+          updateEntry(entryState)
         }
-
     }
+  }
+
+  private def processTransactions(
+      unapplied: TreeMap[Int, delta.Transaction[_, EVT]], snapshot: Snapshot[S]): EntryState = {
+    val state = stateCodec decode snapshot.content
+    processTransactions(
+      unapplied, Some(snapshot.revision -> snapshot.content),
+      Some(state), snapshot.revision, snapshot.tick)
+  }
+
+  @tailrec
+  private def processTransactions(
+      unapplied: TreeMap[Int, delta.Transaction[_, EVT]], origState: Option[(Int, S)] = None,
+      currState: Option[W] = None, revision: Int = -1, tick: Long = Long.MinValue): EntryState = {
+
+    unapplied.headOption match {
+
+      case Some((_, tx)) if tx.revision == revision + 1 =>
+        val newState = projector(tx, currState)
+        processTransactions(unapplied.tail, origState, Some(newState), tx.revision, tx.tick)
+
+      case _ =>
+        val (snapshotOrNull, contentUpdated) = currState match {
+          case Some(currState) =>
+            origState match {
+              case Some((origRev, origState)) if origRev == revision =>
+                Snapshot(origState, revision, tick) -> false
+              case _ =>
+                val encoding = stateCodec.encode(currState)(Threads.PiggyBack)
+                val newState = encoding await Duration.Zero // Duration irrelevant when piggybacking
+                val snapshot = Snapshot(newState, revision, tick)
+                val contentUpdated = !origState.exists(snapshot.contentEquals)
+                snapshot -> contentUpdated
+            }
+          case None => (null: Snapshot[S]) -> false
+        }
+        EntryState(snapshotOrNull, contentUpdated, unapplied)
+    }
+
   }
 
 }

@@ -8,8 +8,8 @@ import scala.concurrent.{ ExecutionContext, Future }
 import delta.read.{ BasicReadModel, SubscriptionSupport }
 import scuff.Subscription
 
-trait SubscriptionAdapter[ID, S] {
-  rm: BasicReadModel[ID, S] with SubscriptionSupport[ID, S] =>
+trait SubscriptionAdapter[ID, View, U] {
+  rm: BasicReadModel[ID, View] with SubscriptionSupport[ID, View, U] =>
 
   /**
    * Subscribe to snapshot updates with an initial snapshot.
@@ -19,7 +19,7 @@ trait SubscriptionAdapter[ID, S] {
    */
   def subscribe(
       id: ID, callbackEC: ExecutionContext,
-      callback: BiConsumer[Snapshot, SnapshotUpdate]): Future[Subscription] = {
+      callback: BiConsumer[Snapshot, Update]): Future[Subscription] = {
     this.subscribe(id, callbackEC) {
       case Right(update) => callback.accept(null, update)
       case Left(snapshot) => callback.accept(snapshot, null)
@@ -32,12 +32,16 @@ trait SubscriptionAdapter[ID, S] {
    * In other words, the first callback will be a snapshot and all subsequent
    * callbacks will be updates.
    */
-  def subscribe(id: ID, callbackExe: Executor, reportFailure: Consumer[Throwable], callback: BiConsumer[Snapshot, SnapshotUpdate]): Future[Subscription] = {
+  def subscribe(
+      id: ID, callbackExe: Executor, reportFailure: Consumer[Throwable],
+      callback: BiConsumer[Snapshot, Update]): Future[Subscription] = {
+
     val callbackEC = ExecutionContext.fromExecutor(callbackExe, reportFailure.accept)
     this.subscribe(id, callbackEC) {
       case Right(update) => callback.accept(null, update)
       case Left(snapshot) => callback.accept(snapshot, null)
     }
+
   }
 
 }

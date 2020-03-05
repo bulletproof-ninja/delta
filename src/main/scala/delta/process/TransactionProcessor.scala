@@ -1,6 +1,5 @@
 package delta.process
 
-import delta.Transaction
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 
@@ -11,24 +10,24 @@ import scala.util.control.NonFatal
  */
 trait TransactionProcessor[ID, EVT, S >: Null] {
 
-  protected type TXN = Transaction[ID, _ >: EVT]
+  protected type Transaction = delta.Transaction[ID, _ >: EVT]
 
   /**
    *  Transaction processing.
-   *  @param txn Transaction to process
+   *  @param tx Transaction to process
    *  @param currState Current state, if exists.
    *  @return New state
    */
-  protected def process(txn: TXN, currState: Option[S]): Future[S]
+  protected def process(tx: Transaction, currState: Option[S]): Future[S]
 
   @inline
-  private[process] final def callProcess(txn: TXN, currState: Option[S]): Future[S] =
-    try process(txn, currState) catch {
+  private[process] final def callProcess(tx: Transaction, currState: Option[S]): Future[S] =
+    try process(tx, currState) catch {
       case NonFatal(cause) =>
         Future failed new IllegalStateException(
-s"""Failed processing of transaction ${txn.stream}:${txn.revision}
+s"""Failed processing of transaction ${tx.stream}:${tx.revision}
 Preprocess state: $currState
-Transaction: $txn
+Transaction: $tx
 """, cause)
     }
 

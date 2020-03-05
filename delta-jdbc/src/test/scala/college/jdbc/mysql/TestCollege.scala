@@ -18,9 +18,10 @@ import scuff.jdbc.ConnectionSource
 import college.CollegeEventFormat
 import college.jdbc.StudentEmailsStore
 import scuff.SysProps
+import java.{util => ju}
 
 object TestCollege {
-  val db = "delta_testing_college"
+  val db = s"delta_testing_${ju.UUID.randomUUID}".replace('-', '_')
   val ds = {
     val ds = new MysqlDataSource
     ds setUser "root"
@@ -54,9 +55,9 @@ class TestCollege extends college.jdbc.TestCollege {
     new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
     with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop[TXN]
+      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txCodec = scuff.Codec.noop[Transaction]
     }.ensureSchema()
   }
 

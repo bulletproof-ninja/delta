@@ -42,10 +42,10 @@ trait JoinState[ID, EVT, S >: Null] {
     new Processor(process, revision)
 
   /** Process stream as normally implemented through `process`. */
-  protected def processStream(txn: TXN, streamState: Option[S]): Future[S]
-  
-  protected def process(txn: TXN, streamState: Option[S]): Future[S] = 
-    processStream(txn, streamState)
+  protected def processStream(tx: Transaction, streamState: Option[S]): Future[S]
+
+  protected def process(tx: Transaction, streamState: Option[S]): Future[S] =
+    processStream(tx, streamState)
 
 
   /**
@@ -56,20 +56,20 @@ trait JoinState[ID, EVT, S >: Null] {
    *  @param tick If causal ordering is necessary, use this transaction tick
    *  @param metadata Transaction metadata
    *  @param evt Event from stream
-   *  @return Map of collateral id and state processor(s) derivable from event, if any.
+   *  @return Map of joined stream ids and state processor(s) derivable from event
    */
   protected def prepareJoin(
       streamId: ID, streamRevision: Int,
       tick: Long, metadata: Map[String, String])(evt: EVT): Map[ID, _ <: Processor]
 
-  protected def prepareJoin(txn: TXN): Map[ID, Processor] = {
+  protected def prepareJoin(tx: Transaction): Map[ID, Processor] = {
     import scuff._
-    val join = prepareJoin(txn.stream, txn.revision, txn.tick, txn.metadata) _
-    txn.events.foldLeft(Map.empty[ID, Processor]) {
+    val join = prepareJoin(tx.stream, tx.revision, tx.tick, tx.metadata) _
+    tx.events.foldLeft(Map.empty[ID, Processor]) {
       case (fmap, evt: EVT) =>
         val mapping = join(evt)
-        if (mapping.contains(txn.stream)) throw new IllegalStateException(
-          s"JoinState preprocessing cannot contain stream id itself: ${txn.stream}")
+        if (mapping.contains(tx.stream)) throw new IllegalStateException(
+          s"JoinState preprocessing cannot contain stream id itself: ${tx.stream}")
         fmap.merge(mapping) {
           case (first, second) => new JoinState.Processor(
             (state: Option[S]) => {
@@ -82,31 +82,35 @@ trait JoinState[ID, EVT, S >: Null] {
   }
 }
 
-trait MonotonicJoinState[ID, EVT, S >: Null]
-  extends MonotonicProcessor[ID, EVT, S]
+trait MonotonicJoinState[ID, EVT, S >: Null, U]
+  extends MonotonicProcessor[ID, EVT, S, U]
   with JoinState[ID, EVT, S] {
-  
-  protected final override def process(txn: TXN, streamState: Option[S]): Future[S] = {
-    val processors: Map[ID, Processor] = prepareJoin(txn)
+
+  protected final override def process(tx: Transaction, streamState: Option[S]): Future[S] = {
+    val processors: Map[ID, Processor] = prepareJoin(tx)
     val futureUpdates: Iterable[Future[Unit]] =
       processors.map {
         case (id, processor) =>
           implicit val ec = processContext(id)
-          val res: Future[(Option[SnapshotUpdate], _)] = this.processStore.upsert(id) { optSnapshot =>
-            val tick = optSnapshot.map(_.tick max txn.tick) getOrElse txn.tick
-            val updatedState: S = processor(optSnapshot.map(_.content))
-            val updatedSnapshot = Snapshot(updatedState, processor.revision, tick)
-            Future successful (Some(updatedSnapshot) -> null)
-          }
-          res.map {
-            case (Some(update), _) => onSnapshotUpdate(id, update)
-            // We only process `Some`, so we know there are no `None`
-            case _ => sys.error("Should not happen.")
+          val result: Future[(Option[Update], _)] =
+            this.processStore.upsert(id) { snapshot =>
+              val tick = snapshot.map(_.tick max tx.tick) getOrElse tx.tick
+              val updatedSnapshot = processor(snapshot.map(_.content)) match {
+                case null => None
+                case updatedState => Some {
+                  Snapshot(updatedState, processor.revision, tick)
+                }
+              }
+              Future successful updatedSnapshot -> (())
+            }
+          result.map {
+            case (Some(update), _) => onUpdate(id, update)
+            case _ => // No change
           }
       }
-    implicit val ec = processContext(txn.stream)
+    implicit val ec = processContext(tx.stream)
     Future.sequence(futureUpdates).flatMap { _ =>
-      super.process(txn, streamState)
+      super.process(tx, streamState)
     }
   }
 }

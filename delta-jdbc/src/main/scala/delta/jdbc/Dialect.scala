@@ -221,15 +221,15 @@ INSERT INTO $metadataTable
     "s.channel", "t.tick", "t.revision",
     "e.event_idx", "e.event_name", "e.event_version", "e.event_data",
     "m.metadata_key", "m.metadata_val")
-  private val TxnColumnsPrefixed = "s.stream_id" +: StreamColumnsPrefixed
+  private val TxColumnsPrefixed = "s.stream_id" +: StreamColumnsPrefixed
   private val StreamColumnsSelect: String = StreamColumnsPrefixed.map { colName =>
     s"$colName AS ${colName.substring(2)}"
   }.mkString(",")
-  private val TxnColumnsSelect: String = TxnColumnsPrefixed.map { colName =>
+  private val TxColumnsSelect: String = TxColumnsPrefixed.map { colName =>
     s"$colName AS ${colName.substring(2)}"
   }.mkString(",")
   private val StreamColumnsIdx = Columns(StreamColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
-  private val TxnColumnsIdx = Columns(TxnColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
+  private val TxColumnsIdx = Columns(TxColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
 
   private[jdbc] case class Columns(
       stream_id: Int, revision: Int,
@@ -294,8 +294,8 @@ LEFT OUTER JOIN $metadataTable m
   ON m.stream_id = t.stream_id
   AND m.revision = t.revision"""
 
-  protected def makeTxnQuery(WHERE: String = ""): String = s"""
-SELECT $TxnColumnsSelect
+  protected def makeTxQuery(WHERE: String = ""): String = s"""
+SELECT $TxColumnsSelect
 $FromJoin
 $WHERE
 ORDER BY e.stream_id, e.revision, e.event_idx
@@ -309,7 +309,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
       s"WHERE t.tick >= ? AND"
     } else "WHERE"
     val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size)}"
-    val query = makeTxnQuery(WHERE)
+    val query = makeTxQuery(WHERE)
     prepareStatement(query) { ps =>
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
@@ -317,7 +317,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
         ps.setChannel(colIdx.next, channel)
       }
       executeQuery(ps) { rs =>
-        thunk(rs, TxnColumnsIdx)
+        thunk(rs, TxColumnsIdx)
       }
     }
   }
@@ -331,7 +331,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
     val channels = eventsByChannel.keys
     val events = eventsByChannel.values.flatten
     val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size, events.size)}"
-    val query = makeTxnQuery(WHERE)
+    val query = makeTxQuery(WHERE)
     prepareStatement(query) { ps =>
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
@@ -342,7 +342,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
         ps.setString(colIdx.next, evtFmt.signature(evt).name)
       }
       executeQuery(ps) { rs =>
-        thunk(rs, TxnColumnsIdx)
+        thunk(rs, TxColumnsIdx)
       }
     }
   }
@@ -351,14 +351,14 @@ ORDER BY e.stream_id, e.revision, e.event_idx
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
     val query = if (tickBound) {
-      makeTxnQuery(s"WHERE t.tick >= ?")
+      makeTxQuery(s"WHERE t.tick >= ?")
     } else {
-      makeTxnQuery()
+      makeTxQuery()
     }
     prepareStatement(query) { ps =>
       if (tickBound) ps.setLong(1, sinceTick)
       executeQuery(ps) { rs =>
-        thunk(rs, TxnColumnsIdx)
+        thunk(rs, TxColumnsIdx)
       }
     }
   }

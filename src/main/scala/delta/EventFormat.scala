@@ -69,9 +69,8 @@ object EventFormat {
 
     /**
      * Version, *if* version is supported, i.e. not `NoVersion`.
-     * @throws [[java.lang.IllegalStateException]] if version is unsupported
      */
-    @throws[IllegalStateException]
+    @throws[IllegalStateException]("if version is unsupported")
     def version: Byte =
       if (_version != NoVersion) _version
       else throw new IllegalStateException(s"Versioning not supported for event '$name'")

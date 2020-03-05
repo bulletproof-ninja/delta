@@ -11,7 +11,7 @@ import scuff.json._, JsVal._
  * is thus meant to be created *per* transaction, it's only necessary if the
  * supplied `EventFormat` need any of those. Otherwise it's fine to re-use an instance.
  */
-class EventCodec[EVT, EF](evtFmt: EventFormat[EVT, EF])(
+class JsonEvent[EVT, EF](evtFmt: EventFormat[EVT, EF])(
     channel: Transaction.Channel, metadata: Map[String, String])(
     implicit
     toJson: EF => JSON, fromJson: JSON => EF)

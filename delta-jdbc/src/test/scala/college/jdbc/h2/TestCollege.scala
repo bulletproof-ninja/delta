@@ -41,17 +41,19 @@ class TestCollege extends college.jdbc.TestCollege {
     dataSource.setURL(s"jdbc:h2:./${h2Name}")
   }
 
-  override def newLookupServiceProcStore = new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec).ensureTable()
+  override def newLookupServiceProcStore =
+    new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec)
+    .ensureTable()
 
   override def newEventStore: EventStore[Int, CollegeEvent] = {
     val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
     new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
     with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions:$ch")
-      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
-      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
-      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop[TXN]
+      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
+      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txCodec = scuff.Codec.noop[Transaction]
     }.ensureSchema()
   }
 

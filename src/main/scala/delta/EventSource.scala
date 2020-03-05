@@ -14,33 +14,33 @@ trait EventSource[ID, EVT] {
 
   protected implicit val channelTag: ClassTag[Channel] = ClassTag(classOf[String])
   type Channel = Transaction.Channel
-  type TXN = Transaction[ID, EVT]
+  type Transaction = delta.Transaction[ID, EVT]
 
   def currRevision(stream: ID): Future[Option[Int]]
   def maxTick(): Future[Option[Long]]
   def ticker: Ticker
 
   /** Replay complete stream. */
-  def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit
+  def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit
   /** Replay stream from provided revision range. */
-  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, R]): Unit
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit
   /** Replay stream from provided revision to current. */
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit
+  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit
   /** Replay stream from revision 0 to specific revision (inclusive). */
-  def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[TXN, R]): Unit =
+  def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit =
     replayStreamRange(stream, 0 to toRevision)(callback)
 
   /** Query across streams, optionally providing a selector to filter results. */
-  def query[U](selector: Selector = Everything)(callback: StreamConsumer[TXN, U]): Unit
+  def query[U](selector: Selector = Everything)(callback: StreamConsumer[Transaction, U]): Unit
   /** Query across streams, optionally providing a selector to filter results. */
-  def querySince[U](sinceTick: Long, selector: Selector = Everything)(callback: StreamConsumer[TXN, U]): Unit
+  def querySince[U](sinceTick: Long, selector: Selector = Everything)(callback: StreamConsumer[Transaction, U]): Unit
 
   /** Subscribe to all transactions, if publishing. */
-  final def subscribe[U]()(callback: TXN => U): Subscription = subscribe(Everything)(callback)
+  final def subscribe[U]()(callback: Transaction => U): Subscription = subscribe(Everything)(callback)
   /** Subscribe to selected transactions, if publishing. */
   def subscribe[U](
       selector: StreamsSelector)(
-      callback: TXN => U): Subscription = 
+      callback: Transaction => U): Subscription =
     sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageHubPublishing[_, _]].getName}")
 
   type CEVT = Class[_ <: EVT]
@@ -55,7 +55,7 @@ trait EventSource[ID, EVT] {
    * data on replay.
    */
   sealed abstract class Selector {
-    def include(txn: TXN): Boolean
+    def include(tx: Transaction): Boolean
     def toStreamsSelector: StreamsSelector
   }
   /**
@@ -71,7 +71,7 @@ trait EventSource[ID, EVT] {
   /** All streams, all channels, unbroken. */
   case object Everything extends StreamsSelector {
     def channelSubset: Set[Channel] = Set.empty
-    def include(txn: TXN) = true
+    def include(tx: Transaction) = true
   }
   @varargs
   def ChannelSelector(one: Channel, others: Channel*): StreamsSelector =
@@ -83,7 +83,7 @@ trait EventSource[ID, EVT] {
     //    def this(one: String, others: String*) = this((one +: others).toSet)
     require(channels.nonEmpty)
     def channelSubset: Set[Channel] = channels
-    def include(txn: TXN) = channels.contains(txn.channel)
+    def include(tx: Transaction) = channels.contains(tx.channel)
   }
   def EventSelector(chEvt: (Channel, Set[CEVT]), more: (Channel, Set[CEVT])*): Selector =
     new EventSelector(Map((chEvt :: more.toList): _*))
@@ -113,8 +113,8 @@ trait EventSource[ID, EVT] {
     require(byChannel.nonEmpty)
     require(byChannel.forall(_._2.nonEmpty), s"No events: ${byChannel.filter(_._2.isEmpty).map(_._1).mkString(", ")}")
     def channelSubset = byChannel.keySet
-    def include(txn: TXN) = byChannel.get(txn.channel).exists { set =>
-      txn.events.exists { evt =>
+    def include(tx: Transaction) = byChannel.get(tx.channel).exists { set =>
+      tx.events.exists { evt =>
         set.exists { cls =>
           cls isAssignableFrom evt.getClass
         }
@@ -126,9 +126,9 @@ trait EventSource[ID, EVT] {
   def SingleStreamSelector(stream: ID, channel: Channel): StreamsSelector = new SingleStreamSelector(stream, channel)
   case class SingleStreamSelector private[EventSource] (stream: ID, channel: Channel) extends StreamsSelector {
     def channelSubset: Set[Channel] = Set(channel)
-    def include(txn: TXN) = {
-      assert(txn.channel == channel) // Stream ids are unique across channels, thus merely assert
-      txn.stream == stream
+    def include(tx: Transaction) = {
+      assert(tx.channel == channel) // Stream ids are unique across channels, thus merely assert
+      tx.stream == stream
     }
   }
 

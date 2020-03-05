@@ -138,10 +138,10 @@ object ScalaHelp {
     }
   }
 
-  def writeToStore[K, V](
-      snapshots: java.util.Map[K, Snapshot[V]],
+  def writeToStore[K, S, U](
+      snapshots: java.util.Map[K, Snapshot[S]],
       batchSize: Int,
-      store: StreamProcessStore[K, V])(implicit ec: ExecutionContext): Future[Void] = {
+      store: StreamProcessStore[K, S, U])(implicit ec: ExecutionContext): Future[Void] = {
     require(batchSize > 0, s"Must have positive batch size, not $batchSize")
     val futures: Iterator[Future[Unit]] =
       if (batchSize == 1) {

@@ -20,8 +20,8 @@ class SomeEventStore(
   protected def toTopic(ch: Channel) = Topic(s"${this.getClass}:$ch")
   private val maxConnections = Runtime.getRuntime.availableProcessors * 2
   private val buffer = new ArrayBlockingQueue[Any](2048)
-  protected val txnHub = new RedisMessageHub(jedisInfo, maxConnections, ec, buffer, 3)
-  protected val txnChannels = Set(Channel("txn"))
-  protected val txnCodec = JavaSerializer[TXN]
+  protected val txHub = new RedisMessageHub(jedisInfo, maxConnections, ec, buffer, 3)
+  protected val txChannels = Set(Channel("tx"))
+  protected val txCodec = JavaSerializer[Transaction]
 
 }

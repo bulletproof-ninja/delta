@@ -3,24 +3,20 @@ package delta.process
 import scala.concurrent._
 import scuff.StreamConsumer
 import scala.reflect.ClassTag
-import java.util.concurrent.ScheduledExecutorService
 
 /**
  * Extension of [[delta.process.PersistentMonotonicConsumer]] with support
  * for join state (cross stream state).
  */
-abstract class PersistentMonotonicJoinConsumer[ID, EVT: ClassTag, S >: Null](
-    processStore: StreamProcessStore[ID, S],
-    replayPersistenceContext: ExecutionContext,
-    scheduler: ScheduledExecutorService)
-  extends PersistentMonotonicConsumer(processStore, replayPersistenceContext, scheduler)
+abstract class PersistentMonotonicJoinConsumer[ID, EVT: ClassTag, S >: Null, U]
+  extends PersistentMonotonicConsumer[ID, EVT, S, U]
   with JoinState[ID, EVT, S] {
 
-  override protected def replayProcessor(es: EventSource): StreamConsumer[TXN, Future[ReplayResult]] =
-    new ReplayProcessor with MonotonicJoinState[ID, EVT, S] {
+  override protected def replayProcessor(es: EventSource): StreamConsumer[Transaction, Future[ReplayResult]] =
+    new ReplayProcessor with MonotonicJoinState[ID, EVT, S, U] {
 
-      def processStream(txn: TXN, currState: Option[S]) =
-        PersistentMonotonicJoinConsumer.this.processStream(txn, currState)
+      def processStream(tx: Transaction, currState: Option[S]) =
+        PersistentMonotonicJoinConsumer.this.processStream(tx, currState)
 
       def prepareJoin(
           streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String])(
@@ -29,11 +25,11 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT: ClassTag, S >: Null](
 
     }
 
-  override protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any =
-    new LiveProcessor(es) with MonotonicJoinState[ID, EVT, S] {
+  override protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): Transaction => Any =
+    new LiveProcessor(es) with MonotonicJoinState[ID, EVT, S, U] {
 
-      def processStream(txn: TXN, currState: Option[S]) =
-        PersistentMonotonicJoinConsumer.this.processStream(txn, currState)
+      def processStream(tx: Transaction, currState: Option[S]) =
+        PersistentMonotonicJoinConsumer.this.processStream(tx, currState)
 
       def prepareJoin(
           streamId: ID, streamRevision: Int, tick: Long, metadata: Map[String, String])(

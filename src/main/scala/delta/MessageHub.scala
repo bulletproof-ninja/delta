@@ -45,7 +45,7 @@ object MessageHub {
 trait MessageHub {
 
   /** Native message type. */
-  type MsgType
+  type Message
 
   type Topic = MessageHub.Topic
   def Topic(name: String): Topic = MessageHub.Topic(name)
@@ -59,7 +59,7 @@ trait MessageHub {
    * @param topic Publishing topic
    * @param msg Hub-native message
    */
-  protected def publishImpl(topic: Topic, msg: MsgType): Unit
+  protected def publish(msg: Message, topic: Topic): Unit
 
   /**
    * Publish future message.
@@ -69,9 +69,9 @@ trait MessageHub {
   final def publish[M](
       topic: Topic, msg: Future[M])(
       implicit
-      encoder: M => MsgType): Unit = {
+      encoder: M => Message): Unit = {
     msg.foreach { msg =>
-      try publishImpl(topic, encoder(msg)) catch {
+      try publish(encoder(msg), topic) catch {
         case NonFatal(cause) =>
           publishCtx reportFailure new MessageHub.PublishFailure(topic, msg, cause)
       }
@@ -85,9 +85,9 @@ trait MessageHub {
    */
   def publish[M](topic: Topic, msg: M)(
       implicit
-      encoder: M => MsgType): Unit =
+      encoder: M => Message): Unit =
     publishCtx execute new Runnable {
-      def run = try publishImpl(topic, encoder(msg)) catch {
+      def run = try publish(encoder(msg), topic) catch {
         case NonFatal(cause) =>
           publishCtx reportFailure new MessageHub.PublishFailure(topic, msg, cause)
       }
@@ -106,16 +106,16 @@ trait MessageHub {
   /**
    *  Subscribe with given subscription key.
    *  @param key Subscription key
-   *  @param callback Topic + MsgType callback
+   *  @param callback Topic + Message callback
    */
-  protected def subscribeToKey(key: SubscriptionKey)(callback: (Topic, MsgType) => Unit): Subscription
+  protected def subscribeToKey(key: SubscriptionKey)(callback: (Topic, Message) => Unit): Subscription
 
   protected final class Subscriber[M: ClassTag](topics: Set[Topic], callback: PartialFunction[M, Unit]) {
     @inline def matches[M2: ClassTag](topic: Topic) = (topics contains topic) && (classTag[M] == classTag[M2])
     @inline def notifyIfMatch(msg: M): Unit = if (callback isDefinedAt msg) callback(msg)
   }
 
-  final def subscribe[M](msgType: Class[M], decoder: MsgType => M, topics: java.lang.Iterable[Topic], callback: java.util.function.Consumer[_ >: M]): Subscription = {
+  final def subscribe[M](msgType: Class[M], decoder: Message => M, topics: java.lang.Iterable[Topic], callback: java.util.function.Consumer[_ >: M]): Subscription = {
     import scala.collection.JavaConverters._
     implicit val tag = ClassTag[M](msgType)
     subscribe[M](topics.asScala) {
@@ -133,7 +133,7 @@ trait MessageHub {
       topics: Iterable[Topic])(
       callback: PartialFunction[M, Unit])(
       implicit
-      decoder: MsgType => M): Subscription = {
+      decoder: Message => M): Subscription = {
 
     require(topics.nonEmpty, "Must subscribe at least one topic")
 
@@ -141,7 +141,7 @@ trait MessageHub {
     val keys = subscriptionKeys(topicSet)
     require(keys.nonEmpty, "Method 'subscriptionKeys' must return at least one key; was empty")
     val subscriber = new Subscriber(topicSet, callback)
-    val internalCallback: (Topic, MsgType) => Unit = {
+    val internalCallback: (Topic, Message) => Unit = {
       case (topic, ht) if (subscriber matches topic) =>
         val msg = decoder(ht)
         subscriber notifyIfMatch msg
@@ -167,7 +167,7 @@ trait MessageHub {
       topic: Topic, moreTopics: Topic*)(
       callback: PartialFunction[M, Unit])(
       implicit
-      decoder: MsgType => M): Subscription =
+      decoder: Message => M): Subscription =
     subscribe[M](topic +: moreTopics)(callback)
 
 }
@@ -186,7 +186,7 @@ trait BufferedRetryPublish {
   hub: MessageHub =>
 
   /** The publish queue. */
-  protected def publishQueue: BlockingQueue[(Topic, MsgType)]
+  protected def publishQueue: BlockingQueue[(Topic, Message)]
   /** The threshold before circuit breaker is tripped. */
   protected def circuitBreakerThreshold: Int
   /** The retry back-off schedule circuit breaker. */
@@ -194,12 +194,12 @@ trait BufferedRetryPublish {
 
   override def publish[M](topic: Topic, msg: M)(
       implicit
-      encoder: M => MsgType): Unit = {
+      encoder: M => Message): Unit = {
     if (!publishThread.isAlive) publishThread.start()
     enqueue(topic, encoder(msg))
   }
 
-  private def enqueue(topic: Topic, msg: MsgType): Unit = {
+  private def enqueue(topic: Topic, msg: Message): Unit = {
     try publishQueue add topic -> msg catch {
       case NonFatal(cause) => // If enqueuing fails, for any reason, report it, but don't propagate failure
         publishCtx reportFailure new MessageHub.PublishFailure(topic, msg, cause)
@@ -232,7 +232,7 @@ trait BufferedRetryPublish {
         val (topic, msg) = publishQueue.take() // blocking
         publishCtx execute new Runnable {
           def run = try {
-            publishImpl(topic, msg)
+            publish(msg, topic)
             ft.reset() // Publish success
           } catch {
             case NonFatal(cause) =>
@@ -251,7 +251,7 @@ trait BufferedRetryPublish {
  * if individual subscriptions lead to inefficient use
  * of resources.
  * NOTE: It is assumed that individual subscriber decoding
- * of a given `MsgType` are identical, such that decoding only
+ * of a given `Message` are identical, such that decoding only
  * happens, at most, once per message, not per subscriber.
  */
 trait SubscriptionPooling {
@@ -278,7 +278,7 @@ trait SubscriptionPooling {
       }
     }
 
-    private[this] def notifySubscribers(decoder: MsgType => M)(topic: Topic, hubMsg: MsgType): Unit = {
+    private[this] def notifySubscribers(decoder: Message => M)(topic: Topic, hubMsg: Message): Unit = {
       val subscribers = sharedLock {
         this.subscribers.iterator.filter(_ matches topic).toArray
       }
@@ -288,7 +288,7 @@ trait SubscriptionPooling {
       }
     }
 
-    def subscribe(sub: Subscriber[M], decoder: MsgType => M): Subscription = {
+    def subscribe(sub: Subscriber[M], decoder: Message => M): Subscription = {
       exclusiveLock {
         scheduledCancellation.foreach { scheduledCancellation =>
           scheduledCancellation.cancel( /* mayInterruptIfRunning = */ false)
@@ -296,7 +296,7 @@ trait SubscriptionPooling {
         }
         if (subscription.isEmpty) {
           assert(subscribers.isEmpty)
-          val callback: (Topic, MsgType) => Unit = notifySubscribers(decoder) _
+          val callback: (Topic, Message) => Unit = notifySubscribers(decoder) _
           val sub = subscribeToKey(key)(callback)
           this.subscription = Some(sub)
         }
@@ -325,7 +325,7 @@ trait SubscriptionPooling {
       topics: Iterable[Topic])(
       callback: PartialFunction[M, Unit])(
       implicit
-      decoder: MsgType => M): Subscription = {
+      decoder: Message => M): Subscription = {
 
     require(topics.nonEmpty, "Must subscribe at least one topic")
 

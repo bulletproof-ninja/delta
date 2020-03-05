@@ -2,56 +2,55 @@ package delta.process
 
 import scala.concurrent.duration.FiniteDuration
 import scuff.concurrent.PartitionedExecutionContext
-import scala.concurrent.Future
+import scala.concurrent._
 import scala.reflect.ClassTag
 import scuff.concurrent.Threads
-import scala.concurrent.ExecutionContext
+import scala.collection.concurrent.{ Map => CMap, _ }
 
-abstract class PersistentMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
-    persistentStore: StreamProcessStore[ID, S],
-    whenDoneCompletionTimeout: FiniteDuration,
-    protected val persistenceContext: ExecutionContext,
-    writeBatchSize: Int,
-    partitionThreads: PartitionedExecutionContext,
-    cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]])
-  extends MonotonicReplayProcessor[ID, EVT, S, Unit](
-      whenDoneCompletionTimeout,
-      ConcurrentMapStore(cmap, persistentStore.tickWatermark)(persistentStore.read))
-  with ConcurrentMapReplayPersistence[ID, EVT, S, Unit] {
+abstract class PersistentMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, U](
+  persistentStore: StreamProcessStore[ID, S, U],
+  whenDoneCompletionTimeout: FiniteDuration,
+  protected val persistenceContext: ExecutionContext,
+  writeBatchSize: Int,
+  partitionThreads: PartitionedExecutionContext,
+  cmap: CMap[ID, ConcurrentMapStore.State[S]])
+extends MonotonicReplayProcessor[ID, EVT, S, U, Unit](
+  whenDoneCompletionTimeout,
+  ConcurrentMapStore.asReplayStore(cmap, persistentStore))
+with ConcurrentMapReplayPersistence[ID, EVT, S, U, Unit] {
 
   def this(
-      store: StreamProcessStore[ID, S],
+      persistentStore: StreamProcessStore[ID, S, U],
       whenDoneCompletionTimeout: FiniteDuration,
       whenDoneContext: ExecutionContext,
       writeBatchSize: Int,
       failureReporter: Throwable => Unit,
       processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
-      cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]] = 
-        new collection.concurrent.TrieMap[ID, ConcurrentMapStore.Value[S]]) =
-    this(store, whenDoneCompletionTimeout, whenDoneContext, writeBatchSize,
-      PartitionedExecutionContext(processingThreads, failureReporter, Threads.factory(s"default-replay-processor", failureReporter)),
+      cmap: CMap[ID, ConcurrentMapStore.State[S]] = new TrieMap[ID, ConcurrentMapStore.State[S]]) =
+    this(persistentStore, whenDoneCompletionTimeout, whenDoneContext, writeBatchSize,
+      PartitionedExecutionContext(
+        processingThreads, failureReporter, Threads.factory(s"default-replay-processor", failureReporter)),
       cmap)
-      
+
+  override type Snapshot = delta.Snapshot[S]
+
   protected def processContext(id: ID) = partitionThreads.singleThread(id.##)
 
-  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Value]] =
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]] =
     partitionThreads.shutdown().map(_ => cmap)(persistenceContext)
 
-  protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[Unit] = {
-    val writes = collection.mutable.Buffer[Future[Unit]]()
-    while (snapshots.hasNext) {
-      if (writeBatchSize > 1) {
-        val batch = snapshots.take(writeBatchSize).toMap
-        writes += persistentStore.writeBatch(batch)
-      } else if (writeBatchSize == 1) {
-        val (id, snapshot) = snapshots.next
-        writes += persistentStore.write(id, snapshot)
-      } else { // replayProcessorWriteReplaySize <= 0
-        val batch = snapshots.toMap
-        writes += persistentStore.writeBatch(batch)
-      }
-    }
+  protected final def persistReplayState(snapshots: Iterator[(ID, Snapshot)]) = {
       implicit def ec = persistenceContext
+
+    val writes: Iterator[Future[Unit]] =
+      if (writeBatchSize > 1) {
+        snapshots.grouped(writeBatchSize).map { batch =>
+          persistentStore writeBatch batch.toMap
+        }
+      } else {
+        snapshots.map(persistentStore.write)
+      }
+
     Future.sequence(writes).map(_ => ())
   }
 

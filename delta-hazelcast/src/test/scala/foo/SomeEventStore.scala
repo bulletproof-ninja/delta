@@ -14,9 +14,9 @@ class SomeEventStore(ec: ExecutionContext, hz: HazelcastInstance, initTicker: Ev
   extends TransientEventStore[Int, MyEvent, Array[Byte]](ec, BinaryEventFormat)(initTicker)
   with MessageHubPublishing[Int, MyEvent] {
 
-  protected def toTopic(ch: Channel) = Topic(s"txn:$ch")
-  protected val txnHub = new TopicMessageHub[TXN](hz, ec)
-  protected val txnChannels = Set(Channel("one"))
-  protected val txnCodec = Codec.noop[TXN]
+  protected def toTopic(ch: Channel) = Topic(s"tx:$ch")
+  protected val txHub = new TopicMessageHub[Transaction](hz, ec)
+  protected val txChannels = Set(Channel("one"))
+  protected val txCodec = Codec.noop[Transaction]
 
 }

@@ -5,10 +5,12 @@ import java.sql._
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
-import delta.process.{ StreamProcessStore, BlockingCASWrites, Exceptions }
+import delta.process._
 
-import scuff.concurrent.Threads
 import scuff.jdbc.ConnectionSource
+import delta.SnapshotReader
+
+import scuff._
 
 object JdbcStreamProcessStore {
   private[jdbc] case class PkColumn[T](name: String, colType: ColumnType[T])
@@ -40,6 +42,19 @@ object JdbcStreamProcessStore {
     def colType = implicitly[ColumnType[C]].asInstanceOf[ColumnType[Any]]
   }
 
+  case class Config(
+    pkColumn: String,
+    table: String,
+    schema: Option[String] = None,
+    timestamp: Option[WithTimestamp] = None,
+    version: Option[Short] = None) {
+
+    def version(v: Short): Config = copy(version = Some(v))
+    def timestamp(wt: WithTimestamp): Config = copy(timestamp = Option(wt))
+    def schema(s: String): Config = copy(schema = s.optional)
+
+  }
+
 }
 
 import JdbcStreamProcessStore._
@@ -53,55 +68,22 @@ import JdbcStreamProcessStore._
  * unless the side effect is idempotent, as a new version will
  * trigger re-processing thus the side-effects being repeated.
  */
-class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
-    pkColumnName: String,
-    protected val cs: ConnectionSource,
-    version: Option[Short],
-    table: String, schema: Option[String],
-    blockingCtx: ExecutionContext,
-    withTimestamp: Option[WithTimestamp] = None,
-    indexes: List[Index[S]] = Nil)
-  extends AbstractStore(version, table, schema)(blockingCtx)
-  with StreamProcessStore[PK, S] with BlockingCASWrites[PK, S, Connection] {
+class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType, U](
+  config: Config,
+  protected val cs: ConnectionSource,
+  blockingCtx: ExecutionContext,
+  indexes: List[Index[S]] = Nil)(
+  implicit
+  protected val updateCodec: UpdateCodec[S, U])
+extends AbstractStore(config.version, config.table, config.schema)(blockingCtx)
+with StreamProcessStore[PK, S, U] with BlockingCASWrites[PK, S, U, Connection] {
 
-  def this(
-      pkColumnName: String,
-      cs: ConnectionSource,
-      table: String, schema: Option[String],
-      blockingCtx: ExecutionContext,
-      withTimestamp: WithTimestamp,
-      indexes: List[Index[S]]) =
-    this(pkColumnName, cs, None, table, schema, blockingCtx, Option(withTimestamp), indexes)
+  protected final def dataColumnType = implicitly[ColumnType[S]]
 
-  def this(
-      pkColumnName: String,
-      cs: ConnectionSource,
-      version: Short,
-      table: String, schema: Option[String],
-      blockingCtx: ExecutionContext,
-      withTimestamp: WithTimestamp,
-      indexes: List[Index[S]]) =
-    this(pkColumnName, cs, Some(version), table, schema, blockingCtx, Option(withTimestamp), indexes)
+  import config.{ pkColumn => pkColumnName }
 
-  def this(
-      pkColumnName: String,
-      cs: ConnectionSource,
-      version: Short,
-      table: String, schema: Option[String],
-      blockingCtx: ExecutionContext,
-      withTimestamp: WithTimestamp) =
-    this(pkColumnName, cs, Some(version), table, schema, blockingCtx, Option(withTimestamp), Nil)
-
-  def this(
-      pkColumnName: String,
-      cs: ConnectionSource,
-      version: Option[Short],
-      table: String, schema: Option[String],
-      blockingCtx: ExecutionContext,
-      withTimestamp: WithTimestamp) =
-    this(pkColumnName, cs, version, table, schema, blockingCtx, Option(withTimestamp))
-
-  private[this] val setTS: String = withTimestamp.map(col => s", ${col.colName} = ${col.sqlFunction}") getOrElse ""
+  private[this] val setTS: String =
+    config.timestamp.map(col => s", ${col.colName} = ${col.sqlFunction}") getOrElse ""
 
   final protected val WHERE: String = version.map(version => s"WHERE version = $version\nAND") getOrElse "WHERE"
   final protected val pkColumn = PkColumn(pkColumnName, implicitly[ColumnType[PK]])
@@ -113,6 +95,60 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
       case PkColumn(name, colType) => s"$name ${colType.typeName} NOT NULL"
     }.mkString(",\n  ")
   }
+
+  /**
+    * Create a snapshot reader with modified data selection.
+    * This can be used to select a subset of the data, to
+    * minimize unnecessary data transport.
+    * E.g. the regular `SELECT data` can be modified
+    * into `SELECT SUBSTR(data, 5) AS data` by providing
+    * a `selectData` value of `"SUBSTR(data, 5)"`.
+    * @param selectData The modified data selection
+    * @return Snapshot with modified data selection
+    */
+  protected def withModifiedData[ID, MS: ColumnType](
+      selectData: String)(
+      implicit
+      idConv: ID => PK): SnapshotReader[ID, MS] =
+    new SnapshotReader[ID, MS] {
+
+      def read(id: ID): Future[Option[Snapshot]] =
+        queryModified[MS](id, selectData)
+
+    }
+
+  /**
+    * Create a snapshot reader with modified data selection,
+    * based on a sub-selection key.
+    * This can be used to select a keyed subset of the data,
+    * to minimize unnecessary data transport.
+    * E.g. if `data` contains a JSON array, the regular
+    * `SELECT data` can be modified into
+    * `SELECT data -> '$[7]' AS data` by returning
+    * a `selectData(7)` value of `"data -> '$[7]'"`
+    * (MySQL JSON syntax for selecting the 8th element).
+    * @param selectData The modified data selection function
+    * @return Snapshot with modified data selection
+    */
+  protected def withModifiedData[ID, SID, MS: ColumnType](
+      selectData: SID => String)(
+      implicit
+      idConv: ID => PK)
+      : SnapshotReader[(ID, SID), MS] =
+    new SnapshotReader[(ID, SID), MS] {
+
+      def read(id: (ID, SID)): Future[Option[delta.Snapshot[MS]]] =
+        queryModified[MS](id._1, selectData(id._2))
+
+    }
+
+  private def queryModified[MS: ColumnType](
+      pk: PK, selectData: String)
+      : Future[Option[delta.Snapshot[MS]]] =
+    futureQuery { conn =>
+      val select = selectOneSQL(selectData)
+      queryAll[MS](conn prepareStatement select, pk :: Nil) get pk
+    }
 
   protected def createTableDDL = {
     val pkColumns = versionColumn.toList :+ pkColumn
@@ -126,7 +162,9 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType](
       }.mkString("\n  ", ",\n  ", ",")
     }
 
-    val timestampColDef = withTimestamp.map(col => s"""${col.colName} ${col.sqlType} NOT NULL,""") getOrElse ""
+    val timestampColDef =
+      config.timestamp
+        .map(col => s"""${col.colName} ${col.sqlType} NOT NULL,""") getOrElse ""
 
     s"""
 CREATE TABLE IF NOT EXISTS $tableRef (
@@ -139,9 +177,14 @@ CREATE TABLE IF NOT EXISTS $tableRef (
 )"""
   }
 
-  protected def selectOneSQL = _selectOneSQL
-  private[this] val _selectOneSQL =
-    s"""
+  protected def selectOneSQL(dataSelection: String = ""): String =
+    if (dataSelection.length == 0) defaultSelectOne
+    else defaultSelectOne.replace(
+      "SELECT data,",
+      s"SELECT $dataSelection AS data,")
+
+  private[this] val defaultSelectOne =
+s"""
 SELECT data, revision, tick
 FROM $tableRef
 $WHERE $pkColumnName = ?
@@ -154,7 +197,10 @@ $WHERE $pkColumnName = ?
         indexColumns.map(_ => "?").mkString("", ",", ",")
     }
     val (vCol, vQ) = version.map(version => "version, " -> s"$version, ") getOrElse "" -> ""
-    val (tCol, tQ) = withTimestamp.map(col => s"${col.colName}, " -> s"${col.sqlFunction}, ") getOrElse "" -> ""
+    val (tCol, tQ) =
+      config.timestamp
+        .map(col => s"${col.colName}, " -> s"${col.sqlFunction}, ") getOrElse "" -> ""
+
     s"""
 INSERT INTO $tableRef
 (${tCol}${vCol}data, revision, tick, $qryNames$pkColumnName)
@@ -215,11 +261,11 @@ CREATE INDEX IF NOT EXISTS $indexName
     }
   }
 
-  protected def getSnapshot(rs: ResultSet): Snapshot = {
-    val data = rs.getValue[S](1)(implicitly)
+  protected def getSnapshot[T: ColumnType](rs: ResultSet): delta.Snapshot[T] = {
+    val data = rs.getValue[T](1)//(implicitly)
     val revision = rs.getInt(2)
     val tick = rs.getLong(3)
-    new Snapshot(data, revision, tick)
+    new delta.Snapshot(data, revision, tick)
   }
 
   protected def setSnapshot(ps: PreparedStatement, s: Snapshot, offset: Int = 0): Int = {
@@ -243,26 +289,41 @@ CREATE INDEX IF NOT EXISTS $indexName
 
   protected def readForUpdate[R](key: PK)(thunk: (Connection, Option[Snapshot]) => R): R = {
     cs.forUpdate { conn =>
-      val existing = getAll(conn, List(key)).get(key)
+      val existing = getOne(conn, key)
       thunk(conn, existing)
     }
   }
 
-  def read(key: PK): Future[Option[Snapshot]] = readBatch(List(key)).map(_.get(key))(Threads.PiggyBack)
-  def readBatch(keys: Iterable[PK]): Future[Map[PK, Snapshot]] = futureQuery { conn =>
-    getAll(conn, keys)
+  def read(key: PK): Future[Option[Snapshot]] =
+    futureQuery {
+      getOne(_, key)
+    }
+  def readBatch(keys: Iterable[PK]): Future[Map[PK, Snapshot]] =
+    futureQuery {
+      getAll(_, keys)
+    }
+
+  private def getOne(conn: Connection, key: PK): Option[Snapshot] = {
+    queryAll[S](conn prepareStatement selectOneSQL(), key :: Nil) get key
   }
 
-  private def getAll(conn: Connection, keys: Iterable[PK], map: Map[PK, Snapshot] = Map.empty): Map[PK, Snapshot] = {
-    val ps = conn.prepareStatement(selectOneSQL)
+  private def getAll(
+      conn: Connection, keys: Iterable[PK])
+      : Map[PK, Snapshot] = {
+    queryAll[S](conn prepareStatement selectOneSQL(), keys)
+  }
+
+  private def queryAll[T: ColumnType](
+      ps: PreparedStatement, keys: Iterable[PK])
+      : Map[PK, delta.Snapshot[T]] = {
     try {
-      keys.foldLeft(map) {
+      keys.foldLeft(Map.empty[PK, delta.Snapshot[T]]) {
         case (map, key) =>
           ps.setValue(1, key)
           val rs = ps.executeQuery()
           try {
             if (rs.next) {
-              map.updated(key, getSnapshot(rs))
+              map.updated(key, getSnapshot[T](rs))
             } else map
           } finally Try(rs.close)
       }
@@ -283,7 +344,7 @@ CREATE INDEX IF NOT EXISTS $indexName
       // Update failed; can have 2 reasons: 1) Row doesn't exist yet (thus try insert), 2) Old revision and/or tick
       if (insertSnapshots(conn, Map(key -> snapshot)).nonEmpty) { // Could be race condition. Super unlikely, but try update again
         if (!updateSnapshot()) { // At this point, it's probably revision and/or tick
-          getAll(conn, List(key)).get(key) match {
+          getOne(conn, key) match {
             case Some(existing) =>
               throw Exceptions.writeOlder(key, existing, snapshot)
             case None =>
@@ -377,9 +438,8 @@ CREATE INDEX IF NOT EXISTS $indexName
     else futureUpdate(refreshAll(_, revisions))
 
   protected def writeIfAbsent(conn: Connection)(key: PK, snapshot: Snapshot): Option[Snapshot] = {
-    val failed = insertSnapshots(conn, Map(key -> snapshot))
-    if (failed.isEmpty) None
-    else Some(getAll(conn, failed)(key))
+    val failed = insertSnapshots(conn, Map(key -> snapshot)).headOption
+    failed.flatMap(getOne(conn, _))
   }
 
   /**
@@ -387,14 +447,17 @@ CREATE INDEX IF NOT EXISTS $indexName
    *  Otherwise return current snapshot.
    *  @return `None` if write was successful, or `Some` current snapshot
    */
-  protected def writeReplacement(conn: Connection)(key: PK, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot] = {
+  protected def writeReplacement(
+      conn: Connection)(
+      key: PK, oldSnapshot: Snapshot, newSnapshot: Snapshot)
+      : Option[Snapshot] = {
     val ps = conn prepareStatement replaceSnapshotSQL
     try {
       val offset = setSnapshot(ps, newSnapshot)
       ps.setValue(1 + offset, key)
       setRevTick(ps, oldSnapshot.revision, oldSnapshot.tick, offset + 1)
       if (ps.executeUpdate() == 1) None
-      else Some(getAll(conn, List(key))(key))
+      else getOne(conn, key)
     } finally Try(ps.close)
   }
 
@@ -430,7 +493,7 @@ $WHERE $where
         try {
           var map = Map.empty[PK, Snapshot]
           while (rs.next) {
-            val snapshot = getSnapshot(rs)
+            val snapshot = getSnapshot[S](rs)
             map = map.updated(pkColumn.colType.readFrom(rs, 4), snapshot)
           }
           map

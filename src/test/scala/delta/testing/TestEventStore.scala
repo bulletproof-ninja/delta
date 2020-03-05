@@ -36,25 +36,25 @@ class TestEventStore {
       RandomDelayExecutionContext, EvtFmt)(_ => SysClockTicker)
       with MessageHubPublishing[Symbol, Event] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
-      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
-      val txnChannels = Set(Channel)
-      val txnCodec = Codec.noop[TXN]
+      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
+      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txChannels = Set(Channel)
+      val txCodec = Codec.noop[Transaction]
   }
 
   @Test
   def serialization(): Unit = {
     val id12 = Symbol("id12")
     val wallClock = System.currentTimeMillis
-    val txn = new es.TXN(99, Channel, id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
+    val tx = new es.Transaction(99, Channel, id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
     val objOut = new ObjectOutputStream(out)
-    objOut.writeObject(txn)
+    objOut.writeObject(tx)
     objOut.close()
     val bytes = out.toArray
     val objInp = new ObjectInputStream(new ByteInputStream(bytes))
-    val outTxn = objInp.readObject().asInstanceOf[es.TXN]
+    val outTx = objInp.readObject().asInstanceOf[es.Transaction]
     assertEquals(0, objInp.available)
-    assertEquals(txn, outTxn)
+    assertEquals(tx, outTx)
   }
 }

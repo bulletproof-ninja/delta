@@ -7,7 +7,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
 import delta.Snapshot
-import delta.process.{ BlockingCASWrites, Exceptions, StreamProcessStore }
+import delta.process._
 import scuff._
 import scuff.jdbc.ConnectionSource
 
@@ -15,19 +15,24 @@ import scuff.jdbc.ConnectionSource
  * Keep history of all snapshots generated,
  * to ensure a complete audit trail.
  */
-class JdbcStreamProcessHistory[ID: ColumnType, D: ColumnType](
+class JdbcStreamProcessHistory[ID: ColumnType, S: ColumnType, U](
     jdbcCtx: ExecutionContext,
     protected val cs: ConnectionSource,
     version: Short, withTimestamp: WithTimestamp,
-    table: String, schema: Option[String] = None)
+    table: String, schema: Option[String] = None)(
+    implicit
+    protected val updateCodec: UpdateCodec[S, U])
   extends AbstractStore(Some(version), table, schema)(jdbcCtx)
-  with StreamProcessStore[ID, D] with BlockingCASWrites[ID, D, Connection] {
+  with StreamProcessStore[ID, S, U] with BlockingCASWrites[ID, S, U, Connection] {
 
   def this(
+      updateCodec: UpdateCodec[S, U],
       jdbcCtx: ExecutionContext,
       cs: ConnectionSource,
       version: Short, withTimestamp: WithTimestamp,
-      table: String, schema: String) =
+      table: String, schema: String)(
+      implicit
+      updCodec: UpdateCodec[S, U]) =
     this(jdbcCtx, cs, version, withTimestamp, table, schema.optional)
 
   private def insertTransaction(withData: Boolean): String = s"""
@@ -65,7 +70,7 @@ CREATE TABLE IF NOT EXISTS $tableRef (
   tick BIGINT NOT NULL,
   revision INT NOT NULL,
   ${withTimestamp.colName} ${withTimestamp.sqlType} NOT NULL,
-  data ${implicitly[ColumnType[D]].typeName} NULL,
+  data ${implicitly[ColumnType[S]].typeName} NULL,
 
   PRIMARY KEY (version, $idColName, tick)
 )"""
@@ -100,13 +105,16 @@ AND t.tick = (
     }
   }
 
-  def read(key: ID): Future[Option[Snapshot]] = readBatch(List(key)).map(_.get(key))
+  def read(key: ID): Future[Option[Snapshot]] =
+    futureQuery {
+      getOne(_, key)
+    }
   def readBatch(keys: Iterable[ID]): Future[Map[ID, Snapshot]] =
-    futureQuery { conn =>
-      getAll(conn, keys)
+    futureQuery {
+      getAll(_, keys)
     }
 
-  private def getOne(conn: Connection, key: ID): Option[Snapshot] = getAll(conn, key :: Nil).get(key)
+  private def getOne(conn: Connection, key: ID): Option[Snapshot] = getAll(conn, key :: Nil) get key
   private def getAll(conn: Connection, keys: Iterable[ID]): Map[ID, Snapshot] = {
     val ps = conn prepareStatement selectSnapshotSQL
     try {
@@ -118,7 +126,7 @@ AND t.tick = (
             if (rs.next) {
               val revision = rs.getInt(1)
               val tick = rs.getLong(2)
-              val data = rs.getValue[D](3)
+              val data = rs.getValue[S](3)
               if (rs.wasNull) map
               else map.updated(key, new Snapshot(data, revision, tick))
             } else map

@@ -3,9 +3,9 @@ package delta
 import java.util.Arrays
 
 case class Snapshot[+Content](
-    content: Content,
-    revision: Int,
-    tick: Long) {
+  content: Content,
+  revision: Int,
+  tick: Long) {
 
   def map[That](f: Content => That): Snapshot[That] =
     new Snapshot(f(content), revision, tick)

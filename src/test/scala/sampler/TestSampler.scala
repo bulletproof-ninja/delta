@@ -19,16 +19,16 @@ class TestSampler {
   implicit def metadata = Metadata("timestamp" -> new scuff.Timestamp().toString)
 
   protected def initTicker(es: EventStore[Int, DomainEvent]) = LamportTicker(es)
-  
+
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
-         RandomDelayExecutionContext, JsonDomainEventFormat)(initTicker) 
+         RandomDelayExecutionContext, JsonDomainEventFormat)(initTicker)
          with MessageHubPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
-      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
-      val txnChannels = Set(Employee.Def.channel, Department.Def.channel)
-      val txnCodec = Codec.noop[TXN]
+      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
+      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txChannels = Set(Employee.Def.channel, Department.Def.channel)
+      val txCodec = Codec.noop[Transaction]
     }
 
   implicit def ec = RandomDelayExecutionContext

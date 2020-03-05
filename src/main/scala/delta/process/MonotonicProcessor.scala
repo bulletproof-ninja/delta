@@ -1,39 +1,44 @@
 package delta.process
 
 import scala.collection.concurrent.TrieMap
-import scala.reflect.ClassTag
 import scala.util.Failure
 import scala.collection.immutable.TreeMap
 import java.util.concurrent.TimeoutException
 
-import scuff.concurrent._
 import scala.concurrent._, duration.FiniteDuration
 import delta._
 import scala.annotation.tailrec
 import scala.util.Try
+import scuff.concurrent._
 
 private object MonotonicProcessor {
 
-  implicit class UnappliedOps[TXN <: Transaction[_, _]](private val map: TreeMap[Int, TXN]) extends AnyVal {
-    @inline def add(txn: TXN): TreeMap[Int, TXN] = map.updated(txn.revision, txn)
+  implicit class UnappliedOps[TX <: Transaction[_, _]](private val map: TreeMap[Int, TX]) extends AnyVal {
+    @inline def add(tx: TX): TreeMap[Int, TX] = map.updated(tx.revision, tx)
   }
 
 }
 
-trait MonotonicProcessor[ID, EVT, S >: Null]
+/**
+ * Monotonic replay processor.
+ * @tparam ID Stream identifier type
+ * @tparam EVT Event type
+ * @tparam S State type
+ */
+trait MonotonicProcessor[ID, EVT, S >: Null, U]
   extends TransactionProcessor[ID, EVT, S]
   with (Transaction[ID, _ >: EVT] => Future[Unit]) {
 
   type Snapshot = delta.Snapshot[S]
-  type SnapshotUpdate = delta.process.SnapshotUpdate[S]
+  type Update = delta.process.Update[U]
 
-  protected def processStore: StreamProcessStore[ID, S]
+  protected def processStore: StreamProcessStore[ID, S, U]
   protected def processContext(id: ID): ExecutionContext
 
   import MonotonicProcessor.UnappliedOps
   private type Revision = Int
-  private[this] val Empty = TreeMap.empty[Revision, TXN]
-  private type Unapplied = TreeMap[Revision, TXN]
+  private[this] val Empty = TreeMap.empty[Revision, Transaction]
+  private type Unapplied = TreeMap[Revision, Transaction]
 
   sealed private abstract class StreamStatus {
     def revision: Revision
@@ -49,26 +54,26 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
     extends StreamStatus { def isActive = false }
 
   /** Set active. A non-empty map indicates success. */
-  private def setActive(txn: TXN): (Unapplied, Future[Unit]) = {
-    streamStatus.get(txn.stream) match {
+  private def setActive(tx: Transaction): (Unapplied, Future[Unit]) = {
+    streamStatus.get(tx.stream) match {
       case None =>
         val promise = Promise[Unit]
         val active = new Active(Empty, promise)
-        if (streamStatus.putIfAbsent(txn.stream, active).isEmpty) {
-          Empty.add(txn) -> promise.future
-        } else setActive(txn)
+        if (streamStatus.putIfAbsent(tx.stream, active).isEmpty) {
+          Empty.add(tx) -> promise.future
+        } else setActive(tx)
       case Some(inactive: Inactive) =>
         val promise = inactive.promise
         val active = new Active(Empty, promise)
-        if (streamStatus.replace(txn.stream, inactive, active)) {
-          inactive.unapplied.add(txn) -> promise.future
-        } else setActive(txn)
+        if (streamStatus.replace(tx.stream, inactive, active)) {
+          inactive.unapplied.add(tx) -> promise.future
+        } else setActive(tx)
       case Some(active: Active) =>
         val promise = active.promise
-        val newActive = new Active(active.unapplied.add(txn), promise)
-        if (streamStatus.replace(txn.stream, active, newActive)) {
+        val newActive = new Active(active.unapplied.add(tx), promise)
+        if (streamStatus.replace(tx.stream, active, newActive)) {
           Empty -> promise.future
-        } else setActive(txn)
+        } else setActive(tx)
     }
   }
 
@@ -129,7 +134,7 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
       IncompleteStream(id, status.isActive, status.revision + 1, unappliedRevisions, status.promise.future)
   }
 
-  protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit
+  protected def onUpdate(id: ID, update: Update): Unit
   protected def onMissingRevisions(id: ID, missing: Range): Unit
 
   /**
@@ -143,16 +148,16 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
       Future successful (snapshot -> unapplied)
     } else {
       val expectedRev = snapshot.map(_.revision + 1) getOrElse 0
-      val txn = unapplied.head._2
-      if (txn.revision == expectedRev) {
-        callProcess(txn, snapshot.map(_.content)).flatMap { updated =>
-          val tick = snapshot.map(_.tick max txn.tick) getOrElse txn.tick
-          applyTransactions(unapplied.tail, Some(Snapshot(updated, txn.revision, tick)))
+      val tx = unapplied.head._2
+      if (tx.revision == expectedRev) {
+        callProcess(tx, snapshot.map(_.content)).flatMap { newState =>
+          val tick = snapshot.map(_.tick max tx.tick) getOrElse tx.tick
+          applyTransactions(unapplied.tail, Some(Snapshot(newState, tx.revision, tick)))
         }
-      } else if (txn.revision < expectedRev) { // Already processed
+      } else if (tx.revision < expectedRev) { // Already processed
         applyTransactions(unapplied.tail, snapshot)
-      } else { // txn.revision > expectedRev
-        onMissingRevisions(txn.stream, expectedRev until txn.revision)
+      } else { // tx.revision > expectedRev
+        onMissingRevisions(tx.stream, expectedRev until tx.revision)
         Future successful (snapshot -> unapplied)
       }
     }
@@ -164,17 +169,15 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
       implicit
       ec: ExecutionContext): Future[Unit] = {
 
-    val upsertResult =
+    val upsertResult: Future[(Option[Update], Unapplied)] =
       processStore.upsert(stream) { existingSnapshot =>
-        applyTransactions(unapplied, existingSnapshot).map {
-          case (latestSnapshot, stillUnapplied) =>
-            latestSnapshot -> (stillUnapplied -> (latestSnapshot.map(_.revision) getOrElse -1))
-        }
+        applyTransactions(unapplied, existingSnapshot)
       }
 
     val inactiveFuture = upsertResult.flatMap {
-      case (maybeUpdate, (stillUnapplied, currRevision)) =>
-        Try(maybeUpdate.foreach(onSnapshotUpdate(stream, _))).failed.foreach(ec.reportFailure)
+      case (maybeUpdate, stillUnapplied) =>
+        Try(maybeUpdate.foreach(onUpdate(stream, _))).failed.foreach(ec.reportFailure)
+        val currRevision = maybeUpdate.map(_.revision) getOrElse -1
         setInactive(stream, stillUnapplied, currRevision) match {
           case (Empty, future) => future
           case (moreUnapplied, _) => upsertUntilInactive(stream, moreUnapplied)
@@ -189,11 +192,11 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
     }
   }
 
-  def apply(txn: TXN): Future[Unit] = {
-    setActive(txn) match {
+  def apply(tx: Transaction): Future[Unit] = {
+    setActive(tx) match {
       case (Empty, future) => future
       case (unapplied, _) =>
-        upsertUntilInactive(txn.stream, unapplied)(processContext(txn.stream))
+        upsertUntilInactive(tx.stream, unapplied)(processContext(tx.stream))
     }
 
   }
@@ -207,13 +210,11 @@ trait MonotonicProcessor[ID, EVT, S >: Null]
  * @tparam S State type
  * @tparam BR Batch result. Typically just `Unit`
  */
-abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, BR](
-    finishProcessingTimeout: FiniteDuration,
-    protected val processStore: StreamProcessStore[ID, S])(
-    implicit
-    protected val evtTag: ClassTag[EVT])
-  extends MonotonicProcessor[ID, EVT, S]
-  with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
+abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U, BR](
+  finishProcessingTimeout: FiniteDuration,
+  protected val processStore: StreamProcessStore[ID, S, U])
+extends MonotonicProcessor[ID, EVT, S, U]
+with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
   protected final def completionTimeout = finishProcessingTimeout
 
@@ -267,7 +268,7 @@ Possible causes:
   }
 
   /** Don't broadcast snapshot updates during replay. */
-  protected def onSnapshotUpdate(id: ID, update: SnapshotUpdate): Unit = ()
+  protected def onUpdate(id: ID, update: Update): Unit = ()
 
   /**
    * Missing revision replay is disabled on replay, since
@@ -287,22 +288,23 @@ Possible causes:
   protected def whenDone(): Future[BR]
 }
 
-trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, BR] {
-  proc: MonotonicReplayProcessor[ID, EVT, S, BR] =>
+trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U, BR] {
+  proc: MonotonicReplayProcessor[ID, EVT, S, U, BR] =>
 
-  protected type Value = ConcurrentMapStore.Value[S]
+  type Snapshot = delta.Snapshot[S]
+  protected type State = ConcurrentMapStore.State[S]
 
   /** Execution context for persisting final replay state. */
   protected def persistenceContext: ExecutionContext
   protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[BR]
-  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Value]]
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]]
   protected def whenDone(): Future[BR] = {
       implicit def ec = persistenceContext
     onReplayCompletion()
       .flatMap { cmap =>
         require(incompleteStreams.isEmpty, s"Incomplete streams are present. This code should not execute. This is a bug.")
         val snapshots = cmap.iterator.collect {
-          case (id, ConcurrentMapStore.Value(snapshot, true)) => id -> snapshot
+          case (id, value) if value.modified => id -> value.snapshot
         }
         persistReplayState(snapshots).andThen {
           case _ => cmap.clear()

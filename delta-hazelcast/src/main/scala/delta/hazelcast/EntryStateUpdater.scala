@@ -13,7 +13,7 @@ object EntryStateUpdater {
   /**
     * Update entry state.
     */
-  def apply[K, EVT, S](imap: IMap[K, EntryState[S, EVT]])(key: K, snapshot: Snapshot[S]): Future[Unit] = {
+  def apply[K, EVT, S](imap: IMap[K, _ <: EntryState[S, EVT]])(key: K, snapshot: Snapshot[S]): Future[Unit] = {
     val updater = new EntryStateUpdater[K, EVT, S](snapshot)
     val callback = CallbackPromise[Any, Unit](_ => ())
     imap.submitToKey(key, updater, callback)

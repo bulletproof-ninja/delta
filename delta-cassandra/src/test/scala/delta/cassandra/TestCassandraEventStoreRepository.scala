@@ -65,10 +65,10 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor,
       AggrEventFormat, RandomDelayExecutionContext)(_ => ticker)
       with MessageHubPublishing[String, AggrEvent] {
-      def toTopic(ch: Channel) = Topic(s"txn:$ch")
-      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txnChannels = Set(Channel("any"))
-      val txnCodec = Codec.noop[TXN]
+      def toTopic(ch: Channel) = Topic(s"tx:$ch")
+      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txChannels = Set(Channel("any"))
+      val txCodec = Codec.noop[Transaction]
     }.ensureTable()
     repo = new EntityRepository(TheOneAggr, ec)(es)
   }

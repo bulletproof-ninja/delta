@@ -3,41 +3,41 @@ package delta.hazelcast.serializers
 import java.io.{ ObjectInputStream, ObjectOutputStream }
 import com.hazelcast.nio.{ ObjectDataInput, ObjectDataOutput }
 import com.hazelcast.nio.serialization.StreamSerializer
-import delta.{ Snapshot, Transaction, TransactionProjector }
+import delta.{ Snapshot, Transaction, Projector }
 import delta.hazelcast._
-import scala.reflect.ClassTag
 import scala.collection.immutable.TreeMap
-import delta.process.SnapshotUpdate
+import delta.process.Update
+import delta.process.AsyncCodec
 
 trait TransactionSerializer
-  extends StreamSerializer[delta.Transaction[Any, Any]] {
+extends StreamSerializer[delta.Transaction[Any, Any]] {
 
-  type TXN = delta.Transaction[Any, Any]
+  type Transaction = delta.Transaction[Any, Any]
 
   @inline private def serializer = delta.Transaction.Serialization
 
-  def write(out: ObjectDataOutput, txn: TXN): Unit = {
+  def write(out: ObjectDataOutput, tx: Transaction): Unit = {
     val output = out match {
       case out: java.io.ObjectOutput => out
       case out: java.io.OutputStream => new ObjectOutputStream(out)
     }
-    serializer.writeObject(txn, output)
+    serializer.writeObject(tx, output)
   }
 
-  def read(inp: ObjectDataInput): TXN = {
+  def read(inp: ObjectDataInput): Transaction = {
     val input = inp match {
       case inp: java.io.ObjectInput => inp
       case inp: java.io.InputStream => new ObjectInputStream(inp)
     }
     serializer.readObject[Any, Any](input) {
       case (tick, ch, id, rev, metadata, events) =>
-        new TXN(tick, ch, id, rev, metadata, events)
+        new Transaction(tick, ch, id, rev, metadata, events)
     }
   }
 }
 
 trait SnapshotSerializer
-  extends StreamSerializer[Snapshot[Any]] {
+extends StreamSerializer[Snapshot[Any]] {
 
   def write(out: ObjectDataOutput, s: Snapshot[Any]): Unit = {
     out writeObject s.content
@@ -53,40 +53,41 @@ trait SnapshotSerializer
   }
 }
 
-trait SnapshotUpdateSerializer
-  extends StreamSerializer[SnapshotUpdate[Any]] {
+trait UpdateSerializer
+extends StreamSerializer[Update[Any]] {
 
-  def write(out: ObjectDataOutput, s: SnapshotUpdate[Any]): Unit = {
-    out writeObject s.snapshot
-    out writeBoolean s.contentUpdated
+  def write(out: ObjectDataOutput, u: Update[Any]): Unit = {
+    out writeObject u.changed.orNull
+    out writeInt u.revision
+    out writeLong u.tick
   }
   def read(inp: ObjectDataInput) =
-    new SnapshotUpdate(
-      snapshot = inp.readObject[Snapshot[Any]],
-      contentUpdated = inp.readBoolean)
+    new Update(Option(inp.readObject[Any]), inp.readInt, inp.readLong)
+
 }
 
 trait DistributedMonotonicProcessorSerializer
-  extends StreamSerializer[delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any]] {
+extends StreamSerializer[DistributedMonotonicProcessor[Any, Any, Any, Any]] {
 
-  def write(out: ObjectDataOutput, ep: delta.hazelcast.DistributedMonotonicProcessor[Any, Any, Any]): Unit = {
-    out writeObject ep.txn
-    out writeObject ep.txnProjector
-    out writeObject ep.evtTag.runtimeClass
-    out writeObject ep.stateTag.runtimeClass
+  def write(out: ObjectDataOutput, ep: DistributedMonotonicProcessor[Any, Any, Any, Any]): Unit = {
+    out writeObject ep.tx
+    out writeObject ep.projector
+    out writeObject ep.stateCodec
+    out writeUTF ep.getExecutorName
   }
 
   def read(inp: ObjectDataInput) = {
-    val txn = inp.readObject[delta.Transaction[Any, Any]]
-    val projector = inp.readObject[TransactionProjector[Any, Any]]
-    val evtTag = ClassTag[Any](inp.readObject[Class[Any]])
-    val stateTag = ClassTag[Any](inp.readObject[Class[Any]])
-    new delta.hazelcast.DistributedMonotonicProcessor(txn, projector)(evtTag, stateTag)
+    val tx = inp.readObject[delta.Transaction[Any, Any]]
+    val projector = inp.readObject[Projector[Any, Any]]
+    val codec = inp.readObject[AsyncCodec[Any, Any]]
+    val execName = inp.readUTF
+    new delta.hazelcast.DistributedMonotonicProcessor(codec, execName, tx, projector)
   }
+
 }
 
 trait SnapshotUpdaterSerializer
-  extends StreamSerializer[delta.hazelcast.SnapshotUpdater[Any, Any]] {
+extends StreamSerializer[delta.hazelcast.SnapshotUpdater[Any, Any]] {
 
   type Updater = delta.hazelcast.SnapshotUpdater[Any, Any]
 
@@ -100,21 +101,27 @@ trait SnapshotUpdaterSerializer
 }
 
 trait EntryStateSnapshotReaderSerializer
-  extends StreamSerializer[delta.hazelcast.EntryStateSnapshotReader.type] {
+extends StreamSerializer[delta.hazelcast.EntryStateSnapshotReader[Any, Any]] {
 
-  type Reader = delta.hazelcast.EntryStateSnapshotReader.type
+  type Reader = delta.hazelcast.EntryStateSnapshotReader[Any, Any]
 
-  def write(out: ObjectDataOutput, ep: Reader): Unit = ()
-  def read(inp: ObjectDataInput): Reader = delta.hazelcast.EntryStateSnapshotReader
+  def write(out: ObjectDataOutput, ep: Reader): Unit = {
+    out writeObject ep.stateConv
+  }
+  def read(inp: ObjectDataInput): Reader = {
+    val stateConv = inp.readObject[Any => Any]
+    new Reader(stateConv)
+  }
+
 }
 
 trait EntryUpdateResultSerializer
-  extends StreamSerializer[delta.hazelcast.EntryUpdateResult] {
+extends StreamSerializer[delta.hazelcast.EntryUpdateResult] {
 
   def write(out: ObjectDataOutput, res: delta.hazelcast.EntryUpdateResult): Unit = res match {
-    case Updated(model) =>
+    case Updated(update) =>
       out writeByte 0
-      out writeObject model
+      out writeObject update
     case IgnoredDuplicate =>
       out writeByte 1
     case MissingRevisions(range) =>
@@ -124,7 +131,7 @@ trait EntryUpdateResultSerializer
   }
   def read(inp: ObjectDataInput): delta.hazelcast.EntryUpdateResult = inp.readByte match {
     case 0 =>
-      new Updated(inp.readObject[delta.Snapshot[Any]])
+      new Updated(inp.readObject[delta.process.Update[Any]])
     case 1 =>
       IgnoredDuplicate
     case 2 =>
@@ -133,7 +140,7 @@ trait EntryUpdateResultSerializer
 }
 
 trait EntryStateSerializer
-    extends StreamSerializer[EntryState[Any, Any]] {
+extends StreamSerializer[EntryState[Any, Any]] {
   def write(out: ObjectDataOutput, es: EntryState[Any, Any]) = {
     out writeObject es.snapshot
     out writeBoolean es.contentUpdated
@@ -148,7 +155,7 @@ trait EntryStateSerializer
 }
 
 trait StreamProcessStoreUpdaterSerializer
-    extends StreamSerializer[IMapStreamProcessStore.Updater[Any, Any]] {
+extends StreamSerializer[IMapStreamProcessStore.Updater[Any, Any]] {
   type Updater = IMapStreamProcessStore.Updater[Any, Any]
   def write(out: ObjectDataOutput, updater: Updater): Unit = updater match {
     case IMapStreamProcessStore.WriteReplacement(rev, tick, snapshot) =>
@@ -172,4 +179,21 @@ trait StreamProcessStoreUpdaterSerializer
         new IMapStreamProcessStore.WriteIfAbsent[Any, Any](snapshot)
     }
   }
+}
+
+trait ConcurrentMapStoreValueSerializer
+extends StreamSerializer[delta.process.ConcurrentMapStore.State[Any]] {
+  type State = delta.process.ConcurrentMapStore.State[Any]
+  def write(out: ObjectDataOutput, value: State): Unit = {
+    out writeBoolean value.modified
+    out writeObject value.snapshot.content
+    out writeInt value.snapshot.revision
+    out writeLong value.snapshot.tick
+  }
+  def read(inp: ObjectDataInput): State = {
+    val modified = inp.readBoolean()
+    val snapshot = new Snapshot(inp.readObject[Any], inp.readInt, inp.readLong)
+    new State(snapshot, modified)
+  }
+
 }

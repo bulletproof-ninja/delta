@@ -16,13 +16,13 @@ class TestSampler extends sampler.TestSampler {
     import delta.mongo._
     val settings = com.mongodb.MongoClientSettings.builder().build()
     val ns = new MongoNamespace("unit-testing", "event-store")
-    val txnCollection = MongoEventStore.getCollection(ns, settings)
-    new MongoEventStore[Int, DomainEvent](txnCollection, BsonDomainEventFormat)(initTicker)
+    val txCollection = MongoEventStore.getCollection(ns, settings)
+    new MongoEventStore[Int, DomainEvent](txCollection, BsonDomainEventFormat)(initTicker)
     with MessageHubPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop[TXN]
+      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txCodec = scuff.Codec.noop[Transaction]
     }
   }
 

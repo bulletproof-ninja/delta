@@ -6,10 +6,9 @@ import scala.collection.concurrent.TrieMap
 
 import scala.concurrent.Future
 import delta.process.StreamProcessStore
-import delta.process.SnapshotUpdate
+import delta.process.Update
 import delta.process.ConcurrentMapStore
-import scuff.Codec
-import delta.process.StreamProcessStoreAdapter
+import scuff._, concurrent.ScuffFutureObject
 
 case class TestKey(long: Long, int: Int)
 case class Foo(text: String, num: Int)
@@ -25,19 +24,17 @@ class TestStreamProcessStore {
 
   implicit val ec = RandomDelayExecutionContext
 
-  type Value = ConcurrentMapStore.Value[String]
+  type State = ConcurrentMapStore.State[String]
 
-  def newStore(): StreamProcessStore[Long, String] = 
-    ConcurrentMapStore(new TrieMap[Long, Value], None)(_ => Future successful None)
+  def newStore(): StreamProcessStore[Long, String, String] =
+    ConcurrentMapStore(new TrieMap[Long, State], None)(_ => Future.none)
 
-  def newStore[S](implicit codec: Codec[S, String]): StreamProcessStore[Long, S] =
-    new StreamProcessStoreAdapter(
-      newStore(),
-      Codec.noop, codec)
+  def newStore[S](implicit codec: Codec[S, String]): StreamProcessStore[Long, S, String] =
+    newStore() adaptState codec
 
   protected def storeSupportsConditionalWrites: Boolean = true
 
-  def newFooStore: StreamProcessStore[Long, Foo] = newStore[Foo](Foo)
+  def newFooStore: StreamProcessStore[Long, Foo, String] = newStore(Foo)
 
   @Test
   def foo(): Unit = {
@@ -147,26 +144,27 @@ class TestStreamProcessStore {
     }.await._1
     assertEquals(None, stillNoUpdate)
     assertEquals(snapshot2, store.read(key).await.get)
-    val SnapshotUpdate(snapshot3, s3Updated) = store.upsert(key) {
+    val update3 = store.upsert(key) {
       case None =>
         fail("Should not happen"); ???
       case Some(existing) =>
         assertEquals(snapshot2, existing)
-        Future successful Some(Snapshot(existing.content, -1, 556L)) -> (())
+        Future successful Some(snapshot2.copy(tick = 556L)) -> (())
     }.await._1.get
-    assertFalse(s3Updated)
-    assertEquals(Snapshot(snapshot2.content, -1, 556L), snapshot3)
+    assertTrue(update3.changed.isEmpty)
+    assertEquals(Update(None, -1, 556L), update3)
+    val snapshot3 = Snapshot(snapshot2.content, update3.revision, update3.tick)
     assertEquals(snapshot3, store.read(key).await.get)
-    val SnapshotUpdate(snapshot4, s4Updated) = store.upsert(key) {
+    val update4 = store.upsert(key) {
       case None =>
         fail("Should not happen"); ???
       case Some(existing) =>
         assertEquals(snapshot3, existing)
         Future successful Some(Snapshot("[1,2,3]", -1, 556L)) -> (())
     }.await._1.get
-    assertTrue(s4Updated)
-    assertEquals(Snapshot("[1,2,3]", -1, 556L), snapshot4)
-    assertEquals(snapshot4, store.read(key).await.get)
+    // assertTrue(update4.change.isDefined)
+    assertEquals(Update(Some("[1,2,3]"), -1, 556L), update4)
+    assertEquals(update4.changed.get, store.read(key).await.get.content)
   }
 
 }

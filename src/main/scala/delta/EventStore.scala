@@ -18,9 +18,9 @@ trait EventStore[ID, EVT]
       stream: ID,
       revision: Int,
       metadata: Map[String, String],
-      events: List[EVT]) = new TXN(tick, channel, stream, revision, metadata, events)
+      events: List[EVT]) = new Transaction(tick, channel, stream, revision, metadata, events)
 
-  final class DuplicateRevisionException(val conflict: TXN)
+  final class DuplicateRevisionException(val conflict: Transaction)
     extends RuntimeException(s"Revision ${conflict.revision} already exists for: ${conflict.stream}")
     with NoStackTrace {
     override def toString = super[RuntimeException].toString()
@@ -37,6 +37,6 @@ trait EventStore[ID, EVT]
    * [[DuplicateRevisionException]] if the revision already exists.
    */
   def commit(channel: Channel, stream: ID, revision: Int, tick: Long,
-      events: List[EVT], metadata: Map[String, String] = Map.empty): Future[TXN]
+      events: List[EVT], metadata: Map[String, String] = Map.empty): Future[Transaction]
 
 }

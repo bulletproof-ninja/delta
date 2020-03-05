@@ -3,7 +3,7 @@ package delta.util.json
 import scuff.Codec
 import scuff.json._, JsVal._
 
-class Tuple2Codec[A, B](a: Codec[A, JSON], b: Codec[B, JSON])
+class JsonTuple2[A, B](a: Codec[A, JSON], b: Codec[B, JSON])
   extends Codec[(A, B), JSON] {
 
   def encode(t: (A, B)): JSON = {
@@ -19,9 +19,9 @@ class Tuple2Codec[A, B](a: Codec[A, JSON], b: Codec[B, JSON])
   }
 }
 
-object Tuple2Codec {
+object JsonTuple2 {
 
-  def apply[A, B](a: Codec[A, JSON], b: Codec[B, JSON]): Codec[(A, B), JSON] = new Tuple2Codec(a, b)
-  def apply[T](t: Codec[T, JSON]): Codec[(T, T), JSON] = new Tuple2Codec(t, t)
+  def apply[A, B](a: Codec[A, JSON], b: Codec[B, JSON]): Codec[(A, B), JSON] = new JsonTuple2(a, b)
+  def apply[T](t: Codec[T, JSON]): Codec[(T, T), JSON] = new JsonTuple2(t, t)
 
 }

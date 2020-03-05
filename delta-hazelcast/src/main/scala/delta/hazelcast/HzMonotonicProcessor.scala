@@ -1,7 +1,5 @@
 package delta.hazelcast
 
-import delta.Transaction
-import delta.TransactionProjector
 import com.hazelcast.core.IMap
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -10,30 +8,32 @@ import scala.util._
 import delta.process.MissingRevisionsReplay
 import delta.EventSource
 import java.util.concurrent.ScheduledExecutorService
+import scala.concurrent.Future
+import delta.Projector
 
 class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null: ClassTag](
-    es: EventSource[ID, _ >: EVT],
-    imap: IMap[ID, EntryState[S, EVT]],
-    txnProjector: TransactionProjector[S, EVT],
-    reportFailure: Throwable => Unit,
-    missingRevisionsReplayScheduler: ScheduledExecutorService,
-    missingRevisionsReplayDelay: FiniteDuration = 1111.milliseconds)
-  extends (Transaction[ID, _ >: EVT] => Unit)
-  with MissingRevisionsReplay[ID, EVT] {
+  es: EventSource[ID, _ >: EVT],
+  imap: IMap[ID, _ <: EntryState[S, EVT]],
+  getProjector: delta.Transaction[ID, _ >: EVT] => Projector[S, EVT],
+  reportFailure: Throwable => Unit,
+  missingRevisionsReplayScheduler: ScheduledExecutorService,
+  missingRevisionsReplayDelay: FiniteDuration)
+extends (delta.Transaction[ID, _ >: EVT] => Future[Any])
+with MissingRevisionsReplay[ID, EVT] {
 
-  implicit private[this] val ec = 
+  implicit private[this] val ec =
     ExecutionContext.fromExecutorService(missingRevisionsReplayScheduler, reportFailure)
 
-  private[this] val replay = 
+  private[this] val replay =
     replayMissingRevisions(es, missingRevisionsReplayDelay, missingRevisionsReplayScheduler, reportFailure) _
-  private[this] val process = 
-    DistributedMonotonicProcessor(imap, txnProjector) _
 
-  type TXN = Transaction[ID, _ >: EVT]
-  def apply(txn: TXN) = {
-    process(txn) andThen {
+  type Transaction = delta.Transaction[ID, _ >: EVT]
+  def apply(tx: Transaction) = {
+    val projector = getProjector(tx)
+    DistributedMonotonicProcessor(imap, projector)(tx)
+      .andThen {
       case Success(MissingRevisions(range)) =>
-        replay(txn.stream, range)(apply)
+        replay(tx.stream, range)(apply)
       case Failure(th) => reportFailure(th)
     }
   }

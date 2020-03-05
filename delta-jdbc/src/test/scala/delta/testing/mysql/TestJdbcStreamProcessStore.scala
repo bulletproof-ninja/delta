@@ -22,6 +22,8 @@ import delta.testing.Foo
 import scala.util.Random
 import scala.concurrent.Future
 import scuff.SysProps
+import delta.process.UpdateCodec
+import delta.jdbc.JdbcStreamProcessStore.Config
 
 object TestJdbcStreamProcessStore {
 
@@ -61,7 +63,7 @@ object TestJdbcStreamProcessStore {
 }
 
 class TestJdbcStreamProcessStore
-  extends TestStreamProcessStore {
+extends TestStreamProcessStore {
   import TestJdbcStreamProcessStore._
 
   private val cs = new ConnectionSource with DataSourceConnection {
@@ -73,10 +75,16 @@ class TestJdbcStreamProcessStore
     }
   }
 
-  override def newStore(): StreamProcessStore[Long, String] = {
-    val store = new JdbcStreamProcessStore[Long, String]("id",
-      cs, None, readModelName, None, RandomDelayExecutionContext, WithTimestamp("last_updated")) with MySQLSyntax
+  override def newStore(): StreamProcessStore[Long, String, String] = {
+    val store = new JdbcStreamProcessStore[Long, String, String](
+      Config("id", readModelName) timestamp WithTimestamp("last_updated"),
+      cs, RandomDelayExecutionContext) with MySQLSyntax
     store.ensureTable()
+  }
+
+  implicit val fooCodec = new UpdateCodec[Foo, String] {
+    def asUpdate(prevState: Option[Foo], currState: Foo): String = Foo encode currState
+    def asSnapshot(state: Option[Foo], update: String): Option[Foo] = Some { Foo decode update }
   }
 
   private val fooTable = s"foo_${Random.nextInt.toHexString}"
@@ -91,8 +99,9 @@ class TestJdbcStreamProcessStore
     implicit val FooColumn = ColumnType(Foo)
   }
   class FooProcessStore(cs: ConnectionSource, version: Short)(implicit fooCol: ColumnType[Foo])
-    extends JdbcStreamProcessStore[Long, Foo](
-      "id", cs, version, fooTable, None, RandomDelayExecutionContext, WithTimestamp(), FooProcessStore.indexColumns) {
+    extends JdbcStreamProcessStore[Long, Foo, String](
+      Config("id", fooTable).version(version) timestamp WithTimestamp(),
+      cs, RandomDelayExecutionContext, FooProcessStore.indexColumns) {
     def queryText(text: String): Future[Map[Long, Snapshot]] = {
       this.querySnapshot("foo_text" -> text)
     }
@@ -122,16 +131,16 @@ class TestJdbcStreamProcessHistory
   extends TestJdbcStreamProcessStore {
   import TestJdbcStreamProcessStore._
 
-  override def newStore(): StreamProcessStore[Long, String] = newStore(1)
+  override def newStore(): StreamProcessStore[Long, String, String] = newStore(1)
   private def newStore(v: Int) = {
     val cs = new ConnectionSource with DataSourceConnection {
       def dataSource = ds
     }
-    val store = new JdbcStreamProcessHistory[Long, String](RandomDelayExecutionContext, cs, v.toShort, WithTimestamp(), readModelName) with MySQLSyntax
+    val store = new JdbcStreamProcessHistory[Long, String, String](RandomDelayExecutionContext, cs, v.toShort, WithTimestamp(), readModelName) with MySQLSyntax
     store.ensureTable()
   }
 
-  private def history(id: Long, store: StreamProcessStore[Long, String], dataPrefix: String): Unit = {
+  private def history(id: Long, store: StreamProcessStore[Long, String, String], dataPrefix: String): Unit = {
     store.write(id, Snapshot("{}", 0, 3L)).await(1.hour)
     store.refresh(id, 1, 5L).await(1.hour)
     assertEquals(Snapshot("{}", 1, 5L), store.read(id).await(1.hour).get)

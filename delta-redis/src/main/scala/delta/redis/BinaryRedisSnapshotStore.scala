@@ -32,9 +32,9 @@ class BinaryRedisSnapshotStore[K, T](
   protected def transaction(conn: BinaryJedis = null)(thunk: Transaction => Unit): Boolean = {
     if (conn == null) jedis(transaction(_)(thunk))
     else {
-      val txn = conn.multi()
-      thunk(txn)
-      !txn.exec().isEmpty
+      val tx = conn.multi()
+      thunk(tx)
+      !tx.exec().isEmpty
     }
   }
 

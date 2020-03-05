@@ -11,6 +11,10 @@ trait BasicReadModel[ID, S] {
 
   type Snapshot = delta.Snapshot[S]
 
+  protected def readSnapshot(id: ID)(
+      implicit
+      ec: ExecutionContext): Future[Option[Snapshot]]
+
   /**
    * Read latest snapshot. This is intended
    * to get *some* revision fast. This
@@ -21,7 +25,10 @@ trait BasicReadModel[ID, S] {
    */
   def read(id: ID)(
       implicit
-      ec: ExecutionContext): Future[Snapshot]
+      ec: ExecutionContext): Future[Snapshot] =
+    readSnapshot(id).map {
+      verify(id, _)
+    }
 
   /**
    * Read snapshot, ensuring it's at at least the given tick.

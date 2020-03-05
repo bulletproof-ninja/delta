@@ -5,8 +5,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scuff.Subscription
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
-import scuff.concurrent.Threads
-import delta.Transaction
+import scuff.concurrent._
 
 /**
  * A gap-less event source consumer, consisting of
@@ -19,7 +18,7 @@ trait EventSourceConsumer[ID, EVT] {
   protected type ReplayResult
 
   type EventSource = delta.EventSource[ID, _ >: EVT]
-  protected type TXN = Transaction[ID, _ >: EVT]
+  protected type Transaction = delta.Transaction[ID, _ >: EVT]
 
   /**
    * The maximum tick skew, i.e. the largest reasonably
@@ -52,7 +51,7 @@ trait EventSourceConsumer[ID, EVT] {
    * It is highly recommended to return an instance of
    * [[delta.process.MonotonicReplayProcessor]] here.
    */
-  protected def replayProcessor(es: EventSource): StreamConsumer[TXN, Future[ReplayResult]]
+  protected def replayProcessor(es: EventSource): StreamConsumer[Transaction, Future[ReplayResult]]
 
   /**
    * When replay processing is completed, a live processor
@@ -71,7 +70,7 @@ trait EventSourceConsumer[ID, EVT] {
    * @param replayResult The result of replay processing, if any.
    * @return A live transaction processing function
    */
-  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any
+  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): Transaction => Any
 
   /** The currently processed tick watermark. */
   protected def tickWatermark: Option[Long]
@@ -111,7 +110,7 @@ trait EventSourceConsumer[ID, EVT] {
       ec: ExecutionContext): Future[Subscription] = {
     val replayProcessingDone: Future[Option[ReplayResult]] = maxEventSourceTickAtStart match {
       case None => // EventSource is empty
-        Future successful None
+        Future.none
       case Some(_) =>
         val replayProc = StreamPromise(replayProcessor(es))
         es.query(selector)(replayProc)

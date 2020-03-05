@@ -9,18 +9,21 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scuff._
 import java.util.concurrent.atomic.AtomicLong
 import delta.process.{ StreamProcessStore, BlockingCASWrites }
+import delta.process.UpdateCodec
 
 /**
   * Binary Redis implementation of [[delta.util.StreamProcessStore]]
   */
-class BinaryRedisStreamProcessStore[K, T](
+class BinaryRedisStreamProcessStore[K, T, U](
     keyCodec: Serializer[K],
     snapshotCodec: Serializer[delta.Snapshot[T]],
     hashName: String,
     protected val blockingCtx: ExecutionContext)(
-    jedisProvider: ((BinaryJedis => Any) => Any))
+    jedisProvider: ((BinaryJedis => Any) => Any))(
+    implicit
+    protected val updateCodec: UpdateCodec[T, U])
   extends BinaryRedisSnapshotStore(keyCodec, snapshotCodec, hashName, blockingCtx)(jedisProvider)
-  with StreamProcessStore[K, T] with BlockingCASWrites[K, T, BinaryJedis] {
+  with StreamProcessStore[K, T, U] with BlockingCASWrites[K, T, U, BinaryJedis] {
 
   private def newJUHashMap(size: Int) = new java.util.HashMap[Array[Byte], Array[Byte]]((size / 0.67f).toInt, 0.67f)
 
@@ -125,10 +128,10 @@ class BinaryRedisStreamProcessStore[K, T](
       conn.unwatch()
     } else {
       val updateMaxTick = maxTick > lastTickWritten.get
-      val success = transaction(conn) { txn =>
-        txn.hmset(hash, toRefresh)
+      val success = transaction(conn) { tx =>
+        tx.hmset(hash, toRefresh)
         if (updateMaxTick) {
-          txn.hset(hash, TickKey, maxTick.toString.utf8)
+          tx.hset(hash, TickKey, maxTick.toString.utf8)
         }
       }
       if (success) {
@@ -179,8 +182,8 @@ class BinaryRedisStreamProcessStore[K, T](
     val binKey = keyCodec encode key
     val binSnapshot = snapshotCodec encode newSnapshot
     assert(conn.getClient.isInWatch)
-    val success = transaction(conn) { txn =>
-      txn.hset(hash, binKey, binSnapshot)
+    val success = transaction(conn) { tx =>
+      tx.hset(hash, binKey, binSnapshot)
     }
     if (success) None
     else {

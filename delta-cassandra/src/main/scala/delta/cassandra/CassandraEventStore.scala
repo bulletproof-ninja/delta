@@ -45,11 +45,11 @@ private[cassandra] object CassandraEventStore {
   }
 
   private val StreamColumns = Seq("revision", "tick", "channel", "event_names", "event_versions", "event_data", "metadata")
-  private val TxnColumns = "stream_id" +: StreamColumns
+  private val TxColumns = "stream_id" +: StreamColumns
   private def streamColumns: String = StreamColumns.mkString(",")
-  private def txnColumns: String = TxnColumns.mkString(",")
+  private def txColumns: String = TxColumns.mkString(",")
   private val StreamColumnsIdx = Columns(StreamColumns.indexOf(_))
-  private val TxnColumnsIdx = Columns(TxnColumns.indexOf(_))
+  private val TxColumnsIdx = Columns(TxColumns.indexOf(_))
 
   private case class Columns(
       stream_id: Int, revision: Int,
@@ -109,7 +109,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
 
   private[this] val TableName = s"${td.keyspace}.${td.table}"
 
-  protected def toTransaction(knownStream: Option[ID], row: Row, columns: Columns): TXN = {
+  protected def toTransaction(knownStream: Option[ID], row: Row, columns: Columns): Transaction = {
     val stream = knownStream getOrElse ct[ID].readFrom(row, columns.stream_id)
     val tick = row.getLong(columns.tick)
     val channel = Channel(row.getString(columns.channel))
@@ -140,13 +140,13 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
 
   // TODO: Make fully callback driven:
-  private def processMultiple(callback: TXN => Unit, stms: Seq[BoundStatement]): Future[Unit] = {
+  private def processMultiple(callback: Transaction => Unit, stms: Seq[BoundStatement]): Future[Unit] = {
       def iterate(rss: Seq[ResultSet]): Seq[ResultSet] = {
         for {
           rs <- rss
           _ <- 0 until rs.getAvailableWithoutFetching
         } {
-          callback(toTransaction(None, rs.one, TxnColumnsIdx))
+          callback(toTransaction(None, rs.one, TxColumnsIdx))
         }
         rss.filterNot(_.isExhausted)
       }
@@ -163,7 +163,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
 
   // TODO: Make fully non-blocking
-  private def queryAsync[U](stream: Some[ID], callback: StreamConsumer[TXN, U], stm: BoundStatement): Unit = {
+  private def queryAsync[U](stream: Some[ID], callback: StreamConsumer[Transaction, U], stm: BoundStatement): Unit = {
     execute(stm) { rs =>
       Try {
         val iter = rs.iterator().asScala.map(row => toTransaction(stream, row, StreamColumnsIdx))
@@ -200,7 +200,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     (types, typeVers, data)
   }
 
-  private lazy val CurrRevision = {
+  private lazy val CurrentRevision = {
     val ps = session.prepare(s"""
       SELECT revision
       FROM $TableName
@@ -210,7 +210,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
   def currRevision(streamId: ID): Future[Option[Int]] = {
-    execute(CurrRevision(streamId))(rs => Option(rs.one).map(_.getInt(0)))
+    execute(CurrentRevision(streamId))(rs => Option(rs.one).map(_.getInt(0)))
   }
 
   private lazy val GetLastTick = {
@@ -224,14 +224,14 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
 
   private lazy val ReplayEverything: () => BoundStatement = {
     val ps = session.prepare(s"""
-      SELECT $txnColumns
+      SELECT $txColumns
       FROM $TableName
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     () => ps.bind()
   }
   private lazy val ReplayEverythingSince: Long => BoundStatement = {
     val ps = session.prepare(s"""
-      SELECT $txnColumns
+      SELECT $txColumns
       FROM $TableName
       WHERE tick >= ?
       ALLOW FILTERING""").setConsistencyLevel(ConsistencyLevel.SERIAL)
@@ -250,7 +250,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
       session.prepare(s"""
-        SELECT $txnColumns
+        SELECT $txColumns
         FROM $TableName
         WHERE $channelMatch
         ALLOW FILTERING
@@ -266,7 +266,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
       session.prepare(s"""
-        SELECT $txnColumns
+        SELECT $txColumns
         FROM $TableName
         WHERE $channelMatch
         AND tick >= ?
@@ -281,7 +281,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
   private def ReplayByEvent: (Channel, Class[_ <: EVT]) => BoundStatement = {
     val ps = session.prepare(s"""
-      SELECT $txnColumns
+      SELECT $txColumns
       FROM $TableName
       WHERE channel = ?
       AND event_names CONTAINS ?
@@ -294,7 +294,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
   private def ReplayByEventSince: (Channel, Class[_ <: EVT], Long) => BoundStatement = {
     val ps = session.prepare(s"""
-      SELECT $txnColumns
+      SELECT $txColumns
       FROM $TableName
       WHERE channel = ?
       AND event_names CONTAINS ?
@@ -312,7 +312,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
-  def replayStream[R](stream: ID)(callback: StreamConsumer[TXN, R]): Unit = {
+  def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit = {
     val stm = ReplayStream(stream)
     queryAsync(Some(stream), callback, stm)
   }
@@ -322,7 +322,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, fromRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
   }
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[TXN, R]): Unit = {
+  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit = {
     if (fromRevision == 0) {
       replayStream(stream)(callback)
     } else {
@@ -336,7 +336,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, toRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
   }
-  override def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[TXN, R]): Unit = {
+  override def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit = {
     val stm = ReplayStreamTo(stream, toRevision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -355,7 +355,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ps.bind(ct[ID].writeAs(id), first, last)
     }
   }
-  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[TXN, R]): Unit = {
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val from = revisionRange.head
     val to = revisionRange.last
@@ -377,7 +377,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       AND revision = ?""").setConsistencyLevel(ConsistencyLevel.SERIAL)
     (stream: ID, rev: Int) => ps.bind(ct[ID].writeAs(stream), Int box rev)
   }
-  private def replayStreamRevision[U](stream: ID, revision: Int)(callback: StreamConsumer[TXN, U]): Unit = {
+  private def replayStreamRevision[U](stream: ID, revision: Int)(callback: StreamConsumer[Transaction, U]): Unit = {
     val stm = ReplayStreamRevision(stream, revision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -415,7 +415,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   protected def insert(
       channel: Channel, stream: ID, revision: Int, tick: Long,
       events: List[EVT], metadata: Map[String, String])(
-      handler: ResultSet => TXN): Future[TXN] = {
+      handler: ResultSet => Transaction): Future[Transaction] = {
     if (revision == 0) {
       val stm = RecordFirstRevision(stream, channel, tick, events, metadata)
       execute(stm)(handler)
@@ -429,7 +429,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
 
   def commit(
       channel: Channel, stream: ID, revision: Int, tick: Long,
-      events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
+      events: List[EVT], metadata: Map[String, String]): Future[Transaction] = {
     insert(channel, stream, revision, tick, events, metadata) { rs =>
       if (rs.wasApplied) {
         Transaction(tick, channel, stream, revision, metadata, events)
@@ -441,7 +441,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
 
   }
 
-  def query[U](selector: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
+  def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
     resolve(selector, None) match {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {
@@ -453,7 +453,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
 
-  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[TXN, U]): Unit = {
+  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
     resolve(selector, Some(sinceTick)) match {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {

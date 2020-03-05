@@ -48,11 +48,11 @@ final class TestSampler extends sampler.TestSampler {
     }
     new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)(initTicker)
     with MessageHubPublishing[Int, DomainEvent] {
-      def toTopic(ch: Channel) = Topic(s"txn-$ch")
-      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
-      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
-      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop[TXN]
+      def toTopic(ch: Channel) = Topic(s"tx-$ch")
+      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
+      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txCodec = scuff.Codec.noop[Transaction]
     }.ensureSchema()
   }
 

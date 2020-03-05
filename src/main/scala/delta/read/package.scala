@@ -38,6 +38,9 @@ package read {
 
 }
 
+/**
+  * Support for read-only models.
+  */
 package object read {
 
   private[delta] val DefaultReadTimeout = 5555.millis
@@ -83,12 +86,24 @@ package object read {
 
   private[delta] def verifySnapshot[ID, S](
       id: ID, optSnapshot: Option[Snapshot[S]],
-      minRevision: Int = -1, minTick: Long = Long.MinValue): Snapshot[S] =
-    verifySnapshot(id, verify(id, optSnapshot), minRevision, minTick)
+      minRevision: Int): Snapshot[S] =
+    verifySnapshot(id, verify(id, optSnapshot), minRevision, Long.MinValue)
+
+  private[delta] def verifySnapshot[ID, S](
+      id: ID, optSnapshot: Option[Snapshot[S]],
+      minTick: Long): Snapshot[S] =
+    verifySnapshot(id, verify(id, optSnapshot), -1, minTick)
 
   private[delta] def verifySnapshot[ID, S](
       snapshotId: ID, snapshot: Snapshot[S],
       minRev: Int, minTick: Long): snapshot.type = {
+    verifyRevision(snapshotId, snapshot, minRev)
+    verifyTick(snapshotId, snapshot, minTick)
+  }
+  private[delta] def verifySnapshot[ID, S](
+      snapshotId: ID, optSnapshot: Option[Snapshot[S]],
+      minRev: Int, minTick: Long): Snapshot[S] = {
+    val snapshot = verify(snapshotId, optSnapshot)
     verifyRevision(snapshotId, snapshot, minRev)
     verifyTick(snapshotId, snapshot, minTick)
   }

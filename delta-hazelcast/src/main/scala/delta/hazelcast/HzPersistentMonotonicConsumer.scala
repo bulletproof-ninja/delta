@@ -9,27 +9,41 @@ import scala.reflect.ClassTag
 
 import com.hazelcast.core.IMap
 
-import delta.TransactionProjector
+import delta.Projector
 import delta.process.EventSourceConsumer
 import scuff.concurrent.PartitionedExecutionContext
 
 /**
  * @tparam ID The key identifier
  * @tparam EVT The event type
- * @tparam WS The working state type
- * @tparam RS The resting state type
+ * @tparam S The state type
  */
-abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag](
-    protected val imap: IMap[ID, EntryState[S, EVT]],
-    txnProjector: TransactionProjector[S, EVT],
-    protected val tickWatermark: Option[Long],
-    finishReplayProcessingTimeout: FiniteDuration,
-    executionContext: ExecutionContext,
-    scheduler: ScheduledExecutorService)
-  extends EventSourceConsumer[ID, EVT] {
+abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag]
+extends EventSourceConsumer[ID, EVT] {
 
   protected type ReplayResult = Any
 
+  protected def imap: IMap[ID, _ <: EntryState[S, EVT]]
+  protected def tickWatermark: Option[Long]
+
+  /**
+   * If revisions are detected missing during live
+   * processing, this is the delay before requesting
+   * replay. If the messaging infrastructure is not
+   * guaranteed to be ordered per stream, a delay can
+   * prevent unnecessary replay.
+   */
+  protected def missingRevisionsReplayDelay: FiniteDuration
+  protected def missingRevisionsReplayScheduler: ScheduledExecutorService
+
+  /**
+   * How long to wait for replay processing to finish,
+   * once all transactions have been replayed.
+   */
+  protected def finalizeReplayProcessingTimeout: FiniteDuration
+  protected def persistenceContext: ExecutionContext
+
+  protected def projector(tx: Transaction): Projector[S, EVT]
   protected def reportFailure(th: Throwable): Unit
   /** Event source streams selector. */
   protected def selector(es: EventSource): es.StreamsSelector
@@ -40,7 +54,7 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     PartitionedExecutionContext(numThreads, failureReporter = reportFailure)
   }
 
-  import delta.process.ConcurrentMapStore.Value
+  import delta.process.ConcurrentMapStore.State
 
   /**
     * Instantiate new concurrent map used to hold state during
@@ -48,8 +62,8 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     * different implementation that e.g. stores to local disk,
     * if data set is too large for in-memory handling.
     */
-  protected def newReplayMap: collection.concurrent.Map[ID, Value[S]] =
-    new java.util.concurrent.ConcurrentHashMap[ID, Value[S]].asScala
+  protected def newReplayMap: collection.concurrent.Map[ID, State[S]] =
+    new java.util.concurrent.ConcurrentHashMap[ID, State[S]].asScala
 
   /**
     * Called at startup, when replay processing of
@@ -71,23 +85,23 @@ abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: Class
     * It is highly recommended to return an instance of
     * [[delta.util.MonotonicReplayProcessor]] here.
     */
-  protected def replayProcessor(es: EventSource) =
-    new HzMonotonicReplayProcessor[ID, EVT, S](
-      tickWatermark,
-      imap,
-      finishReplayProcessingTimeout,
-      executionContext,
-      newPartitionedExecutionContext,
-      newReplayMap) {
-    def process(txn: TXN, currState: Option[S]) = txnProjector(txn, currState)
+  protected def replayProcessor(es: EventSource) = {
+    val projector = Projector(this.projector) _
+    new HzMonotonicReplayProcessor[ID, EVT, S, Unit](
+        tickWatermark,
+        imap,
+        finalizeReplayProcessingTimeout,
+        persistenceContext,
+        newPartitionedExecutionContext,
+        newReplayMap) {
+      def process(tx: Transaction, currState: Option[S]) = projector(tx, currState)
+    }
   }
 
-  protected def missingRevisionsReplayDelay: FiniteDuration = 2222.millis
-
-  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): TXN => Any = {
+  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): Transaction => Any = {
     new HzMonotonicProcessor[ID, EVT, S](
-      es, imap, txnProjector, reportFailure,
-      scheduler, missingRevisionsReplayDelay)
+      es, imap, projector, reportFailure,
+      missingRevisionsReplayScheduler, missingRevisionsReplayDelay)
   }
 
 }

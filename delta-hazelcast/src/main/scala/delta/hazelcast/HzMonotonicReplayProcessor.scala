@@ -11,7 +11,7 @@ import scuff.concurrent.Threads
 
 object HzMonotonicReplayProcessor {
   private[this] def read[ID, EVT, S](
-      imap: IMap[ID, EntryState[S, EVT]])(id: ID): Future[Option[delta.Snapshot[S]]] = {
+      imap: IMap[ID, _ <: EntryState[S, EVT]])(id: ID): Future[Option[delta.Snapshot[S]]] = {
     val callback = CallbackPromise[delta.Snapshot[S], Option[delta.Snapshot[S]]] {
       case null => None
       case s: delta.Snapshot[_] => Some {
@@ -20,50 +20,53 @@ object HzMonotonicReplayProcessor {
     }
     imap.submitToKey(id, EntryStateSnapshotReader, callback)
     callback.future
-  }    
-  
-  import ConcurrentMapStore.Value
+  }
 
-  private def makeStore[ID, EVT: ClassTag, S](
-      cmap: collection.concurrent.Map[ID, Value[S]],
+  import ConcurrentMapStore.State
+
+  private def localReplayStore[ID, EVT: ClassTag, S, U](
+      cmap: collection.concurrent.Map[ID, State[S]],
       tickWatermark: Option[Long],
-      imap: IMap[ID, EntryState[S, EVT]]): StreamProcessStore[ID, S] = {
-    ConcurrentMapStore(cmap, tickWatermark)(read(imap))
+      imap: IMap[ID, _ <: EntryState[S, EVT]]): StreamProcessStore[ID, S, U] = {
+    ConcurrentMapStore.asReplayStore(cmap, tickWatermark)(read(imap))
   }
 }
 
-abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null](
-    tickWatermark: Option[Long],
-    imap: IMap[ID, EntryState[S, EVT]],
-    finishProcessingTimeout: FiniteDuration,
-    protected val persistenceContext: ExecutionContext,
-    partitionThreads: PartitionedExecutionContext,
-    cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]])
-  extends MonotonicReplayProcessor[ID, EVT, S, Unit](
-    finishProcessingTimeout, HzMonotonicReplayProcessor.makeStore(cmap, tickWatermark, imap))
-  with ConcurrentMapReplayPersistence[ID, EVT, S, Unit] {
+abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, U](
+  tickWatermark: Option[Long],
+  persistentState: IMap[ID, _ <: EntryState[S, EVT]],
+  finalizeProcessingTimeout: FiniteDuration,
+  protected val persistenceContext: ExecutionContext,
+  partitionThreads: PartitionedExecutionContext,
+  cmap: collection.concurrent.Map[ID, ConcurrentMapStore.State[S]])
+extends MonotonicReplayProcessor[ID, EVT, S, U, Unit](
+  finalizeProcessingTimeout, HzMonotonicReplayProcessor.localReplayStore(cmap, tickWatermark, persistentState))
+with ConcurrentMapReplayPersistence[ID, EVT, S, U, Unit] {
 
   def this(
       tickWatermark: Option[Long],
-      imap: IMap[ID, EntryState[S, EVT]],
-      finishProcessingTimeout: FiniteDuration,
+      persistentState: IMap[ID, EntryState[S, EVT]],
+      finalizeProcessingTimeout: FiniteDuration,
       persistContext: ExecutionContext,
       failureReporter: Throwable => Unit,
-      processingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
-      cmap: collection.concurrent.Map[ID, ConcurrentMapStore.Value[S]] = 
-        new collection.concurrent.TrieMap[ID, ConcurrentMapStore.Value[S]]) =
-    this(tickWatermark, imap, finishProcessingTimeout, persistContext,
+      localProcessingThreads: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
+      cmap: collection.concurrent.Map[ID, ConcurrentMapStore.State[S]] =
+        new collection.concurrent.TrieMap[ID, ConcurrentMapStore.State[S]]) =
+    this(tickWatermark, persistentState, finalizeProcessingTimeout, persistContext,
       PartitionedExecutionContext(
-          processingThreads, failureReporter, Threads.factory(s"${imap.getName}-replay-processor", failureReporter)),
+          localProcessingThreads, failureReporter,
+          Threads.factory(s"${persistentState.getName}-replay-processor", failureReporter)),
       cmap)
 
+  override type Snapshot = delta.Snapshot[S]
+
   protected def processContext(id: ID): ExecutionContext = partitionThreads.singleThread(id.##)
-  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, Value]] =
+  protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]] =
     partitionThreads.shutdown().map(_ => cmap)(persistenceContext)
 
   protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[Unit] = {
       implicit def ec = persistenceContext
-    val updater = EntryStateUpdater[ID, EVT, S](imap) _
+    val updater = EntryStateUpdater[ID, EVT, S](persistentState) _
     val persisted: Iterator[Future[Unit]] = snapshots.flatMap {
       case (id, snapshot) => updater(id, snapshot) :: Nil
     }

@@ -10,7 +10,6 @@ import java.util.function.Consumer
 import delta.process.StreamProcessStore
 import delta.process.MonotonicJoinState
 import delta.process.MissingRevisionsReplay
-import delta.Transaction
 import scala.concurrent.ExecutionContext
 
 /**
@@ -18,23 +17,23 @@ import scala.concurrent.ExecutionContext
  * @param processStore The stream process store used to track stream progress
  * @param replayProcessorWriteBatchSize Batch size when writing replay processed state to store
  * @param replayProcessorWriteCompletionTimeout Timeout after replay has completed
- * @param scheduler The scheduler used to schedule replay of potentially missing revisions, as well as general executor
+ * @param replayMissingScheduler The scheduler used to schedule replay of potentially missing revisions
  * @param evtTag The class tag for event type
  */
-abstract class PersistentMonotonicConsumer[ID, EVT, S >: Null](
-    processStore: StreamProcessStore[ID, S],
-    persistenceContext: ExecutionContext,
-    scheduler: ScheduledExecutorService)(
-    implicit
-    evtTag: ClassTag[EVT])
-  extends delta.process.PersistentMonotonicConsumer[ID, EVT, S](processStore, persistenceContext, scheduler) {
+abstract class PersistentMonotonicConsumer[ID, EVT, S >: Null, U](
+  protected val processStore: StreamProcessStore[ID, S, U],
+  protected val replayPersistenceContext: ExecutionContext,
+  protected val replayMissingScheduler: ScheduledExecutorService)(
+  implicit
+  evtTag: ClassTag[EVT])
+extends delta.process.PersistentMonotonicConsumer[ID, EVT, S, U] {
 
   def this(
-      processStore: StreamProcessStore[ID, S],
-      persistenceContext: ExecutionContext,
-      scheduler: ScheduledExecutorService,
+      processStore: StreamProcessStore[ID, S, U],
+      replayPersistenceContext: ExecutionContext,
+      replayMissingScheduler: ScheduledExecutorService,
       evtType: Class[_ <: EVT]) =
-    this(processStore, persistenceContext, scheduler)(ClassTag(evtType))
+    this(processStore, replayPersistenceContext, replayMissingScheduler)(ClassTag(evtType))
 
   /** Turn Scala `List` into Java `Iterable`. */
   protected def iterable(list: List[_ >: EVT]): java.lang.Iterable[EVT] = {
@@ -45,31 +44,31 @@ abstract class PersistentMonotonicConsumer[ID, EVT, S >: Null](
 
 }
 
-abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null](
-    processStore: StreamProcessStore[ID, S],
+abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null, U](
+    processStore: StreamProcessStore[ID, S, U],
     persistenceContext: ExecutionContext,
     scheduler: ScheduledExecutorService)(
     implicit
     evtTag: ClassTag[EVT])
-  extends PersistentMonotonicConsumer[ID, EVT, S](processStore, persistenceContext, scheduler)
-  with MonotonicJoinState[ID, EVT, S]
+  extends PersistentMonotonicConsumer[ID, EVT, S, U](processStore, persistenceContext, scheduler)
+  with MonotonicJoinState[ID, EVT, S, U]
   with MissingRevisionsReplay[ID, EVT] {
 
   def this(
-      processStore: StreamProcessStore[ID, S],
+      processStore: StreamProcessStore[ID, S, U],
       persistenceContext: ExecutionContext,
       scheduler: ScheduledExecutorService,
       evtType: Class[_ <: EVT]) =
     this(processStore, persistenceContext, scheduler)(ClassTag(evtType))
 
   override type Snapshot = delta.Snapshot[S]
-  override type SnapshotUpdate = delta.process.SnapshotUpdate[S]
+  override type Update = delta.process.Update[U]
 
   protected def replayMissingRevisions(
       es: delta.EventSource[ID, _ >: EVT], replayDelayLength: Long, replayDelayUnit: TimeUnit,
       scheduler: ScheduledExecutorService, reportFailure: Consumer[Throwable],
       id: ID, missing: Range,
-      replayProcess: Consumer[Transaction[ID, _ >: EVT]]): Unit =
+      replayProcess: Consumer[delta.Transaction[ID, _ >: EVT]]): Unit =
     this.replayMissingRevisions(
       es, FiniteDuration(replayDelayLength, replayDelayUnit), scheduler, reportFailure.accept)(
       id, missing)(

@@ -8,43 +8,33 @@ import delta.read._
 /**
  * Fully consistent (read-your-writes)
  * on-demand pull-only read-model.
- * Uses a [[delta.util.StreamProcessStore]] for
+ * Uses a [[delta.process.StreamProcessStore]] for
  * storing state and queries a [[delta.EventSource]]
  * for any new events, and updates the process store
  * if anything changed. This means that this is
  * generally slower than [[StatelessReadModel]] for
- * smaller streams, where "smaller" depends on a lot
- * of factors. Unless state is required to be kept
- * in an external store, consider using [[StatelessReadModel]]
- * instead.
- * NOTE: *Cannot* be used for state derived
- * from joined streams.
+ * cheap streams, where "cheap" depends on a lot
+ * of factors, e.g. stream revision size, cost of computing state, etc.
+ * Unless state is required to be kept in an external store, or there
+ * is no messaging infrastructure available, and it's cheap to generate,
+ * consider using [[StatelessReadModel]] instead.
+ * NOTE: *Cannot* be used for state derived from joined streams.
  * @tparam ID The id type
- * @tparam S The state type
  * @tparam ESID The event-source id type
  * @tparam EVT The event type used for producing state
+ * @tparam Work The state type optimized for mutation
+ * @tparam Stored The state type optimized for storage/reading
  */
-abstract class StatefulReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
-    txProjector: TransactionProjector[S, EVT],
-    es: EventSource[ESID, _ >: EVT])(
-    implicit
-    convId: ID => ESID)
-  extends EventSourceReadModel[ID, ESID, S, EVT](es, txProjector)
-  with ProcessStoreSupport[ID, ESID, S] {
+abstract class StatefulReadModel[ID, ESID, EVT: ClassTag, Work >: Null: ClassTag, Stored, U](
+  es: EventSource[ESID, _ >: EVT])(
+  implicit
+  protected val idConv: ID => ESID)
+extends EventSourceReadModel[ID, ESID, EVT, Work, Stored](es)
+with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 
-  def this(
-      projector: Projector[S, EVT])(
-      es: EventSource[ESID, _ >: EVT])(
-      implicit
-      convId: ID => ESID) =
-        this(TransactionProjector[S, EVT](projector), es)
-
-  protected def idConv(id: ID): ESID = convId(id)
-
-  def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
-    readAndUpdate(id).map {
-      verifySnapshot(id, _)
-    }
+  protected def readSnapshot(id: ID)(
+      implicit ec: ExecutionContext): Future[Option[Snapshot]] =
+    readAndUpdate(id)
 
   def read(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
     readAndUpdate(id, minRevision).map {

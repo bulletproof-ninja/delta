@@ -54,10 +54,16 @@ package jdbc {
       new UUID(msb, lsb)
     }
   }
+
   object UUIDCharColumn extends ColumnType[UUID] {
     def typeName = "CHAR(36)"
     override def writeAs(uuid: UUID): String = uuid.toString
     def readFrom(row: ResultSet, col: Int) = UUID fromString row.getString(col)
+  }
+
+  object JsonColumn extends ColumnType[String] {
+    def typeName = "JSON"
+    def readFrom(row: ResultSet, col: Int) = row.getString(col)
   }
 
   object ClobColumn extends ColumnType[String] {

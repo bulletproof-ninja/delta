@@ -2,27 +2,24 @@ package delta.read
 
 import scuff.Subscription
 import scuff.Codec
+import delta.MessageHub
 
-trait MessageHubSupport[ID, MHID, S]
-  extends SubscriptionSupport[ID, S] {
+trait MessageHubSupport[ID, S, U]
+extends SubscriptionSupport[ID, S, U] {
   rm: BasicReadModel[ID, S] =>
 
-  protected type Msg = (MHID, SnapshotUpdate)
-  protected type Topic = delta.MessageHub.Topic
-  protected def Topic(name: String) = delta.MessageHub.Topic(name)
+  protected type Topic = MessageHub.Topic
+  protected def Topic(name: String) = MessageHub.Topic(name)
 
-  protected val snapshotHub: delta.MessageHub
-  protected def snapshotTopic: Topic
-  protected def idConv(id: ID): MHID
-  protected def hubCodec: Codec[Msg, snapshotHub.MsgType]
+  protected val hub: MessageHub
+  protected def hubTopic: Topic
+  protected def hubCodec: Codec[(ID, Update), hub.Message]
   protected implicit lazy val encoder = hubCodec.encode _
   private[this] implicit lazy val decoder = hubCodec.decode _
 
-  protected def subscribe(id: ID)(pf: PartialFunction[SnapshotUpdate, Unit]): Subscription = {
-    val MatchId: MHID = idConv(id)
-    snapshotHub.subscribe[Msg](snapshotTopic) {
+  protected def subscribe(MatchId: ID)(pf: PartialFunction[Update, Unit]): Subscription =
+    hub.subscribe[(ID, Update)](hubTopic) {
       case (MatchId, update) if (pf isDefinedAt update) => pf(update)
     }
-  }
 
 }

@@ -21,16 +21,16 @@ import delta.process.StreamProcessStore
   * back-end store.
   */
 @throws[IllegalArgumentException]("if `processStore` is instance of [[IMapStreamProcessStore]]")
-class StreamProcessMapStore[K, T](
-  processStore: StreamProcessStore[K, T],
+class StreamProcessMapStore[K, T, U](
+  processStore: StreamProcessStore[K, T, U],
   preloadKeys: Iterable[K] = Set.empty[K],
   awaitTimeout: FiniteDuration = 11.seconds)
     extends MapStore[K, EntryState[T, Any]]
     with MapLoaderLifecycleSupport {
 
-  if (processStore.isInstanceOf[IMapStreamProcessStore[_, _]])
+  if (processStore.isInstanceOf[IMapStreamProcessStore[_, _, _]])
     throw new IllegalArgumentException(
-      s"The `processStore` cannot be an instance of ${classOf[IMapStreamProcessStore[_, _]].getSimpleName}")
+      s"The `processStore` cannot be an instance of ${classOf[IMapStreamProcessStore[_, _, _]].getSimpleName}")
 
   private def logTimedOutFuture(th: Throwable): Unit =
     logger.warning("Timed-out future eventually failed", th)

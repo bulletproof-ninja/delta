@@ -52,7 +52,6 @@ object TestMongoStreamProcessStore {
   }
 }
 
-//@Ignore // For some reason fails in setupClass
 class TestMongoStreamProcessStore extends TestStreamProcessStore {
 
   import TestMongoStreamProcessStore._
@@ -61,7 +60,7 @@ class TestMongoStreamProcessStore extends TestStreamProcessStore {
     def encode(str: String) = new Document("string", str)
     def decode(doc: Document) = doc.getString("string")
   }
-  override def newStore = new MongoStreamProcessStore[Long, String](strCdc, coll)
+  override def newStore = new MongoStreamProcessStore[Long, String, String](strCdc, coll)
 
   @Test
   def mock(): Unit = {

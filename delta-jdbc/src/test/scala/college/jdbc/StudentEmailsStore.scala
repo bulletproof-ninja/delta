@@ -2,11 +2,12 @@ package college.jdbc
 
 import scuff.jdbc.ConnectionSource
 import delta.jdbc._
-import college.TestCollege.StudentEmails
+import college.TestCollege._
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scuff.JavaSerializer
 import java.sql.ResultSet
+import JdbcStreamProcessStore.Config
 
 private object StudentEmailsStore {
   val EmailColumn = "email_address"
@@ -26,11 +27,10 @@ class StudentEmailsStore(
     cs: ConnectionSource, version: Short, withTimestamp: WithTimestamp,
     blockingCtx: ExecutionContext)(
         implicit colType: ColumnType[Array[Byte]])
-  extends JdbcStreamProcessStore[Int, StudentEmails](
-    "student_id", cs, version,
-    table = "student_email_lookup", None,
-    blockingCtx, withTimestamp)
-  with IndexTables[Int, StudentEmails] {
+  extends JdbcStreamProcessStore[Int, StudentEmails, StudentEmailsUpdate](
+    Config("student_id", table = "student_email_lookup").version(version) timestamp withTimestamp,
+    cs, blockingCtx)
+  with IndexTables[Int, StudentEmails, StudentEmailsUpdate] {
 
   protected val indexTables = Table(EmailColumn)(_.emails) :: Nil
 

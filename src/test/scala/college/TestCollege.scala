@@ -18,18 +18,34 @@ import delta.MessageHubPublishing
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Success
 import scala.util.Failure
-import delta.process.MonotonicReplayProcessor
-import delta.process.MonotonicJoinState
-import delta.process.SnapshotUpdate
-import delta.process.ConcurrentMapStore
-import delta.process.StreamProcessStore
-import delta.process.PersistentMonotonicConsumer
-import delta.process.BlockingCASWrites
-import delta.process.StreamProcessStore
+import delta.process._
 
 object TestCollege {
 
   case class StudentEmails(emails: Set[String])
+  case class StudentEmailsUpdate(added: Set[String] = Set.empty, removed: Set[String] = Set.empty)
+
+  implicit object StudentEmailsUpdateCodec extends UpdateCodec[StudentEmails, StudentEmailsUpdate] {
+    def asUpdate(
+        prevState: Option[TestCollege.StudentEmails],
+        currState: TestCollege.StudentEmails)
+        : TestCollege.StudentEmailsUpdate = {
+
+      val origEmails = prevState.map(_.emails) getOrElse Set.empty
+      val diff = origEmails diff currState.emails
+      val (removed, added) = diff.partition(origEmails.contains)
+      StudentEmailsUpdate(added = added, removed = removed)
+    }
+
+    def asSnapshot(
+        state: Option[TestCollege.StudentEmails],
+        update: TestCollege.StudentEmailsUpdate)
+        : Option[TestCollege.StudentEmails] = Some {
+
+      val emails = state.map(_.emails) getOrElse Set.empty
+      StudentEmails((emails -- update.removed) ++ update.added)
+    }
+  }
 
 }
 
@@ -40,17 +56,16 @@ class TestCollege {
 
   import TestCollege._
 
-  implicit def any2fut(unit: Unit): Future[Unit] = Future successful unit
-
+  implicit def toFuture[T](t: T): Future[T] = Future successful t
   protected def initTicker(es: EventSource[Int, CollegeEvent]) = LamportTicker(es)
 
   def newEventStore: EventStore[Int, CollegeEvent] =
     new TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker)
         with MessageHubPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
-      val txnHub = new LocalHub[TXN](txn => toTopic(txn.channel), RandomDelayExecutionContext)
-      val txnChannels = Set(Student.channel, Semester.channel)
-      val txnCodec = Codec.noop[TXN]
+      val txHub = new LocalHub[Transaction](tx => toTopic(tx.channel), RandomDelayExecutionContext)
+      val txChannels = Set(Student.channel, Semester.channel)
+      val txCodec = Codec.noop[Transaction]
     }
 
   @volatile var eventStore: EventStore[Int, CollegeEvent] = null
@@ -76,26 +91,23 @@ class TestCollege {
   private def randomName(): String = (
     rand.nextBetween('A', 'Z' + 1) +: (1 to rand.nextBetween(2, 13)).map(_ => rand.nextBetween('a', 'z' + 1))).mkString
 
-  // Count not exact, since we can potentially generate id clashes
-  private def addStudents(approx: Int): Seq[Student.Id] = {
+  private def addStudents(count: Int): Seq[Student.Id] = {
     val ids =
-      for (_ <- 1 to approx) yield {
+      for (_ <- 1 to count) yield {
         val name = randomName()
-        val id = new Student.Id(rand.nextInt)
         val student = Student(RegisterStudent(name, EmailAddress(s"$name@school.edu")))
         student(AddStudentEmail(EmailAddress(s"$name@gmail.com")))
-        StudentRepository.insert(id, student).map(_ => id)
+        StudentRepository.insert(new Student.Id(rand.nextInt), student)
       }
     Future.sequence(ids).await(60.seconds)
   }
-  // Count not exact, since we can potentially generate id clashes
-  private def addSemesters(approx: Int): Seq[Semester.Id] = {
+
+  private def addSemesters(count: Int): Seq[Semester.Id] = {
     val ids =
-      for (_ <- 1 to approx) yield {
+      for (_ <- 1 to count) yield {
         val name = randomName() + " " + (100 + rand.nextBetween(1, 10))
-        val id = new Semester.Id(rand.nextInt)
         val cls = Semester(CreateClass(name))
-        SemesterRepository.insert(id, cls).map(_ => id)
+        SemesterRepository.insert(new Semester.Id(rand.nextInt), cls)
       }
     Future.sequence(ids).await(120.seconds)
   }
@@ -143,24 +155,32 @@ class TestCollege {
     studentIds.toIndexedSeq -> semesterIds.toIndexedSeq
   }
 
-  def newLookupServiceProcStore: StreamProcessStore[Int, StudentEmails] = InMemoryProcStore(new TrieMap)
+  def newLookupServiceProcStore//(implicit updateCodec: UpdateCodec[StudentEmails, StudentEmailsUpdate])
+      : StreamProcessStore[Int, StudentEmails, StudentEmailsUpdate] =
+    InMemoryProcStore[StudentEmails, StudentEmailsUpdate](new TrieMap)
 
-  def lookupService(procStore: StreamProcessStore[Int, StudentEmails]): LookupService = procStore match {
-    case InMemoryProcStore(snapshots) =>
-      new LookupService {
-        def findStudent(email: EmailAddress): Future[Option[Student.Id]] = Future {
-          val lowerCase = email.toLowerCase
-          val result = snapshots.mapValues(_.content.emails).find {
-            case (_, emails) => emails contains lowerCase
+  def lookupService(procStore: StreamProcessStore[Int, StudentEmails, StudentEmailsUpdate])
+    : LookupService = procStore match {
+      case InMemoryProcStore(snapshots) =>
+        new LookupService {
+          def findStudent(email: EmailAddress): Future[Option[Student.Id]] = Future {
+            val lowerCase = email.toLowerCase
+            val results = snapshots.mapValues(_.content.emails).filter {
+              case (_, emails) => emails contains lowerCase
+            }
+            if (results.size > 1) sys.error("Probably a randomization clash. Please run again.")
+            results.headOption.map(_._1).map(new Student.Id(_))
           }
-          result.map(_._1).map(new Student.Id(_))
         }
-      }
-    case _ => sys.error("This method should be overwritten when `def procStore[S]` is overwritten.")
-  }
+      case _ => sys.error("This method should be overwritten when `def procStore[S]` is overwritten.")
+    }
 
-  private case class InMemoryProcStore[S](snapshots: collection.concurrent.Map[Int, delta.Snapshot[S]])
-    extends StreamProcessStore[Int, S] with BlockingCASWrites[Int, S, Unit] {
+  private case class InMemoryProcStore[S, U](
+    snapshots: collection.concurrent.Map[Int, delta.Snapshot[S]])(
+      implicit
+      protected val updateCodec: UpdateCodec[S, U])
+  extends StreamProcessStore[Int, S, U] with BlockingCASWrites[Int, S, U, Unit] {
+
     def read(key: Int): scala.concurrent.Future[Option[Snapshot]] = Future {
       snapshots.get(key)
     }
@@ -211,7 +231,8 @@ class TestCollege {
     def next(model: StudentEmails, evt: StudentEvent): StudentEmails = evt match {
 
       case StudentRegistered(_, email) =>
-        assert(model == null); StudentEmails(Set(email))
+        assert(model == null)
+        StudentEmails(Set(email))
 
       case StudentEmailAdded(email) => model.copy(model.emails + email)
       case StudentEmailRemoved(email) => model.copy(model.emails - email)
@@ -224,7 +245,7 @@ class TestCollege {
   def `many-to-many relationship`(): Unit = {
 
     val eventStore = this.eventStore
-    type TXN = eventStore.TXN
+    type Transaction = eventStore.Transaction
 
     case class StudentModel(name: String, emails: Set[String] = Set.empty)
 
@@ -234,7 +255,7 @@ class TestCollege {
 
     val allStudents = new TrieMap[Student.Id, (Set[Semester.Id], StudentModel)].withDefaultValue(Set.empty -> Unknown)
     val readModel = new TrieMap[Semester.Id, Map[Student.Id, StudentModel]].withDefaultValue(Map.empty)
-    val done = StreamPromise.foreach(enrollmentQuery) { txn: TXN =>
+    val done = StreamPromise.foreach(enrollmentQuery) { tx: Transaction =>
         def onSemester(semesterId: Semester.Id)(evt: CollegeEvent) = evt match {
           case ClassCreated(_) => ()
           case StudentEnrolled(studentId) =>
@@ -275,11 +296,11 @@ class TestCollege {
           case StudentEmailRemoved(removeEmail) =>
             studentEmailChange(Left(removeEmail), studentId)
         }
-      val evtHandler = txn.channel match {
-        case Student.channel => onStudent(new Student.Id(txn.stream)) _
-        case Semester.channel => onSemester(new Semester.Id(txn.stream)) _
+      val evtHandler = tx.channel match {
+        case Student.channel => onStudent(new Student.Id(tx.stream)) _
+        case Semester.channel => onSemester(new Semester.Id(tx.stream)) _
       }
-      txn.events.foreach(evtHandler)
+      tx.events.foreach(evtHandler)
     }
     done.await(120.seconds)
     allStudents.foreach {
@@ -309,14 +330,14 @@ class TestCollege {
     case class StudentModel(enrolled: Set[SemesterRev] = Set.empty) extends Model
     case class SemesterModel(students: Set[Student.Id] = Set.empty) extends Model
 
-    type Value = ConcurrentMapStore.Value[Model]
-    import ConcurrentMapStore.Value
+    type State = ConcurrentMapStore.State[Model]
+    import ConcurrentMapStore.State
 
-    class ModelBuilder(memMap: TrieMap[Int, Value])
-      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Unit](
+    class ModelBuilder(memMap: TrieMap[Int, State])
+      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model, Unit](
         10.seconds,
-        ConcurrentMapStore(memMap, None)(_ => Future successful None))
-      with MonotonicJoinState[Int, SemesterEvent, Model] {
+        ConcurrentMapStore(memMap, None)(_ => Future.none))
+      with MonotonicJoinState[Int, SemesterEvent, Model, Model] {
 
       protected def prepareJoin(
           semesterId: Int, semesterRev: Int, tick: Long, md: Map[String, String])(
@@ -344,16 +365,16 @@ class TestCollege {
         }
       }
       protected def processContext(id: Int) = streamPartitions.singleThread(id)
-      override protected def onSnapshotUpdate(id: Int, update: SnapshotUpdate) = update match {
-        case SnapshotUpdate(Snapshot(StudentModel(enrolled), _, _), true) =>
+      override protected def onUpdate(id: Int, update: Update) = update match {
+        case Update(Some(StudentModel(enrolled)), _, _) =>
           println(s"Student $id is currently enrolled in: $enrolled")
-        case SnapshotUpdate(Snapshot(SemesterModel(students), rev, _), true) =>
+        case Update(Some(SemesterModel(students)), rev, _) =>
           println(s"Semester $id:$rev currently has enrolled: $students")
         case _ => // Ignore
       }
 
-      protected def processStream(txn: TXN, currState: Option[Model]) =
-        txn.events.foldLeft(currState getOrElse SemesterModel()) {
+      protected def processStream(tx: Transaction, currState: Option[Model]) =
+        tx.events.foldLeft(currState getOrElse SemesterModel()) {
           case (model @ SemesterModel(students), StudentEnrolled(studentId)) => model.copy(students = students + studentId)
           case (model @ SemesterModel(students), StudentCancelled(studentId)) => model.copy(students = students - studentId)
           case (model, _) => model
@@ -370,36 +391,41 @@ class TestCollege {
     }
 
     val (_, semesterIds) = populateRepos(100, 20)
-    //    val studentRevs = (Future sequence studentIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
-    //      .map {
-    //        case (id, revOpt) => id -> revOpt.getOrElse{fail(s"Student $id does not exist"); -1}
-    //      }.toMap
-    val semesterRevs: Map[Semester.Id, Int] = (Future sequence semesterIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev))).await
+    val semesterRevs: Map[Semester.Id, Int] =
+      (Future sequence semesterIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev)))
+      .await
       .map {
         case (id, revOpt) => id -> revOpt.getOrElse { fail(s"Semester $id does not exist"); -1 }
       }.toMap
-    val inMemoryMap = new TrieMap[Int, Value]
+    val inMemoryMap = new TrieMap[Int, State]
     val builder = StreamPromise(new ModelBuilder(inMemoryMap))
     eventStore.query(eventStore.Selector(Semester.channel))(builder)
-    //    val queryProcess = StreamPromise.foreach(semesterQuery)(builder)
     builder.future.await
     inMemoryMap.foreach {
-      case (semesterId, Value(Snapshot(SemesterModel(students), rev, _), _)) =>
-        assertEquals(s"Semester $semesterId revision $rev failed", semesterRevs.get(new Semester.Id(semesterId)), Some(rev))
+      case (semesterId, State(Snapshot(SemesterModel(students), rev, _), _)) =>
+        val semId = new Semester.Id(semesterId)
+        val expected = semesterRevs.get(semId) match {
+          case Some(rev) => rev
+          case None =>
+            if (semesterIds contains semId) {
+              eventStore.currRevision(semId.int).await getOrElse sys.error(s"Semester $semId does not exist in event store, which should be impossible")
+            } else fail(s"Semester $semId exists in inMemoryMap, but not in event store. That is basically impossible")
+        }
+        assertEquals(s"Semester $semesterId revision $rev failed", expected, rev)
         val studentSemesters = students
           .map(id => inMemoryMap(id.int))
           .collect {
-            case Value(Snapshot(StudentModel(semesters), _, _), _) => semesters.map(_.id.int)
+            case State(Snapshot(StudentModel(semesters), _, _), _) => semesters.map(_.id.int)
           }
         studentSemesters.foreach { semesters =>
           assertTrue(semesters contains semesterId)
         }
-      case (studentId, Value(Snapshot(StudentModel(semesters), rev, _), _)) =>
+      case (studentId, State(Snapshot(StudentModel(semesters), rev, _), _)) =>
         assertEquals(-1, rev)
         val semesterStudents = semesters
           .map(s => inMemoryMap(s.id.int))
           .collect {
-            case Value(Snapshot(SemesterModel(students), _, _), _) => students.map(_.int)
+            case State(Snapshot(SemesterModel(students), _, _), _) => students.map(_.int)
           }
         semesterStudents.foreach { students =>
           assertTrue(students contains studentId)
@@ -412,19 +438,22 @@ class TestCollege {
 
     val procStore = newLookupServiceProcStore
     val lookup = lookupService(procStore)
-    object ServiceBuilder
-      extends PersistentMonotonicConsumer[Int, StudentEvent, StudentEmails](procStore, RandomDelayExecutionContext, Scheduler) {
-      def replayMissingRevisionsDelay = 2.seconds
+    object ServiceBuilder extends PersistentMonotonicConsumer[Int, StudentEvent, StudentEmails, StudentEmailsUpdate] {
+      protected def processStore = procStore
+      protected def replayMissingDelay = 2.seconds
+      protected def replayMissingScheduler = Scheduler
+      protected def replayPersistenceBatchSize: Int = 100
+      protected def replayPersistenceContext: ExecutionContext = RandomDelayExecutionContext
+      // RandomDelayExecutionContext
       protected def maxTickSkew: Int = 2
       protected def selector(es: EventSource): es.Selector = es.ChannelSelector(Student.channel)
-      protected def onSnapshotUpdate(id: Int, update: SnapshotUpdate): Unit = ()
+      protected def onUpdate(id: Int, update: Update): Unit = ()
       protected def reportFailure(th: Throwable): Unit = {
         th.printStackTrace()
         fail(th.getMessage)
       }
-      private[this] val project = TransactionProjector(StudentEmailsProjector)
-      protected def process(txn: TXN, currState: Option[StudentEmails]) =
-        project(txn, currState)
+      protected def process(tx: Transaction, currState: Option[StudentEmails]) =
+        StudentEmailsProjector(tx, currState)
     }
     val subscription = ServiceBuilder.consume(eventStore).await
     assertEquals(None, lookup.findStudent(EmailAddress("foo@bar.com")).await)

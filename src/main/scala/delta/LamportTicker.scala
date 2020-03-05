@@ -36,7 +36,7 @@ object LamportTicker {
         val maxTick = es.maxTick.await(111.seconds) getOrElse -1L
         val clock = new LamportClock(maxTick)
         val subscription = Try {
-          es.subscribe()(txn => clock.sync(txn.tick))
+          es.subscribe()(tx => clock.sync(tx.tick))
         }
         subscription.map(sub => new LamportTicker(clock, sub.cancel _))
 

@@ -10,6 +10,7 @@ package college {
   trait CollegeEvent
 
 }
+
 package object college {
 
   implicit def intId(id: IntId[_]): Int = id.int

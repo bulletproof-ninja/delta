@@ -73,9 +73,9 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
         coll, MongoDBAggrEventFmt)(
         _ => ticker) with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txnHub = new LocalHub[TXN](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txnChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txnCodec = scuff.Codec.noop[TXN]
+      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+      val txCodec = scuff.Codec.noop[Transaction]
     }
     repo = new EntityRepository(TheOneAggr, ec)(es)
   }

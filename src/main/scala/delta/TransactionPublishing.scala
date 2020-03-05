@@ -5,19 +5,19 @@ import scuff.Subscription
 import scuff.Codec
 
 trait TransactionPublishing[ID, EVT]
-  extends EventStore[ID, EVT] {
+extends EventStore[ID, EVT] {
 
-  protected def publishTransaction(stream: ID, ch: Channel, txn: Future[TXN]): Unit
+  protected def publishTransaction(stream: ID, ch: Channel, tx: Future[Transaction]): Unit
 
   abstract final override def commit(
       channel: Channel, stream: ID, revision: Int, tick: Long,
-      events: List[EVT], metadata: Map[String, String]): Future[TXN] = {
-    val txn = super.commit(channel, stream, revision, tick, events, metadata)
-    publishTransaction(stream, channel, txn)
-    txn
+      events: List[EVT], metadata: Map[String, String]): Future[Transaction] = {
+    val tx = super.commit(channel, stream, revision, tick, events, metadata)
+    publishTransaction(stream, channel, tx)
+    tx
   }
 
-  override def subscribe[U](selector: StreamsSelector)(callback: TXN => U): Subscription
+  override def subscribe[U](selector: StreamsSelector)(callback: Transaction => U): Subscription
 
 }
 
@@ -25,35 +25,35 @@ trait TransactionPublishing[ID, EVT]
  * Enable pub/sub of transactions.
  */
 trait MessageHubPublishing[ID, EVT]
-  extends TransactionPublishing[ID, EVT] {
+extends TransactionPublishing[ID, EVT] {
 
-  protected val txnHub: MessageHub
-  protected def txnChannels: Set[Channel]
+  protected val txHub: MessageHub
+  protected def txChannels: Set[Channel]
   protected def toTopic(ch: Channel): Topic
-  protected def txnCodec: Codec[TXN, txnHub.MsgType]
+  protected def txCodec: Codec[Transaction, txHub.Message]
 
-  implicit private lazy val encoder = txnCodec.encode _
-  implicit private lazy val decoder = txnCodec.decode _
+  implicit private lazy val encoder = txCodec.encode _
+  implicit private lazy val decoder = txCodec.decode _
 
-  protected def publishTransaction(stream: ID, ch: Channel, txn: Future[TXN]): Unit = 
-    txnHub.publish(toTopic(ch), txn)
+  protected def publishTransaction(stream: ID, ch: Channel, tx: Future[Transaction]): Unit =
+    txHub.publish(toTopic(ch), tx)
 
   protected type Topic = MessageHub.Topic
   protected def Topic(name: String): Topic = MessageHub.Topic(name)
 
-  override def subscribe[U](selector: StreamsSelector)(callback: TXN => U): Subscription = {
+  override def subscribe[U](selector: StreamsSelector)(callback: Transaction => U): Subscription = {
 
-    val pfCallback = new PartialFunction[TXN, Unit] {
-      def isDefinedAt(txn: TXN) = true
-      def apply(txn: TXN) = callback(txn)
+    val pfCallback = new PartialFunction[Transaction, Unit] {
+      def isDefinedAt(tx: Transaction) = true
+      def apply(tx: Transaction) = callback(tx)
     }
 
     val channels = {
       val channelSubset = selector.channelSubset
-      if (channelSubset.isEmpty) txnChannels else channelSubset
+      if (channelSubset.isEmpty) txChannels else channelSubset
     }
 
-    txnHub.subscribe[TXN](channels.map(toTopic))(pfCallback)
+    txHub.subscribe[Transaction](channels.map(toTopic))(pfCallback)
   }
 
 }

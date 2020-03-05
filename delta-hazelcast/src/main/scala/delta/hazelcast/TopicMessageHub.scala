@@ -1,6 +1,6 @@
 package delta.hazelcast
 
-import com.hazelcast.core.{ ITopic, Message, MessageListener }
+import com.hazelcast.core.{ ITopic, Message => HzMessage, MessageListener }
 
 import scuff.Subscription
 import concurrent.blocking
@@ -9,17 +9,17 @@ import delta.MessageHub
 import com.hazelcast.core.HazelcastInstance
 import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
-import delta.process.SnapshotUpdate
+import delta.process.Update
 
 object TopicMessageHub {
 
-  private def getITopic[MsgType](
+  private def getITopic[Message](
       hz: HazelcastInstance)(
-      topic: Topic): ITopic[MsgType] = hz.getTopic[MsgType](topic.toString)
+      topic: Topic): ITopic[Message] = hz.getTopic[Message](topic.toString)
 
-  def apply[ID, S](
+  def apply[ID, U](
       hz: HazelcastInstance,
-      publishCtx: ExecutionContext): TopicMessageHub[(ID, SnapshotUpdate[S])] =
+      publishCtx: ExecutionContext): TopicMessageHub[(ID, Update[U])] =
     new TopicMessageHub(hz, publishCtx)
 
   type Topic = MessageHub.Topic
@@ -43,18 +43,18 @@ class TopicMessageHub[M](
       publishCtx: ExecutionContext) =
     this(TopicMessageHub.getITopic[M](hz) _, publishCtx)
 
-  type MsgType = M
+  type Message = M
 
-  protected def publishImpl(topic: Topic, msg: MsgType) = blocking {
+  protected def publish(msg: Message, topic: Topic) = blocking {
     getITopic(topic).publish(msg)
   }
 
   protected type SubscriptionKey = Topic
   protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = topics
-  protected def subscribeToKey(topic: Topic)(callback: (Topic, MsgType) => Unit): Subscription = {
+  protected def subscribeToKey(topic: Topic)(callback: (Topic, Message) => Unit): Subscription = {
     val hzTopic = getITopic(topic)
-    val regId = hzTopic addMessageListener new MessageListener[MsgType] {
-      def onMessage(msg: Message[MsgType]): Unit = callback(topic, msg.getMessageObject)
+    val regId = hzTopic addMessageListener new MessageListener[Message] {
+      def onMessage(msg: HzMessage[Message]): Unit = callback(topic, msg.getMessageObject)
     }
     new Subscription {
       def cancel(): Unit = try hzTopic.removeMessageListener(regId) catch {

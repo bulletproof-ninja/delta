@@ -1,9 +1,11 @@
 package delta.read.impl
 
 import delta._
+import delta.process.AsyncCodec
 import scala.concurrent._
 import scala.reflect.ClassTag
 import delta.read._
+import scuff.concurrent.Threads
 
 /**
  * Fully consistent (read-your-writes)
@@ -17,23 +19,15 @@ import delta.read._
  * @tparam S The state type
  * @tparam EVT The event type used for producing state
  */
-class StatelessReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
-    txProjector: TransactionProjector[S, EVT],
-    es: EventSource[ESID, _ >: EVT])(
-    implicit
-    idConv: ID => ESID)
-  extends EventSourceReadModel[ID, ESID, S, EVT](es, txProjector) {
+abstract class StatelessReadModel[ID, ESID, EVT: ClassTag, Work >: Null: ClassTag, View](
+  es: EventSource[ESID, _ >: EVT])(
+  implicit
+  protected val idConv: ID => ESID)
+extends EventSourceReadModel[ID, ESID, EVT, Work, View](es) {
 
-  def this(projector: Projector[S, EVT])(
-      es: EventSource[ESID, _ >: EVT])(
-      implicit
-      idConv: ID => ESID) =
-        this(TransactionProjector[S, EVT](projector), es)
-
-  def read(id: ID)(implicit ec: ExecutionContext): Future[Snapshot] =
-    replayToComplete(None, id).map {
-      verifySnapshot(id, _)
-    }
+  protected def readSnapshot(id: ID)(
+      implicit ec: ExecutionContext): Future[Option[Snapshot]] =
+    replayToComplete(None, id)
 
   def read(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
     read(id).map {
@@ -45,5 +39,16 @@ class StatelessReadModel[ID, ESID, S >: Null: ClassTag, EVT: ClassTag](
       verifyTick(id, _, minTick)
     }
   }
+
+}
+
+abstract class PlainStatelessReadModel[ID, ESID, EVT: ClassTag, S >: Null: ClassTag](
+  es: EventSource[ESID, _ >: EVT])(
+  implicit
+  idConv: ID => ESID)
+extends StatelessReadModel[ID, ESID, EVT, S, S](es) {
+
+  protected val stateCodec = AsyncCodec.noop[S]
+  protected def stateCodecContext = Threads.PiggyBack
 
 }

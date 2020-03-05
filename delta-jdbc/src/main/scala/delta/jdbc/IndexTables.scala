@@ -20,8 +20,8 @@ object IndexTables {
  * NOTE: For simple one-to-one associations,
  * use [[delta.jdbc.JdbcStreamProcessStore.Index]]
  */
-trait IndexTables[PK, S]
-  extends JdbcStreamProcessStore[PK, S] {
+trait IndexTables[PK, S, U]
+extends JdbcStreamProcessStore[PK, S, U] {
 
   protected type Table = IndexTables.Table[S, _]
   protected def Table[C: ColumnType](indexColumn: String)(getIndexValues: S => Set[C]): Table =
@@ -239,7 +239,7 @@ $WHERE i.${table.indexColumn} = ?
       () => super.querySnapshot(indexColumnMatch, more: _*),
       kv => this.queryTick(kv.head, kv.tail: _*).map(_.keySet),
       selectSnapshotSQL) { rs =>
-        val snapshot = this.getSnapshot(rs)
+        val snapshot = this.getSnapshot(rs)(dataColumnType)
         val stream = pkColumn.colType.readFrom(rs, 4)
         stream -> snapshot
       }

@@ -55,12 +55,12 @@ class IMapSnapshotStore[K, V](
 
 }
 
-abstract class IMapStreamProcessStore[K, V](
+abstract class IMapStreamProcessStore[K, V, U](
     imap: IMap[K, delta.Snapshot[V]],
     logger: ILogger)
   extends IMapSnapshotStore[K, V](imap, logger)
-  with StreamProcessStore[K, V]
-  with NonBlockingCASWrites[K, V] {
+  with StreamProcessStore[K, V, U]
+  with NonBlockingCASWrites[K, V, U] {
 
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] = {
     implicit def ec = Threads.PiggyBack
@@ -121,7 +121,7 @@ abstract class IMapStreamProcessStore[K, V](
 
 }
 
-private[hazelcast] object IMapStreamProcessStore {
+object IMapStreamProcessStore {
 
   import com.hazelcast.map.AbstractEntryProcessor
   import delta.Snapshot

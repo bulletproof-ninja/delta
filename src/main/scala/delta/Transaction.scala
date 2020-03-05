@@ -38,18 +38,18 @@ object Transaction {
   }
 
   object Serialization {
-    def writeObject(txn: Transaction[_, _], out: java.io.ObjectOutput): Unit = {
-      out.writeLong(txn.tick)
-      out.writeUTF(txn.channel.toString)
-      out.writeObject(txn.stream)
-      out.writeInt(txn.revision)
-      out.writeChar(txn.metadata.size)
-      txn.metadata.foreach {
+    def writeObject(tx: Transaction[_, _], out: java.io.ObjectOutput): Unit = {
+      out.writeLong(tx.tick)
+      out.writeUTF(tx.channel.toString)
+      out.writeObject(tx.stream)
+      out.writeInt(tx.revision)
+      out.writeChar(tx.metadata.size)
+      tx.metadata.foreach {
         case (key, value) =>
           out.writeUTF(key)
           out.writeUTF(value)
       }
-      txn.events.reverse.foreach(out.writeObject)
+      tx.events.reverse.foreach(out.writeObject)
       out.writeObject(null)
     }
     @annotation.tailrec

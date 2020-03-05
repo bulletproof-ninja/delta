@@ -10,7 +10,7 @@ import scala.concurrent.duration.{ Duration, DurationInt }
 import scala.util.{ Failure, Success, Try }
 import org.junit._
 import org.junit.Assert._
-import scuff._
+import scuff._, concurrent._
 import delta.ddd.{ Repository, UnknownIdException }
 import scuff.reflect.Surgeon
 import delta._
@@ -358,10 +358,10 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
           RandomDelayExecutionContext, EvtFmt)(_ => ticker)
         with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
-      val txnHub = new LocalHub[TXN](toTopic, ec)
-      val txnChannels = Set(TheOneAggr.channel)
-      val txnCodec = Codec.noop[TXN]
+      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
+      val txHub = new LocalHub[Transaction](toTopic, ec)
+      val txChannels = Set(TheOneAggr.channel)
+      val txCodec = Codec.noop[Transaction]
     }
     repo = new EntityRepository(TheOneAggr, ec)(es)
   }
@@ -411,14 +411,14 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
            RandomDelayExecutionContext, EvtFmt)(_ => ticker)
          with MessageHubPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(txn: TXN): Topic = toTopic(txn.channel)
-      val txnHub = new LocalHub[TXN](toTopic, RandomDelayExecutionContext)
-      val txnChannels = Set(TheOneAggr.channel)
-      val txnCodec = Codec.noop[TXN]
+      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
+      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txChannels = Set(TheOneAggr.channel)
+      val txCodec = Codec.noop[Transaction]
     }
-    type Value = ConcurrentMapStore.Value[AggrState]
-    val snapshotMap = new TrieMap[String, Value]
-    val snapshotStore = ConcurrentMapStore[String, AggrState](snapshotMap, None)(_ => Future successful None)
+    type State = ConcurrentMapStore.State[AggrState]
+    val snapshotMap = new TrieMap[String, State]
+    val snapshotStore = ConcurrentMapStore[String, AggrState, AggrState](snapshotMap, None)(_ => Future.none)
     repo = new EntityRepository(TheOneAggr, ec)(es, snapshotStore)
   }
 }

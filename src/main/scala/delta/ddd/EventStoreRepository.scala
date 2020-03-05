@@ -50,30 +50,30 @@ class EventStoreRepository[ESID, EVT, S >: Null, RID](
 
   def exists(id: RID): Future[Option[Int]] = eventStore.currRevision(id)
 
-  private type TXN = eventStore.TXN
+  private type Transaction = eventStore.Transaction
 
   private def buildCurrentSnapshot(
       snapshot: Option[Snapshot],
       expectedRevision: Option[Int],
-      replayer: StreamConsumer[TXN, Any] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
-    case class Builder(applyEventsAfter: Int, state: State[S, EVT], concurrentUpdates: List[EVT] = Nil, lastTxnOrNull: TXN = null)
+      replayer: StreamConsumer[Transaction, Any] => Unit): Future[Option[(Snapshot, List[EVT])]] = {
+    case class Builder(applyEventsAfter: Int, state: State[S, EVT], concurrentUpdates: List[EVT] = Nil, lastTxOrNull: Transaction = null)
     val initBuilder = new Builder(snapshot.map(_.revision) getOrElse -1, newState(snapshot.map(_.content).orNull))
     val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
     val futureBuilt = StreamPromise.fold(initBuilder, replayer) {
-      case (b, txn) =>
-        if (txn.revision > b.applyEventsAfter) {
-          txn.events.foreach(b.state.mutate)
+      case (b, tx) =>
+        if (tx.revision > b.applyEventsAfter) {
+          tx.events.foreach(b.state.mutate)
         }
         val newUpdates: List[EVT] =
-          if (txn.revision > lastSeenRevision) b.concurrentUpdates ::: txn.events
+          if (tx.revision > lastSeenRevision) b.concurrentUpdates ::: tx.events
           else b.concurrentUpdates
-        b.copy(concurrentUpdates = newUpdates, lastTxnOrNull = txn)
+        b.copy(concurrentUpdates = newUpdates, lastTxOrNull = tx)
     }
     futureBuilt.map {
       case Builder(_, _, _, null) =>
         snapshot.map(_ -> Nil)
-      case Builder(_, mutator, concurrentUpdates, lastTxn) =>
-        Some(new Snapshot(mutator.curr, lastTxn.revision, lastTxn.tick) -> concurrentUpdates)
+      case Builder(_, mutator, concurrentUpdates, lastTx) =>
+        Some(new Snapshot(mutator.curr, lastTx.revision, lastTx.tick) -> concurrentUpdates)
     }
   }
 

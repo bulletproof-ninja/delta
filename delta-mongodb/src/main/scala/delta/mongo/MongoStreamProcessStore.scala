@@ -15,16 +15,18 @@ import com.mongodb.client.model.UpdateOptions
 import com.mongodb.client.result.UpdateResult
 
 import delta.Snapshot
-import delta.process.{ StreamProcessStore, NonBlockingCASWrites }
+import delta.process._
 import scuff.Codec
 import scuff.concurrent._
 
-class MongoStreamProcessStore[K: ClassTag, V](
-    snapshotCodec: Codec[V, Document],
+class MongoStreamProcessStore[K: ClassTag, S, U](
+    snapshotCodec: Codec[S, Document],
     coll: MongoCollection[Document])(
-    implicit ec: ExecutionContext)
+    implicit
+    ec: ExecutionContext,
+    protected val updateCodec: UpdateCodec[S, U])
   extends MongoSnapshotStore(snapshotCodec, coll)
-  with StreamProcessStore[K, V] with NonBlockingCASWrites[K, V] {
+  with StreamProcessStore[K, S, U] with NonBlockingCASWrites[K, S, U] {
 
   private[this] val tickIndexFuture = withFutureCallback[String] { cb =>
     coll.createIndex(new Document("tick", -1), cb)
@@ -121,7 +123,7 @@ class MongoStreamProcessStore[K: ClassTag, V](
           .append("tick", newSnapshot.tick))
       coll.updateOne(exactly(key, oldSnapshot.revision, oldSnapshot.tick), update, callback)
     } flatMap {
-      case Some(upd) if upd.wasAcknowledged && upd.getModifiedCount == 1 => Future successful None
+      case Some(upd) if upd.wasAcknowledged && upd.getModifiedCount == 1 => Future.none
       case Some(upd) if upd.getMatchedCount == 0 =>
         read(key) map {
           case found @ Some(_) => found

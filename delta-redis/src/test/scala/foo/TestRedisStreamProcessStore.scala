@@ -21,10 +21,10 @@ class TestRedisStreamProcessStore extends TestStreamProcessStore {
   val snapshotVersion: Short = 1
 
   override def storeSupportsConditionalWrites = false
-  override def newStore: StreamProcessStore[Long, String] = {
-    new RedisStreamProcessStore[Long, String](
+  override def newStore: StreamProcessStore[Long, String, String] = {
+    new RedisStreamProcessStore[Long, String, String](
       keyCodec = Codec.fromString(_.toLong),
-      snapshotCodec = json.SnapshotCodec(jsonStringCodec),
+      snapshotCodec = json.JsonSnapshot(jsonStringCodec),
       s"${getClass.getSimpleName}:$snapshotVersion", ec)(jedisProvider)
   }
 

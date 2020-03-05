@@ -5,14 +5,14 @@ import delta.Snapshot
 import scuff._
 import scuff.json._, JsVal._
 
-object SnapshotCodec {
+object JsonSnapshot {
 
-  private final val DefaultContentFieldName = "content"
+  private final val DefaultContentFieldName = "snapshot"
 
   def apply[T](
       contentJsonCodec: Codec[T, String],
       contentFieldName: String = DefaultContentFieldName): Codec[Snapshot[T], String] =
-    new SnapshotCodec(contentJsonCodec, contentFieldName)
+    new JsonSnapshot(contentJsonCodec, contentFieldName)
 
   def fromBinary[T](
       contentJsonCodec: Codec[T, Array[Byte]],
@@ -24,28 +24,25 @@ object SnapshotCodec {
 /**
  * @tparam T Snapshot type
  */
-class SnapshotCodec[T](contentJsonCodec: Codec[T, String], contentFieldName: String)
+class JsonSnapshot[T](contentJsonCodec: Codec[T, String], contentFieldName: String)
   extends Codec[Snapshot[T], String] {
 
-  require(contentFieldName != "tick" && contentFieldName != "rev", s"Invalid content field name: $contentFieldName")
+  require(contentFieldName != "tick" && contentFieldName != "revision", s"Invalid content field name: $contentFieldName")
 
   def this(contentJsonCodec: Codec[T, String]) =
-      this(contentJsonCodec, SnapshotCodec.DefaultContentFieldName)
+      this(contentJsonCodec, JsonSnapshot.DefaultContentFieldName)
 
   def encode(snapshot: Snapshot[T]): String = {
-    val jsonContent: String = contentJsonCodec encode snapshot.content
-    if (snapshot.revision < 0) {
-      s"""{"tick":${snapshot.tick},"$contentFieldName":$jsonContent}"""
-    } else {
-      s"""{"rev":${snapshot.revision},"tick":${snapshot.tick},"$contentFieldName":$jsonContent}"""
-    }
+    val contentField: String = s""","$contentFieldName":${contentJsonCodec encode snapshot.content}"""
+    val revisionField = if (snapshot.revision < 0) "" else s""","revision":${snapshot.revision}"""
+    s"""{"tick":${snapshot.tick}$revisionField$contentField}"""
   }
 
   def decode(json: String): Snapshot[T] = this decode (JsVal parse json).asObj
 
   private[json] def decode(ast: JsObj): Snapshot[T] = {
     val tick = ast.tick.asNum
-    val revision = ast.rev getOrElse JsNum(-1)
+    val revision = ast.revision getOrElse JsNum(-1)
     val content = contentJsonCodec decode ast(contentFieldName).toJson
     new Snapshot(content, revision.toInt, tick.toLong)
   }

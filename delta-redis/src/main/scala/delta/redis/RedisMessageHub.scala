@@ -24,18 +24,18 @@ private object RedisMessageHub {
  * @param channelCodec
  */
 class RedisMessageHub(
-    info: JedisShardInfo,
-    maxConnections: Int,
-    protected val publishCtx: ExecutionContext,
-    publishBuffer: BlockingQueue[Any],
-    publishFailureThreshold: Int,
-    pooledSubscriptionCancellationDelay: Option[(ScheduledExecutorService, FiniteDuration)] = None,
-    failureBackoff: Iterable[FiniteDuration] = MessageHub.DefaultBackoff)(
-    implicit
-    lifecycle: ResourcePool.Lifecycle[BinaryJedis] = RedisMessageHub.DefaultLifecycle)
-  extends MessageHub
-  with SubscriptionPooling
-  with BufferedRetryPublish {
+  info: JedisShardInfo,
+  maxConnections: Int,
+  protected val publishCtx: ExecutionContext,
+  publishBuffer: BlockingQueue[Any],
+  publishFailureThreshold: Int,
+  pooledSubscriptionCancellationDelay: Option[(ScheduledExecutorService, FiniteDuration)] = None,
+  failureBackoff: Iterable[FiniteDuration] = MessageHub.DefaultBackoff)(
+  implicit
+  lifecycle: ResourcePool.Lifecycle[BinaryJedis] = RedisMessageHub.DefaultLifecycle)
+extends MessageHub
+with SubscriptionPooling
+with BufferedRetryPublish {
 
   def this(
       info: JedisShardInfo,
@@ -51,13 +51,13 @@ class RedisMessageHub(
   protected def cancellationDelay = pooledSubscriptionCancellationDelay
 
   /** The publish queue. */
-  protected val publishQueue = publishBuffer.asInstanceOf[BlockingQueue[(Topic, MsgType)]]
+  protected val publishQueue = publishBuffer.asInstanceOf[BlockingQueue[(Topic, Message)]]
   /** The threshold before circuit breaker is tripped. */
   protected def circuitBreakerThreshold = publishFailureThreshold
   /** The retry back-off schedule circuit breaker. */
   protected def publishFailureBackoff = failureBackoff
 
-  type MsgType = Array[Byte]
+  type Message = Array[Byte]
 
   protected type SubscriptionKey = Set[Topic]
   protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = Set(topics)
@@ -79,7 +79,7 @@ class RedisMessageHub(
     pool
   }
 
-  protected def publishImpl(topic: Topic, msg: Array[Byte]) = {
+  protected def publish(msg: Array[Byte], topic: Topic) = {
     jedisPool.use { jedis =>
       blocking(jedis.publish(RedisCodec.encode(topic.toString), msg))
     }
@@ -87,7 +87,7 @@ class RedisMessageHub(
 
   private val subscriberThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:subscriber", daemon = false, publishCtx.reportFailure)
 
-  protected def subscribeToKey(channels: SubscriptionKey)(callback: (Topic, MsgType) => Unit): Subscription = {
+  protected def subscribeToKey(channels: SubscriptionKey)(callback: (Topic, Message) => Unit): Subscription = {
     val jedisSubscriber = new BinaryJedisPubSub {
       override def onMessage(channelBytes: Array[Byte], byteMsg: Array[Byte]): Unit = {
         callback(Topic(channelBytes), byteMsg)
