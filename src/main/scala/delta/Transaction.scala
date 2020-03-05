@@ -1,6 +1,7 @@
 package delta
 
 import scuff.FakeType
+import scala.util.control.NonFatal
 
 @SerialVersionUID(1)
 final case class Transaction[+ID, +EVT](
@@ -49,7 +50,12 @@ object Transaction {
           out.writeUTF(key)
           out.writeUTF(value)
       }
-      tx.events.reverse.foreach(out.writeObject)
+      tx.events.reverse.foreach { evt =>
+        try out writeObject evt catch {
+          case NonFatal(cause) =>
+            throw new RuntimeException(s"Failed to serialize event: ${evt.getClass.getName}", cause)
+        }
+      }
       out.writeObject(null)
     }
     @annotation.tailrec
