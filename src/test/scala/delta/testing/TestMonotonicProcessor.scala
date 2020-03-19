@@ -37,8 +37,8 @@ class TestMonotonicProcessor {
         ConcurrentMapStore(Tracker.snapshotMap, None)(NoFallback)) {
       def whenDone() = Future successful (())
       override def onUpdate(id: Int, update: Update) = {
-        //        println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
-//        assertEquals(42, update.id)
+        // println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
+        // assertEquals(42, update.id)
         assertTrue(update.changed.nonEmpty)
         Tracker.lastUpdate = update
         if (update.revision == 4) {

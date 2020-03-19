@@ -80,7 +80,6 @@ trait EventSource[ID, EVT] {
     new ChannelSelector(channels.toSet)
   /** All streams in the provided channels, unbroken. */
   case class ChannelSelector private[EventSource] (channels: Set[Channel]) extends StreamsSelector {
-    //    def this(one: String, others: String*) = this((one +: others).toSet)
     require(channels.nonEmpty)
     def channelSubset: Set[Channel] = channels
     def include(tx: Transaction) = channels.contains(tx.channel)

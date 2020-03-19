@@ -103,18 +103,15 @@ with StreamProcessStore[PK, S, U] with BlockingCASWrites[PK, S, U, Connection] {
     * E.g. the regular `SELECT data` can be modified
     * into `SELECT SUBSTR(data, 5) AS data` by providing
     * a `selectData` value of `"SUBSTR(data, 5)"`.
+    * @tparam M Modified data type
     * @param selectData The modified data selection
     * @return Snapshot with modified data selection
     */
-  protected def withModifiedData[ID, MS: ColumnType](
-      selectData: String)(
-      implicit
-      idConv: ID => PK): SnapshotReader[ID, MS] =
-    new SnapshotReader[ID, MS] {
-
-      def read(id: ID): Future[Option[Snapshot]] =
-        queryModified[MS](id, selectData)
-
+  protected def withModifiedData[M: ColumnType](
+      selectData: String): SnapshotReader[PK, M] =
+    new SnapshotReader[PK, M] {
+      def read(id: PK): Future[Option[Snapshot]] =
+        queryModified[M](id, selectData)
     }
 
   /**
@@ -127,18 +124,18 @@ with StreamProcessStore[PK, S, U] with BlockingCASWrites[PK, S, U, Connection] {
     * `SELECT data -> '$[7]' AS data` by returning
     * a `selectData(7)` value of `"data -> '$[7]'"`
     * (MySQL JSON syntax for selecting the 8th element).
+    * @tparam SK Secondary key type
+    * @tparam M Modified data type
     * @param selectData The modified data selection function
     * @return Snapshot with modified data selection
     */
-  protected def withModifiedData[ID, SID, MS: ColumnType](
-      selectData: SID => String)(
-      implicit
-      idConv: ID => PK)
-      : SnapshotReader[(ID, SID), MS] =
-    new SnapshotReader[(ID, SID), MS] {
+  protected def withModifiedData[SK, M: ColumnType](
+      selectData: SK => String)
+      : SnapshotReader[(PK, SK), M] =
+    new SnapshotReader[(PK, SK), M] {
 
-      def read(id: (ID, SID)): Future[Option[delta.Snapshot[MS]]] =
-        queryModified[MS](id._1, selectData(id._2))
+      def read(id: (PK, SK)): Future[Option[Snapshot]] =
+        queryModified[M](id._1, selectData(id._2))
 
     }
 
