@@ -8,7 +8,7 @@ import delta.util._
 import delta.ddd._
 import delta.testing._
 import delta.EventFormat
-import delta.MessageHubPublishing
+import delta.MessageTransportPublishing
 import org.bson.BsonValue
 import org.bson.BsonString
 import org.bson.BsonInt32
@@ -71,9 +71,9 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     assertTrue(result.wasAcknowledged)
     es = new MongoEventStore[String, AggrEvent](
         coll, MongoDBAggrEventFmt)(
-        _ => ticker) with MessageHubPublishing[String, AggrEvent] {
+        _ => ticker) with MessageTransportPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
     }

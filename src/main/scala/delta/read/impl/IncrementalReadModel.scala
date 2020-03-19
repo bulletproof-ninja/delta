@@ -9,7 +9,6 @@ import scala.reflect.ClassTag
 import scuff.Subscription
 import delta.read._
 import delta._
-import scuff.Codec
 
 /**
  * Incrementally built on-demand read-model, pull or push.
@@ -29,14 +28,19 @@ import scuff.Codec
 abstract class IncrementalReadModel[ID, ESID, EVT: ClassTag, Work >: Null, Stored, U](
   es: EventSource[ESID, _ >: EVT])(
   implicit
-  idCodec: Codec[ESID, ID],
+  convId: ID => ESID,
   protected val stateCodec: AsyncCodec[Work, Stored])
 extends EventSourceReadModel[ID, ESID, EVT, Work, Stored](es)
-with SubscriptionSupport[ID, Stored, U]
 with MessageHubSupport[ID, Stored, U]
 with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 
-  protected val idConv = (id: ID) => idCodec decode id
+  protected def readSnapshot(id: ID)(
+      implicit
+      ec: ExecutionContext): Future[Option[Snapshot]] =
+    (processStore read id).flatMap {
+      case None => readAndUpdate(id)
+      case some => Future successful some
+    }
 
   protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
       implicit
@@ -63,16 +67,6 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
     eventSource.subscribe(selector.toStreamsSelector)(onTxUpdate)
   }
 
-  protected def readSnapshot(id: ID)(
-      implicit
-      ec: ExecutionContext): Future[Option[Snapshot]] = processStore read (idCodec decode id)
-
-  def read(id: ID, minRevision: Int)(implicit ec: ExecutionContext): Future[Snapshot] =
-    read(id, minRevision, DefaultReadTimeout)
-
-  def read(id: ID, minTick: Long)(implicit ec: ExecutionContext): Future[Snapshot] =
-    read(id, minTick, DefaultReadTimeout)
-
   protected def replayDelayOnMissing: FiniteDuration = 2.seconds
 
   private[this] val onTxUpdate =
@@ -84,9 +78,8 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
           eventSource, replayDelayOnMissing, scheduler, processContext(id).reportFailure)(
           id, missing)(this.apply)
 
-      protected def onUpdate(id: ESID, update: Update): Unit = {
-        hub.publish(hubTopic, idCodec.encode(id) -> update)
-      }
+      protected def onUpdate(id: ESID, update: Update): Unit =
+        hub.publish(id, update)
 
       protected val processStore = IncrementalReadModel.this.processStore.adaptState(stateCodec, stateCodecContext)
       protected def processContext(id: ESID) = IncrementalReadModel.this.processContext(id)
@@ -102,10 +95,10 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 /**
   * Model where the various state representations are identical.
   */
-abstract class PlainIncrementalReadModel[ID, ESID, EVT: ClassTag, S >: Null](
+abstract class SimpleIncrementalReadModel[ID, ESID, EVT: ClassTag, S >: Null](
   es: EventSource[ESID, _ >: EVT])(
   implicit
-  idCodec: Codec[ESID, ID])
+  convId: ID => ESID)
 extends IncrementalReadModel[ID, ESID, EVT, S, S, S](es) {
   import scuff.concurrent.Threads
 

@@ -4,34 +4,29 @@ import scala.concurrent._, duration._
 import delta.read._
 
 /**
- * Read model that relies on `snapshotStore` being pre-built
- * and continuously updated by _another thread or process_.
+ * Read model that relies on some externally built store
+ * that is continuously updated by _another thread or process_.
  * The subscription implementation is left out, but can be
- * easily augmented by adding [[delta.read.MessageHubSupport]]
+ * easily augmented by adding [[delta.read.MessageTransportSupport]]
  * to an instance of this class.
  * @tparam ID The specific identifier type
- * @tparam ESID The more general EventSource identifier type
- * @tparam SS The snapshot store state type
- * @tparam S The read model type, often the same as `SS`
+ * @tparam V The view model type
+ * @tparam SID The more general stream identifier
+ * @tparam U The update type
  */
-abstract class PrebuiltReadModel[ID, S, U](
-  defaultReadTimeout: FiniteDuration = DefaultReadTimeout)
-extends BasicReadModel[ID, S]
-with SubscriptionSupport[ID, S, U] {
+abstract class PrebuiltReadModel[ID, V, SID, U](
+  protected val defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
+  implicit
+  idConv: ID => SID)
+extends BasicReadModel[ID, V]
+with SubscriptionSupport[ID, V, U] {
+
+  protected type StreamId = SID
+  protected def StreamId(id: ID) = idConv(id)
 
   protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]] =
     readSnapshot(id)
-
-  def read(id: ID, minTick: Long)(
-      implicit
-      ec: ExecutionContext): Future[Snapshot] =
-    read(id, minTick, defaultReadTimeout)
-
-  def read(id: ID, minRevision: Int)(
-      implicit
-      ec: ExecutionContext): Future[Snapshot] =
-    read(id, minRevision, defaultReadTimeout)
 
 }

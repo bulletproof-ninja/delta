@@ -70,7 +70,7 @@ class IMapEntryStateReadModel[ID, S, MID, ES, U](
   protected val imap: IMap[MID, _ <: EntryState[ES, _]],
   protected val scheduler: ScheduledExecutorService,
   failureReporter: Throwable => Unit,
-  defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
+  protected val defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
   implicit
   updateCodec: UpdateCodec[ES, U],
   toMapKey: ID => MID,
@@ -78,6 +78,9 @@ class IMapEntryStateReadModel[ID, S, MID, ES, U](
   fromView: S => Option[ES])
 extends BasicReadModel[ID, S]
 with SubscriptionSupport[ID, S, U] {
+
+  protected type StreamId = MID
+  protected def StreamId(id: ID) = toMapKey(id)
 
   private type EntryState = delta.hazelcast.EntryState[ES, _]
 
@@ -113,15 +116,7 @@ with SubscriptionSupport[ID, S, U] {
       ec: ExecutionContext): Future[Option[Snapshot]] =
     readSnapshot(id)
 
-  def read(id: ID, minTick: Long)(
-      implicit
-      ec: ExecutionContext): Future[Snapshot] = read(id, minTick, defaultReadTimeout)
-
-  def read(id: ID, minRevision: Int)(
-      implicit
-      ec: ExecutionContext): Future[Snapshot] = read(id, minRevision, defaultReadTimeout)
-
-  protected def subscribe(id: ID)(pf: PartialFunction[Update, Unit]): Subscription = {
+  protected def subscribe(id: ID)(callback: Update => Unit): Subscription = {
     val entryListener =
       new EntryAddedListener[ID, EntryState]
       with EntryUpdatedListener[ID, EntryState]
@@ -138,7 +133,7 @@ with SubscriptionSupport[ID, S, U] {
                 case _ => None
               }
               val update = updateCodec.asUpdate(prevSnapshot, currSnapshot, entryState.contentUpdated)
-              if (pf isDefinedAt update) pf(update)
+              callback(update)
           }
         }
       }

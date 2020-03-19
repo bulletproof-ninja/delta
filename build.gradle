@@ -11,7 +11,7 @@ ext {
 
     vScala = System.properties.scalaVersion ?: '2.12'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '6.5.0'
+    vScuff = '6.5.2'
     vScalaTest = '3.0.6'
     vScalaJava8Compat = '0.9.0'
     vSilencer = '1.4.4'

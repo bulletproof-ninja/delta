@@ -6,13 +6,13 @@ import scala.concurrent._, duration._
 import scala.util.Try
 import scala.util.control.{ NoStackTrace, NonFatal }
 
-import delta.{ BufferedRetryPublish, MessageHub, SubscriptionPooling }
+import delta.{ BufferedRetryPublish, MessageTransport, SubscriptionPooling }
 import redis.clients.jedis.{ BinaryJedis, BinaryJedisPubSub, JedisShardInfo }
 import redis.clients.jedis.exceptions.JedisConnectionException
 import scuff.concurrent.{ BoundedResourcePool, FailureTracker, ResourcePool, Threads, UnboundedResourcePool }
 import scuff.Subscription
 
-private object RedisMessageHub {
+private object RedisMessageTransport {
   val DefaultLifecycle = ResourcePool.onEviction[BinaryJedis](_.quit) {
     case _: JedisConnectionException => true
     case _ => false
@@ -23,17 +23,17 @@ private object RedisMessageHub {
  * @param info Redis server information
  * @param channelCodec
  */
-class RedisMessageHub(
+class RedisMessageTransport(
   info: JedisShardInfo,
   maxConnections: Int,
   protected val publishCtx: ExecutionContext,
   publishBuffer: BlockingQueue[Any],
   publishFailureThreshold: Int,
   pooledSubscriptionCancellationDelay: Option[(ScheduledExecutorService, FiniteDuration)] = None,
-  failureBackoff: Iterable[FiniteDuration] = MessageHub.DefaultBackoff)(
+  failureBackoff: Iterable[FiniteDuration] = MessageTransport.DefaultBackoff)(
   implicit
-  lifecycle: ResourcePool.Lifecycle[BinaryJedis] = RedisMessageHub.DefaultLifecycle)
-extends MessageHub
+  lifecycle: ResourcePool.Lifecycle[BinaryJedis] = RedisMessageTransport.DefaultLifecycle)
+extends MessageTransport
 with SubscriptionPooling
 with BufferedRetryPublish {
 
@@ -45,19 +45,19 @@ with BufferedRetryPublish {
       publishFailureThreshold: Int) =
     this(info, maxConnections, publishCtx, publishBuffer, publishFailureThreshold, None)
 
-  @inline private def Topic(bytes: Array[Byte]) = MessageHub.Topic(RedisCodec decode bytes)
+  @inline private def Topic(bytes: Array[Byte]) = MessageTransport.Topic(RedisCodec decode bytes)
   @inline private def toRedisChannel(topic: Topic): Array[Byte] = RedisCodec encode topic.toString
 
   protected def cancellationDelay = pooledSubscriptionCancellationDelay
 
   /** The publish queue. */
-  protected val publishQueue = publishBuffer.asInstanceOf[BlockingQueue[(Topic, Message)]]
+  protected val publishQueue = publishBuffer.asInstanceOf[BlockingQueue[(Topic, TransportType)]]
   /** The threshold before circuit breaker is tripped. */
   protected def circuitBreakerThreshold = publishFailureThreshold
   /** The retry back-off schedule circuit breaker. */
   protected def publishFailureBackoff = failureBackoff
 
-  type Message = Array[Byte]
+  type TransportType = Array[Byte]
 
   protected type SubscriptionKey = Set[Topic]
   protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = Set(topics)
@@ -87,7 +87,7 @@ with BufferedRetryPublish {
 
   private val subscriberThreadGroup = Threads.newThreadGroup(s"${getClass.getName}:subscriber", daemon = false, publishCtx.reportFailure)
 
-  protected def subscribeToKey(channels: SubscriptionKey)(callback: (Topic, Message) => Unit): Subscription = {
+  protected def subscribeToKey(channels: SubscriptionKey)(callback: (Topic, TransportType) => Unit): Subscription = {
     val jedisSubscriber = new BinaryJedisPubSub {
       override def onMessage(channelBytes: Array[Byte], byteMsg: Array[Byte]): Unit = {
         callback(Topic(channelBytes), byteMsg)

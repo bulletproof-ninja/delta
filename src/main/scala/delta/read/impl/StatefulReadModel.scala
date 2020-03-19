@@ -3,7 +3,9 @@ package delta.read.impl
 import delta._
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.reflect.ClassTag
+import delta.process.AsyncCodec
 import delta.read._
+import scuff.concurrent.Threads
 
 /**
  * Fully consistent (read-your-writes)
@@ -28,7 +30,7 @@ import delta.read._
 abstract class StatefulReadModel[ID, ESID, EVT: ClassTag, Work >: Null: ClassTag, Stored, U](
   es: EventSource[ESID, _ >: EVT])(
   implicit
-  protected val idConv: ID => ESID)
+  idConv: ID => ESID)
 extends EventSourceReadModel[ID, ESID, EVT, Work, Stored](es)
 with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 
@@ -46,5 +48,17 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
       verifySnapshot(id, _, minTick = minTick)
     }
   }
+
+}
+
+abstract class SimpleStatefulReadModel[ID, ESID, EVT: ClassTag, S >: Null: ClassTag](
+  es: EventSource[ESID, _ >: EVT])(
+  implicit
+  idConv: ID => ESID)
+extends StatefulReadModel[ID, ESID, EVT, S, S, S](es) {
+
+  protected val stateCodec = AsyncCodec.noop[S]
+  protected def stateCodecContext = Threads.PiggyBack
+
 
 }

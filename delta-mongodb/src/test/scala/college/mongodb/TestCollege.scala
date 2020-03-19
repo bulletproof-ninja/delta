@@ -10,8 +10,8 @@ import org.junit.AfterClass
 import delta.mongo._
 import delta.EventFormatAdapter
 import scuff.Codec
-import delta.util.LocalHub
-import delta.MessageHubPublishing
+import delta.util.LocalTransport
+import delta.MessageTransportPublishing
 import org.bson.BsonValue
 import com.mongodb._
 import org.bson.BsonBinary
@@ -55,9 +55,9 @@ class TestCollege extends college.TestCollege {
 
   override def newEventStore: EventStore[Int, CollegeEvent] = {
     new MongoEventStore[Int, CollegeEvent](coll, EvtFormat)(initTicker)
-    with MessageHubPublishing[Int, CollegeEvent] {
+    with MessageTransportPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
     }

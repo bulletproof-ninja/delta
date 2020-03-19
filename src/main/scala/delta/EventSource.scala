@@ -41,7 +41,7 @@ trait EventSource[ID, EVT] {
   def subscribe[U](
       selector: StreamsSelector)(
       callback: Transaction => U): Subscription =
-    sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageHubPublishing[_, _]].getName}")
+    sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageTransportPublishing[_, _]].getName}")
 
   type CEVT = Class[_ <: EVT]
 

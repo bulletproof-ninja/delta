@@ -7,7 +7,8 @@ import scuff.Subscription
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 
-trait SubscriptionSupport[ID, S, U] {
+trait SubscriptionSupport[ID, S, U]
+extends StreamId[ID] {
   rm: BasicReadModel[ID, S] =>
 
   type Update = delta.process.Update[U]
@@ -22,10 +23,21 @@ trait SubscriptionSupport[ID, S, U] {
     */
   protected def updateState(id: ID, prevState: Option[S], update: U): Option[S]
 
+  protected def defaultReadTimeout: FiniteDuration
   /** Scheduler used for `read` timeouts and replay delay scheduling. */
   protected def scheduler: ScheduledExecutorService
   /** Update subscription stub. */
-  protected def subscribe(id: ID)(pf: PartialFunction[Update, Unit]): Subscription
+  protected def subscribe(id: ID)(callback: Update => Unit): Subscription
+
+  def read(id: ID, minTick: Long)(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] =
+    read(id, minTick, defaultReadTimeout)
+
+  def read(id: ID, minRevision: Int)(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] =
+    read(id, minRevision, defaultReadTimeout)
 
   /**
    * Read snapshot, ensuring it's at least the given revision,
@@ -109,9 +121,8 @@ trait SubscriptionSupport[ID, S, U] {
 
     val pendingUpdates: AtomicReference[List[Update]] = new AtomicReference(Nil) // becomes `null` when read is resolved
 
-    val subscription = this.subscribe(id) {
-      case update =>
-        callbackCtx execute new UpdateCallback(id, update, callback, pendingUpdates)
+    val subscription = this.subscribe(id) { update =>
+      callbackCtx execute new UpdateCallback(id, update, callback, pendingUpdates)
     }
     // Piggy-back on reader thread. Don't use potentially single threaded callbackCtx, which could possibly deadlock.
       implicit def ec = Threads.PiggyBack
@@ -136,7 +147,7 @@ trait SubscriptionSupport[ID, S, U] {
       implicit
       ec: ExecutionContext): Future[Snapshot] = {
 
-      def matches(revision: Int, tick: Long): Boolean = {
+      def expected(revision: Int, tick: Long): Boolean = {
         if (revision < 0 && minRevision >= 0) {
           throw new IllegalArgumentException(s"Snapshot revision is not supported (possibly because of joined streams). Use `tick` instead.")
         }
@@ -147,7 +158,7 @@ trait SubscriptionSupport[ID, S, U] {
           id: ID, minRevision: Int, minTick: Long, promise: Promise[Snapshot]): Unit = {
 
         this.readAgain(id, minRevision, minTick) andThen {
-          case Success(Some(snapshot)) if matches(snapshot.revision, snapshot.tick) =>
+          case Success(Some(snapshot)) if expected(snapshot.revision, snapshot.tick) =>
             promise trySuccess snapshot
           case Failure(th) =>
             promise tryFailure th
@@ -156,15 +167,15 @@ trait SubscriptionSupport[ID, S, U] {
       }
 
     readSnapshot(id) flatMap {
-      case Some(snapshot) if matches(snapshot.revision, snapshot.tick) =>
+      case Some(snapshot) if expected(snapshot.revision, snapshot.tick) =>
         Future successful snapshot
       case maybeSnapshot => // Earlier revision or tick than expected, or unknown id
         if (timeout.length == 0) {
           Future failed Timeout(id, maybeSnapshot, minRevision, minTick, timeout)
         } else {
           val promise = Promise[Snapshot]
-          val subscription = this.subscribe(id) {
-            case update if matches(update.revision, update.tick) =>
+          val subscription = this.subscribe(id) { update =>
+            if (expected(update.revision, update.tick)) {
               val snapshotRev = maybeSnapshot.map(_.revision) getOrElse -1
               val updSnapshot = {
                 if (snapshotRev != update.revision - 1) None
@@ -183,6 +194,7 @@ trait SubscriptionSupport[ID, S, U] {
                 case None =>
                   readAgain(id, minRevision, minTick, promise)
               }
+            }
           }
           promise.future.onComplete(_ => subscription.cancel)
           scheduler.schedule(timeout) {

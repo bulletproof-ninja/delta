@@ -356,10 +356,10 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
 
     es = new TransientEventStore[String, AggrEvent, String](
           RandomDelayExecutionContext, EvtFmt)(_ => ticker)
-        with MessageHubPublishing[String, AggrEvent] {
+        with MessageTransportPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txHub = new LocalHub[Transaction](toTopic, ec)
+      val txTransport = new LocalTransport[Transaction](toTopic, ec)
       val txChannels = Set(TheOneAggr.channel)
       val txCodec = Codec.noop[Transaction]
     }
@@ -409,10 +409,10 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
     metrics = Nil
     es = new TransientEventStore[String, AggrEvent, String](
            RandomDelayExecutionContext, EvtFmt)(_ => ticker)
-         with MessageHubPublishing[String, AggrEvent] {
+         with MessageTransportPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
       val txChannels = Set(TheOneAggr.channel)
       val txCodec = Codec.noop[Transaction]
     }

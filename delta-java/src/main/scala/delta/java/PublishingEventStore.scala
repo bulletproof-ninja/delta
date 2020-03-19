@@ -1,35 +1,36 @@
 package delta.java
 
 import delta.EventStore
-import delta.MessageHub
-import delta.MessageHubPublishing
+import delta.MessageTransport
+import delta.MessageTransportPublishing
 import scuff.StreamConsumer
 import delta.Transaction, Transaction.Channel
 import scala.concurrent.Future
 
-trait PublishingEventStore[ID, EVT] extends EventStore[ID, EVT] with MessageHubPublishing[ID, EVT]
+trait PublishingEventStore[ID, EVT] extends EventStore[ID, EVT] with MessageTransportPublishing[ID, EVT]
 
 object PublishingEventStore {
 
   def withPublishing[ID, EVT, M](
       eventStore: EventStore[ID, EVT],
-      txHub: MessageHub { type Message = M },
+      txTransport: MessageTransport { type TransportType = M },
       txChannels: Set[String],
       txCodec: scuff.Codec[Transaction[ID, EVT], M],
       channelToTopic: java.util.function.Function[String, String]): PublishingEventStore[ID, EVT] = {
     val typedChannels = txChannels.map(Channel(_))
-    new EventStoreProxy(eventStore, txHub, typedChannels, txCodec, channelToTopic) with PublishingEventStore[ID, EVT]
+    new EventStoreProxy(eventStore, txTransport, typedChannels, txCodec, channelToTopic) with PublishingEventStore[ID, EVT]
   }
+
 }
 
 private abstract class EventStoreProxy[ID, EVT, M](
     evtStore: EventStore[ID, EVT],
-    protected val txHub: MessageHub { type Message = M },
+    protected val txTransport: MessageTransport { type TransportType = M },
     protected val txChannels: Set[Channel],
     protected val txCodec: scuff.Codec[Transaction[ID, EVT], M],
     ch2tp: java.util.function.Function[String, String])
   extends EventStore[ID, EVT] {
-  publishing: MessageHubPublishing[ID, EVT] =>
+  publishing: MessageTransportPublishing[ID, EVT] =>
 
   protected def toTopic(ch: Channel) = Topic(ch2tp(ch.toString))
 

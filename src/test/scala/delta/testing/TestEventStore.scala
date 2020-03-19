@@ -6,7 +6,7 @@ import org.junit.Assert._
 import scuff.io.{ ByteInputStream, ByteOutputStream }
 import scuff.JavaSerializer
 import delta._
-import delta.util.LocalHub
+import delta.util.LocalTransport
 import scuff.Codec
 
 sealed trait Event
@@ -34,10 +34,10 @@ class TestEventStore {
 
   private[this] val es = new util.TransientEventStore[Symbol, Event, Array[Byte]](
       RandomDelayExecutionContext, EvtFmt)(_ => SysClockTicker)
-      with MessageHubPublishing[Symbol, Event] {
+      with MessageTransportPublishing[Symbol, Event] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
       val txChannels = Set(Channel)
       val txCodec = Codec.noop[Transaction]
   }

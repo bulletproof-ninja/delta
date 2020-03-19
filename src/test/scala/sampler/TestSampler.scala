@@ -5,12 +5,12 @@ import scala.util.{ Failure, Success, Try }
 import org.junit.Assert._
 import org.junit.Test
 
-import delta.{ EventStore, LamportTicker, MessageHubPublishing }
+import delta.{ EventStore, LamportTicker, MessageTransportPublishing }
 import delta.ddd.{ DuplicateIdException, EntityRepository }
 import delta.testing.RandomDelayExecutionContext
 import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
-import delta.util.LocalHub
+import delta.util.LocalTransport
 import scuff.Codec
 import delta.ddd.Metadata
 
@@ -23,10 +23,10 @@ class TestSampler {
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
          RandomDelayExecutionContext, JsonDomainEventFormat)(initTicker)
-         with MessageHubPublishing[Int, DomainEvent] {
+         with MessageTransportPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
       val txChannels = Set(Employee.Def.channel, Department.Def.channel)
       val txCodec = Codec.noop[Transaction]
     }

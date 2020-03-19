@@ -18,8 +18,7 @@ trait BasicReadModel[ID, S] {
   /**
    * Read latest snapshot. This is intended
    * to get *some* revision fast. This
-   * may, or may not, be the latest written
-   * revision.
+   * may, or may not, be the latest revision.
    *
    * @return Latest accessible snapshot, or [[delta.read.UnknownIdRequested]] if unknown id
    */

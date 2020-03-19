@@ -11,10 +11,10 @@ import sampler.aggr.DomainEvent
 import delta.jdbc._
 import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
-import delta.util.LocalHub
+import delta.util.LocalTransport
 import org.junit.AfterClass
 import scuff.jdbc.DataSourceConnection
-import delta.MessageHubPublishing
+import delta.MessageTransportPublishing
 import scuff.jdbc.ConnectionSource
 import scuff.SysProps
 
@@ -47,10 +47,10 @@ final class TestSampler extends sampler.TestSampler {
       def dataSource = TestSampler.ds
     }
     new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)(initTicker)
-    with MessageHubPublishing[Int, DomainEvent] {
+    with MessageTransportPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(s"tx-$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
     }.ensureSchema()

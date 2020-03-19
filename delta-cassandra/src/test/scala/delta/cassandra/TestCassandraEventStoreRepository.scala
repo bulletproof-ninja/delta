@@ -64,9 +64,9 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     deleteAll(session)
     es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor,
       AggrEventFormat, RandomDelayExecutionContext)(_ => ticker)
-      with MessageHubPublishing[String, AggrEvent] {
+      with MessageTransportPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"tx:$ch")
-      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(Channel("any"))
       val txCodec = Codec.noop[Transaction]
     }.ensureTable()

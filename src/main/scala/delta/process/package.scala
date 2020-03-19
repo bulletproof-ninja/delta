@@ -6,4 +6,8 @@ package delta
   * _will not_ work correctly if mutable objects are
   * used.
   */
-package object process
+package object process {
+
+  type UpdateHub[ID, U] = MessageHub[ID, Update[U]]
+
+}

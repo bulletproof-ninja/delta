@@ -5,8 +5,8 @@ import com.mongodb.MongoNamespace
 import delta.mongo.MongoEventStore
 import delta.testing.RandomDelayExecutionContext
 import sampler.aggr.DomainEvent
-import delta.MessageHubPublishing
-import delta.util.LocalHub
+import delta.MessageTransportPublishing
+import delta.util.LocalTransport
 
 import org.junit._, Assert._
 
@@ -18,9 +18,9 @@ class TestSampler extends sampler.TestSampler {
     val ns = new MongoNamespace("unit-testing", "event-store")
     val txCollection = MongoEventStore.getCollection(ns, settings)
     new MongoEventStore[Int, DomainEvent](txCollection, BsonDomainEventFormat)(initTicker)
-    with MessageHubPublishing[Int, DomainEvent] {
+    with MessageTransportPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
     }

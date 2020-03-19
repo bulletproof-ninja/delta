@@ -8,8 +8,7 @@ private[impl] trait ProcessStoreSupport[ID, ESID, Work >: Null, Stored, U] {
   rm: EventSourceReadModel[ID, ESID, _, Work, Stored] =>
 
   protected def processContext(id: ESID): ExecutionContext
-  protected def processStore: StreamProcessStore[ESID, Stored, U]
-  protected def idConv: ID => ESID
+  protected def processStore: StreamProcessStore[StreamId, Stored, U]
 
   private type Update = delta.process.Update[U]
 
@@ -17,18 +16,18 @@ private[impl] trait ProcessStoreSupport[ID, ESID, Work >: Null, Stored, U] {
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]] = {
 
-    val esid: ESID = idConv(id)
+    val streamId: StreamId = StreamId(id)
 
     val future: Future[(Option[Update], Option[Snapshot])] =
-      processStore.upsert(esid) { existing =>
+      processStore.upsert(streamId) { existing =>
         val goodEnough = existing.exists { snapshot =>
           snapshot.tick >= minTick && snapshot.revision >= minRevision
         }
         val latestSnapshot: Future[Option[Snapshot]] =
           if (goodEnough) Future successful existing
-          else replayToComplete(existing, esid)
+          else replayToComplete(existing, streamId)
         latestSnapshot.map(ls => ls -> ls)
-      }(processContext(esid))
+      }(processContext(streamId))
 
     future.map(_._2)
 

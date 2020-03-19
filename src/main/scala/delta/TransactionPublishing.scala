@@ -24,22 +24,22 @@ extends EventStore[ID, EVT] {
 /**
  * Enable pub/sub of transactions.
  */
-trait MessageHubPublishing[ID, EVT]
+trait MessageTransportPublishing[ID, EVT]
 extends TransactionPublishing[ID, EVT] {
 
-  protected val txHub: MessageHub
+  protected val txTransport: MessageTransport
   protected def txChannels: Set[Channel]
   protected def toTopic(ch: Channel): Topic
-  protected def txCodec: Codec[Transaction, txHub.Message]
+  protected def txCodec: Codec[Transaction, txTransport.TransportType]
 
   implicit private lazy val encoder = txCodec.encode _
   implicit private lazy val decoder = txCodec.decode _
 
   protected def publishTransaction(stream: ID, ch: Channel, tx: Future[Transaction]): Unit =
-    txHub.publish(toTopic(ch), tx)
+    txTransport.publish(toTopic(ch), tx)
 
-  protected type Topic = MessageHub.Topic
-  protected def Topic(name: String): Topic = MessageHub.Topic(name)
+  protected type Topic = MessageTransport.Topic
+  protected def Topic(name: String): Topic = MessageTransport.Topic(name)
 
   override def subscribe[U](selector: StreamsSelector)(callback: Transaction => U): Subscription = {
 
@@ -53,7 +53,7 @@ extends TransactionPublishing[ID, EVT] {
       if (channelSubset.isEmpty) txChannels else channelSubset
     }
 
-    txHub.subscribe[Transaction](channels.map(toTopic))(pfCallback)
+    txTransport.subscribe[Transaction](channels.map(toTopic))(pfCallback)
   }
 
 }

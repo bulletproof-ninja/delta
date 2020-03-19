@@ -11,11 +11,11 @@ import sampler.{ JSON, JsonDomainEventFormat }
 import sampler.aggr.DomainEvent
 import delta.jdbc._
 import delta.jdbc.h2._
-import delta.util.LocalHub
+import delta.util.LocalTransport
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
-import delta.MessageHubPublishing
+import delta.MessageTransportPublishing
 import scuff.jdbc.ConnectionSource
 
 object TestSampler {
@@ -39,9 +39,9 @@ final class TestSampler extends sampler.TestSampler {
       dataSource.setURL(s"jdbc:h2:./${h2Name}")
     }
     new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)(initTicker)
-      with MessageHubPublishing[Int, DomainEvent] {
+      with MessageTransportPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
-      val txHub = new LocalHub[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
     }.ensureSchema()

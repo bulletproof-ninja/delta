@@ -16,13 +16,15 @@ import scuff.concurrent.Threads
  * NOTE: *Cannot* be used for state derived
  * from joined streams.
  * @tparam ID The id type
- * @tparam S The state type
- * @tparam EVT The event type used for producing state
+ * @tparam ESID The `EventSource` id type
+ * @tparam EVT The event type
+ * @tparam Work The work state type
+ * @tparam View The view model type
  */
 abstract class StatelessReadModel[ID, ESID, EVT: ClassTag, Work >: Null: ClassTag, View](
   es: EventSource[ESID, _ >: EVT])(
   implicit
-  protected val idConv: ID => ESID)
+  idConv: ID => ESID)
 extends EventSourceReadModel[ID, ESID, EVT, Work, View](es) {
 
   protected def readSnapshot(id: ID)(
@@ -42,7 +44,8 @@ extends EventSourceReadModel[ID, ESID, EVT, Work, View](es) {
 
 }
 
-abstract class PlainStatelessReadModel[ID, ESID, EVT: ClassTag, S >: Null: ClassTag](
+/** Simpler stateless read model, with single state type. */
+abstract class SimpleStatelessReadModel[ID, ESID, EVT: ClassTag, S >: Null: ClassTag](
   es: EventSource[ESID, _ >: EVT])(
   implicit
   idConv: ID => ESID)

@@ -14,7 +14,7 @@ import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
 
 import scala.collection.concurrent.TrieMap
-import delta.MessageHubPublishing
+import delta.MessageTransportPublishing
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Success
 import scala.util.Failure
@@ -61,9 +61,9 @@ class TestCollege {
 
   def newEventStore: EventStore[Int, CollegeEvent] =
     new TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker)
-        with MessageHubPublishing[Int, CollegeEvent] {
-      def toTopic(ch: Channel) = MessageHub.Topic(ch.toString)
-      val txHub = new LocalHub[Transaction](tx => toTopic(tx.channel), RandomDelayExecutionContext)
+        with MessageTransportPublishing[Int, CollegeEvent] {
+      def toTopic(ch: Channel) = MessageTransport.Topic(ch.toString)
+      val txTransport = new LocalTransport[Transaction](tx => toTopic(tx.channel), RandomDelayExecutionContext)
       val txChannels = Set(Student.channel, Semester.channel)
       val txCodec = Codec.noop[Transaction]
     }

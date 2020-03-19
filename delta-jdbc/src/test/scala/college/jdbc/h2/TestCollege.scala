@@ -11,11 +11,11 @@ import college.CollegeEvent
 import delta.EventStore
 import delta.jdbc._
 import delta.jdbc.h2.H2Dialect
-import delta.util.LocalHub
+import delta.util.LocalTransport
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Random
 import scuff.jdbc.DataSourceConnection
-import delta.MessageHubPublishing
+import delta.MessageTransportPublishing
 import scuff.jdbc.ConnectionSource
 import college.CollegeEventFormat
 import college.jdbc.StudentEmailsStore
@@ -48,10 +48,10 @@ class TestCollege extends college.jdbc.TestCollege {
   override def newEventStore: EventStore[Int, CollegeEvent] = {
     val sql = new H2Dialect[Int, CollegeEvent, Array[Byte]](None)
     new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
-    with MessageHubPublishing[Int, CollegeEvent] {
+    with MessageTransportPublishing[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(s"transactions:$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txHub = new LocalHub[Transaction](toTopic, RandomDelayExecutionContext)
+      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
     }.ensureSchema()
