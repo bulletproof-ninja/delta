@@ -2,7 +2,7 @@ package delta.java
 
 import java.util.concurrent.ScheduledExecutorService
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 
 import scala.concurrent.duration._

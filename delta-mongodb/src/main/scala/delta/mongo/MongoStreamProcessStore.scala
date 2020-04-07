@@ -2,7 +2,7 @@ package delta.mongo
 
 import java.util.ArrayList
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent._, duration._
 import scala.reflect.ClassTag
 

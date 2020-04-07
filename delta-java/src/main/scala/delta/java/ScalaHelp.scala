@@ -1,6 +1,6 @@
 package delta.java
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection._
 import java.util.Optional
 import scala.concurrent.{ Future, ExecutionContext }

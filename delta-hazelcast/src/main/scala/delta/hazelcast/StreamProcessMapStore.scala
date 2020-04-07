@@ -1,6 +1,6 @@
 package delta.hazelcast
 
-import collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import com.hazelcast.core._
 import concurrent.duration._

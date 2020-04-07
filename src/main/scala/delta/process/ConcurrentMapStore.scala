@@ -1,7 +1,7 @@
 package delta.process
 
 import collection.Map
-import collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 import scuff.concurrent._

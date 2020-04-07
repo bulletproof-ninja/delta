@@ -3,6 +3,7 @@ package delta.testing
 import org.junit._, Assert._
 import delta.Snapshot
 import scala.collection.concurrent.TrieMap
+import scala.collection.compat._
 
 import scala.concurrent.Future
 import delta.process.StreamProcessStore
@@ -97,7 +98,7 @@ class TestStreamProcessStore {
     val evenMoreIds: Map[ID, (Revision, Tick)] = (40L until 50L).map(tick => util.Random.nextLong -> (0 -> tick)).toMap
     store.refreshBatch(ids ++ evenMoreIds).await // Empty store, nothing to refresh, but shouldn't fail
     val newIdSnapshots: Map[ID, Snapshot[JSON]] = (60L until 70L).map(tick => util.Random.nextLong -> Snapshot("{}", 0, tick)).toMap
-    val oldIdSnapshots: Map[ID, Snapshot[JSON]] = ids.mapValues {
+    val oldIdSnapshots: Map[ID, Snapshot[JSON]] = ids.view.mapValues {
       case (rev, tick) => Snapshot("{}", rev + 1, tick + 10)
     }.toMap
     store.writeBatch(oldIdSnapshots ++ newIdSnapshots).await

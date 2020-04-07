@@ -1,11 +1,12 @@
 package delta.jdbc
 
-import java.sql.Connection
 import delta.jdbc.JdbcStreamProcessStore.PkColumn
+
 import scala.util.Try
-import java.sql.PreparedStatement
 import scala.concurrent.Future
-import java.sql.ResultSet
+import scala.collection.compat._
+
+import java.sql.{ Connection, PreparedStatement, ResultSet }
 
 object IndexTables {
   case class Table[S, C: ColumnType](indexColumn: String)(getIndexValues: S => Set[C]) {
@@ -226,7 +227,7 @@ $WHERE i.${table.indexColumn} = ?
         retainKeys <- indexColumnsResult
       } yield {
         list.reduce(_ ++ _)
-          .filterKeys(retainKeys).toMap
+          .view.filterKeys(retainKeys).toMap
       }
     }
 

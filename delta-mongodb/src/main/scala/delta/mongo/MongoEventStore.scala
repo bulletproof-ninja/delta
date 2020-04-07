@@ -18,7 +18,7 @@ import scuff.concurrent.Threads
 import delta.EventFormat
 import scala.annotation.varargs
 import com.mongodb.async.client.{ MongoClient, MongoClients }
-import collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import delta.Transaction.Channel
 import scala.util.Try
 import scala.util.Success
@@ -233,7 +233,7 @@ class MongoEventStore[ID: BsonCodec, EVT](
             matcher.append("events.name", new Document("$in", toJList(evtNames)))
         }
         if (matchByChannel.size == 1) {
-          import collection.JavaConverters._
+          import scala.jdk.CollectionConverters._
           matchByChannel.head.asScala.foreach { entry =>
             docFilter.append(entry._1, entry._2)
           }

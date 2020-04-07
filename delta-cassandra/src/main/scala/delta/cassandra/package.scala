@@ -18,7 +18,7 @@ package cassandra {
 
   private abstract class AbstractMapColumn[K: ColumnType, V: ColumnType, M <: aMap[K, V]: ClassTag]
       extends ColumnType[M] {
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     type T = M
     @inline protected def kType = implicitly[ColumnType[K]]
     @inline protected def vType = implicitly[ColumnType[V]]
@@ -27,7 +27,7 @@ package cassandra {
   }
   private abstract class AbstractSeqColumn[V: ColumnType, S <: aSeq[V]: ClassTag]
       extends ColumnType[S] {
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     type T = S
     @inline protected def vType = implicitly[ColumnType[V]]
     final val typeName = s"frozen<list<${vType.typeName}>>"
@@ -81,19 +81,19 @@ package object cassandra {
 
   implicit def MapColumn[K: ColumnType, V: ColumnType]: ColumnType[Map[K, V]] =
     new AbstractMapColumn[K, V, Map[K, V]] {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala.toMap
     }
   implicit def AnyMapColumn[K: ColumnType, V: ColumnType]: ColumnType[aMap[K, V]] =
     new AbstractMapColumn[K, V, aMap[K, V]] {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala
     }
   implicit def MutableMapColumn[K: ColumnType, V: ColumnType]: ColumnType[mMap[K, V]] =
     new AbstractMapColumn[K, V, mMap[K, V]] {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       def readFrom(row: Row, col: Int): T =
         row.getMap(col, kType.jvmType, vType.jvmType).asScala
     }

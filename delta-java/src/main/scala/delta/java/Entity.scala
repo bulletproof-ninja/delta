@@ -1,6 +1,6 @@
 package delta.java
 
-import collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 abstract class Entity[ID, T, S >: Null, EVT](name: String, projector: delta.Projector[S, EVT])
   extends delta.write.Entity[S, EVT](name, projector) {

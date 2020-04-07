@@ -87,7 +87,7 @@ trait EventSource[ID, EVT] {
   def EventSelector(chEvt: (Channel, Set[CEVT]), more: (Channel, Set[CEVT])*): Selector =
     new EventSelector(Map((chEvt :: more.toList): _*))
   def EventSelector(byChannel: java.util.Map[Channel, java.util.Set[CEVT]]): Selector = {
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     new EventSelector(byChannel.asScala.map(e => e._1 -> e._2.asScala.toSet).toMap)
   }
   /**

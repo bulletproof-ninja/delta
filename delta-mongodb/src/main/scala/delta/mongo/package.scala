@@ -14,7 +14,7 @@ import com.mongodb.async.SingleResultCallback
 import java.util.UUID
 import org.bson._
 import org.bson.types.Decimal128
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 package object mongo {
 

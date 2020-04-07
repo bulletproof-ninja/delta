@@ -1,6 +1,6 @@
 package delta.java
 
-import collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.duration.{ FiniteDuration, TimeUnit }
 
 import delta.process.StreamProcessStore

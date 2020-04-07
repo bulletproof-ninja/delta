@@ -11,7 +11,7 @@ import delta.mongo.BsonJsonCodec
 import org.bson.types.Decimal128
 import org.bson.BsonNull
 
-import collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import org.bson.BsonDocument
 
 class TestCodecs {

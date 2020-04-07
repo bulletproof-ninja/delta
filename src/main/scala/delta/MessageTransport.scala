@@ -3,7 +3,6 @@ package delta
 import java.util.concurrent._
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
-import scala.annotation.varargs
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.reflect.{ ClassTag, classTag }
@@ -112,7 +111,7 @@ trait MessageTransport {
 
   /** Java-friendly subscription. */
   final def subscribe[M](msgType: Class[M], decoder: TransportType => M, topics: java.lang.Iterable[Topic], callback: java.util.function.Consumer[_ >: M]): Subscription = {
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     implicit val tag = ClassTag[M](msgType)
     subscribe[M](topics.asScala) {
       case msg: M => callback accept msg
@@ -158,7 +157,6 @@ trait MessageTransport {
    * @param moreTopics Additional topics, if any
    * @param callback Message callback
    */
-  @varargs
   final def subscribe[M: ClassTag](
       topic: Topic, moreTopics: Topic*)(
       callback: PartialFunction[M, Unit])(

@@ -14,6 +14,8 @@ import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
 
 import scala.collection.concurrent.TrieMap
+import scala.collection.compat._
+
 import delta.MessageTransportPublishing
 import delta.testing.RandomDelayExecutionContext
 import scala.util.Success
@@ -165,7 +167,7 @@ class TestCollege {
         new LookupService {
           def findStudent(email: EmailAddress): Future[Option[Student.Id]] = Future {
             val lowerCase = email.toLowerCase
-            val results = snapshots.mapValues(_.content.emails).filter {
+            val results = snapshots.view.mapValues(_.content.emails).filter {
               case (_, emails) => emails contains lowerCase
             }
             if (results.size > 1) sys.error("Probably a randomization clash. Please run again.")
@@ -189,7 +191,7 @@ class TestCollege {
     }
 
     def readBatch(keys: Iterable[Int]): Future[Map[Int, Snapshot]] = Future {
-      snapshots.filterKeys(keys.toSet).toMap
+      snapshots.view.filterKeys(keys.toSet).toMap
     }
     def writeBatch(batch: scala.collection.Map[Int, Snapshot]): Future[Unit] = Future {
       batch.foreach {

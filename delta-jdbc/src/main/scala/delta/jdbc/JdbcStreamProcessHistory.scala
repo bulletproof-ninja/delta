@@ -2,14 +2,17 @@ package delta.jdbc
 
 import java.sql.{ Connection, SQLException }
 
+import scala.collection.compat._
 import scala.collection.immutable.HashMap
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
 import delta.Snapshot
 import delta.process._
+
 import scuff._
 import scuff.jdbc.ConnectionSource
+
 
 /**
  * Keep history of all snapshots generated,
@@ -159,7 +162,7 @@ AND t.tick = (
       // NOTE: Some JDBC drivers may fail on the entire batch, if a single row fails
       val failed = insertSnapshots(conn, snapshots).toSet
       if (failed.nonEmpty) {
-        snapshots.filterKeys(failed).foreach {
+        snapshots.view.filterKeys(failed).foreach {
           case (key, snapshot) =>
             if (!updateSnapshot(conn, key, snapshot)) {
               // To deal with drivers failing on entire batch, we once again try to insert, this time single row

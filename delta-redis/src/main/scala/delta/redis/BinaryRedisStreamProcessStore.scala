@@ -2,7 +2,7 @@ package delta.redis
 
 import _root_.redis.clients.jedis.BinaryJedis
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.immutable.HashMap
 import scala.concurrent.{ ExecutionContext, Future }
 

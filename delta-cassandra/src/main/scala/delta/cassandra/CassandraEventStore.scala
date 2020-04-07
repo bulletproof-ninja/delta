@@ -4,7 +4,7 @@ import java.util.{ ArrayList, List => JList }
 import java.lang.{ Byte => JByte }
 
 import scala.{ Left, Right }
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.immutable.Seq
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }

@@ -2,6 +2,7 @@ package delta.jdbc
 
 import java.sql._
 
+import scala.collection.compat._
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 
@@ -400,9 +401,9 @@ CREATE INDEX IF NOT EXISTS $indexName
     else futureUpdate { conn =>
       val batchInsertFailures = insertSnapshots(conn, snapshots).toSet
       if (batchInsertFailures.nonEmpty) {
-        val snapshotsToUpdate = snapshots.filterKeys(batchInsertFailures).toMap
+        val snapshotsToUpdate = snapshots.view.filterKeys(batchInsertFailures).toMap
         val batchUpdateFailures = updateSnapshots(conn, snapshotsToUpdate).toSet
-        val writeIndividually = snapshotsToUpdate.filterKeys(batchUpdateFailures)
+        val writeIndividually = snapshotsToUpdate.view.filterKeys(batchUpdateFailures)
         writeIndividually.foreach {
           case (key, snapshot) => writeSnapshot(conn, key, snapshot)
         }
