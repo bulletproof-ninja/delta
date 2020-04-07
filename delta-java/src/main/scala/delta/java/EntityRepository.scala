@@ -10,7 +10,7 @@ import java.util.function.BiConsumer
 import scala.util.control.NonFatal
 import java.util.function.BiFunction
 import java.util.Optional
-import delta.ddd.Metadata
+import delta.write.Metadata
 
 class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     entity: Entity[ID, ET, S, EVT] { type Type = ET },
@@ -18,7 +18,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     exeCtx: ExecutionContext,
     idConv: Function1[ID, ESID]) {
 
-  private[this] val repo = new delta.ddd.EntityRepository[ESID, EVT, S, ID, ET](entity, exeCtx)(eventStore)(idConv)
+  private[this] val repo = new delta.write.EntityRepository[ESID, EVT, S, ID, ET](entity, exeCtx)(eventStore)(idConv)
 
   private def toJInt(t: (Any, Int)): Integer = Integer valueOf t._2
   private def toJInt(t: (ET, Int)): (ET, Integer) = (t._1, Integer valueOf t._2)

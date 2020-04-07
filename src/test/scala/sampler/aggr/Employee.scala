@@ -1,6 +1,6 @@
 package sampler.aggr
 
-import delta.ddd._
+import delta.write._
 
 import sampler._
 import sampler.aggr.emp._
@@ -19,7 +19,7 @@ case class PromoteEmployee(
 
 object Employee {
 
-  type State = delta.ddd.State[EmpState, EmpEvent]
+  type State = delta.write.State[EmpState, EmpEvent]
 
   def apply(cmd: RegisterEmployee): Employee = {
     val name = cmd.name.trim

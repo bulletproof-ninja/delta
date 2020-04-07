@@ -5,7 +5,7 @@ import com.mongodb.client.result.DeleteResult
 import org.junit._
 import org.junit.Assert._
 import delta.util._
-import delta.ddd._
+import delta.write._
 import delta.testing._
 import delta.EventFormat
 import delta.MessageTransportPublishing

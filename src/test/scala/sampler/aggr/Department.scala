@@ -1,7 +1,7 @@
 package sampler.aggr
 
-import delta.ddd._
-import delta.ddd._
+import delta.write._
+import delta.write._
 
 import sampler._
 import sampler.aggr.dept._
@@ -18,7 +18,7 @@ trait Department {
 }
 
 object Department {
-  type State = delta.ddd.State[DeptState, DeptEvent]
+  type State = delta.write.State[DeptState, DeptEvent]
   implicit def ec = delta.testing.RandomDelayExecutionContext
   def insert(repo: Repository[DeptId, Department])(
     id: DeptId, cmd: CreateDepartment)(

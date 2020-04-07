@@ -3,4 +3,4 @@ package delta
 /**
  * Classes around DDD (Domain Driven Design) concepts.
  */
-package object ddd
+package object write

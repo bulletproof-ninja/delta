@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 trait SubscriptionSupport[ID, S, U]
 extends StreamId[ID] {
-  rm: BasicReadModel[ID, S] =>
+  rm: ReadModel[ID, S] =>
 
   type Update = delta.process.Update[U]
 

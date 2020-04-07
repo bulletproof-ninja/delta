@@ -1,4 +1,4 @@
-package delta.ddd
+package delta.write
 
 trait Metadata {
   def toMap: Map[String, String]

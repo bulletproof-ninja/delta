@@ -6,7 +6,7 @@ import com.datastax.driver.core.{ Cluster, Session, SocketOptions }
 import delta.util._
 import scala.reflect.classTag
 import scala.util.Try
-import delta.ddd.EntityRepository
+import delta.write.EntityRepository
 import delta._
 import delta.testing._
 import delta.Transaction.Channel

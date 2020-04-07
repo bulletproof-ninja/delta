@@ -6,7 +6,7 @@ import delta.MessageTransport
 
 trait MessageTransportSupport[ID, S, U]
 extends SubscriptionSupport[ID, S, U] {
-  rm: BasicReadModel[ID, S] =>
+  rm: ReadModel[ID, S] =>
 
   protected type Topic = MessageTransport.Topic
   protected def Topic(name: String) = MessageTransport.Topic(name)

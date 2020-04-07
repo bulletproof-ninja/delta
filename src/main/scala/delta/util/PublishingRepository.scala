@@ -3,12 +3,12 @@ package delta.util
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
-import delta.ddd.Repository
-import delta.ddd.ImmutableEntity
-import delta.ddd.Metadata
+import delta.write.Repository
+import delta.write.ImmutableEntity
+import delta.write.Metadata
 
 /**
-  * [[delta.ddd.Repository]] wrapper for non-Event-source
+  * [[delta.write.Repository]] wrapper for non-Event-source
   * repositories, while still publishing events.
   */
 abstract class PublishingRepository[ID, T <: AnyRef, EVT](

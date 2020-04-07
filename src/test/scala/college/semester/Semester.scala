@@ -1,7 +1,7 @@
 package college.semester
 
 import college._
-import delta.ddd._
+import delta.write._
 import delta.Projector
 import college.student.Student
 

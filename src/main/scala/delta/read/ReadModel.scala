@@ -7,7 +7,7 @@ import scala.concurrent.{ Future, ExecutionContext }
  * or eventually consistent, depending on
  * implementation.
  */
-trait BasicReadModel[ID, S] {
+trait ReadModel[ID, S] {
 
   type Snapshot = delta.Snapshot[S]
 
@@ -22,11 +22,16 @@ trait BasicReadModel[ID, S] {
    *
    * @return Latest accessible snapshot, or [[delta.read.UnknownIdRequested]] if unknown id
    */
-  def read(id: ID)(
+  def read(id: ID, minRevision: Option[Int] = None)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
-    readSnapshot(id).map {
-      verify(id, _)
+    minRevision match {
+      case Some(minRevision) =>
+        read(id, minRevision)
+      case _ =>
+        readSnapshot(id).map {
+          verify(id, _)
+        }
     }
 
   /**

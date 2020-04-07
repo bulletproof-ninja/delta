@@ -15,7 +15,7 @@ private[impl]
 abstract class EventSourceReadModel[ID, ESID, EVT: ClassTag, Work >: Null, Stored] protected (
   protected val eventSource: EventSource[ESID, _ >: EVT])(
   implicit idConv: ID => ESID)
-extends BasicReadModel[ID, Stored]
+extends ReadModel[ID, Stored]
 with StreamId[ID] {
 
   protected type StreamId = ESID

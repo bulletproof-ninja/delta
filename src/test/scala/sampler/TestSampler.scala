@@ -6,13 +6,13 @@ import org.junit.Assert._
 import org.junit.Test
 
 import delta.{ EventStore, LamportTicker, MessageTransportPublishing }
-import delta.ddd.{ DuplicateIdException, EntityRepository }
+import delta.write.{ DuplicateIdException, EntityRepository }
 import delta.testing.RandomDelayExecutionContext
 import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 import delta.util.LocalTransport
 import scuff.Codec
-import delta.ddd.Metadata
+import delta.write.Metadata
 
 class TestSampler {
 

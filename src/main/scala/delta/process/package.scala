@@ -10,4 +10,6 @@ package object process {
 
   type UpdateHub[ID, U] = MessageHub[ID, Update[U]]
 
+  implicit def asyncCodec[A, B](codec: scuff.Codec[A, B]): AsyncCodec[A, B] = AsyncCodec(codec)
+
 }

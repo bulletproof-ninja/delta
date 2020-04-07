@@ -1,4 +1,4 @@
-package delta.ddd
+package delta.write
 
 import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
 

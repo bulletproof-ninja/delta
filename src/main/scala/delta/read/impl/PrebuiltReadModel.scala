@@ -18,7 +18,7 @@ abstract class PrebuiltReadModel[ID, V, SID, U](
   protected val defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
   implicit
   idConv: ID => SID)
-extends BasicReadModel[ID, V]
+extends ReadModel[ID, V]
 with SubscriptionSupport[ID, V, U] {
 
   protected type StreamId = SID

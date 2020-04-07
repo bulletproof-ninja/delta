@@ -1,4 +1,4 @@
-package delta.ddd
+package delta.write
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
@@ -7,7 +7,7 @@ import delta.EventStore
 import delta.SnapshotStore
 
 /**
-  * [[delta.ddd.Entity]]-based [[delta.ddd.Repository]] implementation.
+  * [[delta.write.Entity]]-based [[delta.write.Repository]] implementation.
   * @tparam ESID Event store id type
   * @tparam EVT Repository event type
   * @tparam S Repository state type
@@ -34,7 +34,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
     implicit idConv: ID => ESID)
   extends Repository[ID, ET] with MutableEntity {
 
-  private[this] val repo = 
+  private[this] val repo =
     new EventStoreRepository(
         entity.channel, entity.newState, exeCtx, snapshots, assumeCurrentSnapshots)(eventStore)
 

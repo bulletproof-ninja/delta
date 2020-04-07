@@ -3,7 +3,7 @@ package college
 import org.junit._, Assert._
 
 import delta._
-import delta.ddd._
+import delta.write._
 import delta.util._
 import college.student._
 import college.semester._

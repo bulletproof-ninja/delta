@@ -5,7 +5,7 @@ import delta.MessageHub
 
 trait MessageHubSupport[ID, S, U]
 extends SubscriptionSupport[ID, S, U] {
-  rm: BasicReadModel[ID, S] =>
+  rm: ReadModel[ID, S] =>
 
   protected def hub: MessageHub[StreamId, Update]
 

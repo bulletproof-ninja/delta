@@ -1,4 +1,4 @@
-package delta.ddd
+package delta.write
 
 import delta.Projector
 import delta.Transaction
@@ -20,18 +20,18 @@ abstract class Entity[S >: Null, EVT](name: String, projector: Projector[S, EVT]
   type Id
   type Type
 
-  type State = delta.ddd.State[S, EVT]
+  type State = delta.write.State[S, EVT]
   type Event = EVT
 
   def newState(initState: S = null): State = new State(projector, initState)
 
-  private[ddd] def validatedState(entity: Type): State = {
+  private[write] def validatedState(entity: Type): State = {
     val s = state(entity)
     validate(s.curr)
     s
   }
 
-  private[ddd] def initEntity(state: S, concurrentUpdates: List[EVT]): Type = init(newState(state), concurrentUpdates)
+  private[write] def initEntity(state: S, concurrentUpdates: List[EVT]): Type = init(newState(state), concurrentUpdates)
 
   /**
     * Initialize entity instance.

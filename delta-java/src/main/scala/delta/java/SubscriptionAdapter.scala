@@ -5,11 +5,11 @@ import java.util.function.{ BiConsumer, Consumer }
 
 import scala.concurrent.{ ExecutionContext, Future }
 
-import delta.read.{ BasicReadModel, SubscriptionSupport }
+import delta.read.{ ReadModel, SubscriptionSupport }
 import scuff.Subscription
 
 trait SubscriptionAdapter[ID, View, U] {
-  rm: BasicReadModel[ID, View] with SubscriptionSupport[ID, View, U] =>
+  rm: ReadModel[ID, View] with SubscriptionSupport[ID, View, U] =>
 
   /**
    * Subscribe to snapshot updates with an initial snapshot.

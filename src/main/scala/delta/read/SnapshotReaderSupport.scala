@@ -5,7 +5,7 @@ import scala.concurrent._
 
 trait SnapshotReaderSupport[ID, S]
 extends StreamId[ID] {
-  rm: BasicReadModel[ID, S] =>
+  rm: ReadModel[ID, S] =>
 
   protected def snapshotReader: SnapshotReader[StreamId, _ >: S]
 

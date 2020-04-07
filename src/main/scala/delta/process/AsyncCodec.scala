@@ -9,7 +9,7 @@ abstract class AsyncCodec[W, S] extends Serializable {
 
   final def encode(ws: Option[W])(implicit ec: ExecutionContext): Future[Option[S]] =
     if (ws.isEmpty) Future.none
-    else encode(ws.get).map(Some(_))(Threads.PiggyBack)
+    else encode(ws.get)(ec).map(Some(_))(Threads.PiggyBack)
   final def decode(ss: Option[S]): Option[W] =
     if (ss.isEmpty) None
     else Some(decode(ss.get))
@@ -18,7 +18,7 @@ abstract class AsyncCodec[W, S] extends Serializable {
   protected implicit final def successful(ss: S): Future[S] = Future successful ss
 }
 
-private[delta] final class SyncCodec[W, S](sync: scuff.Codec[W, S])
+private[process] final class SyncCodec[W, S](sync: scuff.Codec[W, S])
 extends AsyncCodec[W, S] {
   def encode(ws: W)(implicit ec: ExecutionContext): Future[S] = successful(sync encode ws)
   def decode(ss: S): W = sync decode ss

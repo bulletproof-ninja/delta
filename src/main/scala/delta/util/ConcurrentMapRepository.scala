@@ -3,9 +3,9 @@ package delta.util
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
 
-import delta.ddd.{ DuplicateIdException, Repository, UnknownIdException }
-import delta.ddd.ImmutableEntity
-import delta.ddd.Metadata
+import delta.write.{ DuplicateIdException, Repository, UnknownIdException }
+import delta.write.ImmutableEntity
+import delta.write.Metadata
 
 /**
  * Repository backed by concurrent map.

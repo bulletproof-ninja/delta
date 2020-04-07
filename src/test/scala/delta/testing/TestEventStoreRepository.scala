@@ -11,10 +11,10 @@ import scala.util.{ Failure, Success, Try }
 import org.junit._
 import org.junit.Assert._
 import scuff._, concurrent._
-import delta.ddd.{ Repository, UnknownIdException }
+import delta.write.{ Repository, UnknownIdException }
 import scuff.reflect.Surgeon
 import delta._
-import delta.ddd._
+import delta.write._
 import delta.util._
 import scala.{ SerialVersionUID => version }
 import delta.process.ConcurrentMapStore

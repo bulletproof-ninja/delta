@@ -1,4 +1,4 @@
-package delta.ddd
+package delta.write
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
@@ -9,7 +9,7 @@ import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
 
 /**
- * [[delta.EventStore]]-based [[delta.ddd.Repository]] implementation.
+ * [[delta.EventStore]]-based [[delta.write.Repository]] implementation.
  * @tparam ESID Event store id type
  * @tparam EVT Repository event type
  * @tparam S Repository state type

@@ -76,7 +76,7 @@ class IMapEntryStateReadModel[ID, S, MID, ES, U](
   toMapKey: ID => MID,
   toView: (ID, ES) => S,
   fromView: S => Option[ES])
-extends BasicReadModel[ID, S]
+extends ReadModel[ID, S]
 with SubscriptionSupport[ID, S, U] {
 
   protected type StreamId = MID

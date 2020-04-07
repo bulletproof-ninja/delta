@@ -1,4 +1,4 @@
-package delta.ddd
+package delta.write
 
 import scala.concurrent.Future
 import language.higherKinds
@@ -18,7 +18,7 @@ trait Repository[ID, E] extends Updates[ID, E] {
    * Load entity. Only for reading.
    * Modifications cannot be saved.
    * @param id The instance ID
-   * @return The latest revision of entity or [[delta.ddd.UnknownIdException]]
+   * @return The latest revision of entity or [[delta.write.UnknownIdException]]
    */
   def load(id: ID): Future[(E, Int)]
 
@@ -28,7 +28,7 @@ trait Repository[ID, E] extends Updates[ID, E] {
    * @param entity The instance to insert
    * @param metadata Optional metadata.
    * @return The id if successful,
-   * or [[delta.ddd.DuplicateIdException]] if id already exists and id is constant
+   * or [[delta.write.DuplicateIdException]] if id already exists and id is constant
    */
   def insert(newId: => ID, entity: E)(implicit metadata: Metadata): Future[ID]
 }
@@ -53,18 +53,24 @@ sealed trait Updates[ID, E] {
    * @param metadata Optional metadata.
    * @param updateThunk The code block responsible for updating.
    * Will receive the instance and revision.
-   * @return New revision, or [[delta.ddd.UnknownIdException]] if unknown id.
+   * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](
       id: ID, expectedRevision: Option[Int] = None)(
       updateThunk: (E, Int) => Future[UT[R]])(
       implicit
       metadata: Metadata): Future[UM[R]] = {
+
     val proxy = (entity: E, revision: Int) => {
-      expectedRevision.filter(_ > revision).foreach(expected => throw new IllegalStateException(s"Expected revision $expected, for $id, is higher than actual revision of $revision"))
+      if ((expectedRevision getOrElse 0) > revision) {
+        throw new IllegalStateException(
+          s"Expected revision ${expectedRevision.get} is higher than actual revision of $revision, for $id")
+      }
       updateThunk(entity, revision)
     }
+
     update(expectedRevision, id, proxy)
+
   }
 
   /**
@@ -76,7 +82,7 @@ sealed trait Updates[ID, E] {
    * @param metadata Metadata.
    * @param updateThunk The code block responsible for updating.
    * Will receive the instance and current revision.
-   * @return New revision, or [[delta.ddd.UnknownIdException]] if unknown id.
+   * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID)(
       updateThunk: (E, Int) => Future[UT[R]])(
@@ -103,9 +109,9 @@ trait ImmutableEntity[E] {
 }
 
 final case class UnknownIdException(id: Any) extends RuntimeException(s"Unknown id: $id")
-final case class DuplicateIdException(id: Any, metadata: Map[String, String]) 
+final case class DuplicateIdException(id: Any, metadata: Map[String, String])
   extends RuntimeException(s"Id already exists: $id${DuplicateIdException.errorMessageSuffix(metadata)}")
 private object DuplicateIdException {
-  def errorMessageSuffix(metadata: Map[String, String]): String = 
+  def errorMessageSuffix(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "" else s", failed transaction metadata: ${metadata.mkString(", ")}"
 }
