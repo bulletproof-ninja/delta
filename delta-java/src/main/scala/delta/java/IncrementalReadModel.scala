@@ -13,10 +13,10 @@ abstract class IncrementalReadModel[ID, ESID, EVT, Work >: Null, Stored, U](
   eventClass: Class[EVT],
   protected val processStore: StreamProcessStore[ESID, Stored, U],
   stateCodec: AsyncCodec[Work, Stored],
-  protected val hub: MessageHub[ESID, Update[U]],
+  protected val hub: MessageHub[ESID, delta.process.Update[U]],
   protected val scheduler: ScheduledExecutorService)(
   eventSource: EventSource[ESID, _ >: EVT],
   idConv: ID => ESID)
 extends delta.read.impl.IncrementalReadModel[ID, ESID, EVT, Work, Stored, U](eventSource)(
-  ClassTag(eventClass), idConv, stateCodec)
+  ClassTag(eventClass), stateCodec, idConv)
 with SubscriptionAdapter[ID, Stored, U]

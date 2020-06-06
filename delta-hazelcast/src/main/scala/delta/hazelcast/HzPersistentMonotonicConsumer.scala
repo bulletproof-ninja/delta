@@ -10,7 +10,7 @@ import scala.reflect.ClassTag
 import com.hazelcast.core.IMap
 
 import delta.Projector
-import delta.process.EventSourceConsumer
+import delta.process._
 import scuff.concurrent.PartitionedExecutionContext
 
 /**
@@ -18,13 +18,16 @@ import scuff.concurrent.PartitionedExecutionContext
  * @tparam EVT The event type
  * @tparam S The state type
  */
-abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag]
+abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag](
+  implicit
+  ec: ExecutionContext,
+  scheduler: ScheduledExecutorService)
 extends EventSourceConsumer[ID, EVT] {
 
-  protected type ReplayResult = Any
+  protected type LiveResult = EntryUpdateResult
 
   protected def imap: IMap[ID, _ <: EntryState[S, EVT]]
-  protected def tickWatermark: Option[Long]
+  protected def tickWatermark: Option[Tick]
 
   /**
    * If revisions are detected missing during live
@@ -34,14 +37,12 @@ extends EventSourceConsumer[ID, EVT] {
    * prevent unnecessary replay.
    */
   protected def missingRevisionsReplayDelay: FiniteDuration
-  protected def missingRevisionsReplayScheduler: ScheduledExecutorService
 
   /**
    * How long to wait for replay processing to finish,
    * once all transactions have been replayed.
    */
   protected def finalizeReplayProcessingTimeout: FiniteDuration
-  protected def persistenceContext: ExecutionContext
 
   protected def projector(tx: Transaction): Projector[S, EVT]
   protected def reportFailure(th: Throwable): Unit
@@ -75,7 +76,7 @@ extends EventSourceConsumer[ID, EVT] {
     * where persistence can be delayed until done,
     * making large data sets much faster to process.
     *
-    * NOTE: Tick order is arbitrary, thus no guarantee
+    * @note Tick order is arbitrary, thus no guarantee
     * of causal tick processing, between different streams,
     * although, as mentioned, individual streams will be
     * processed in causal (monotonic revision) order.
@@ -83,25 +84,25 @@ extends EventSourceConsumer[ID, EVT] {
     * not be called.
     *
     * It is highly recommended to return an instance of
-    * [[delta.util.MonotonicReplayProcessor]] here.
+    * [[delta.process.MonotonicReplayProcessor]] here.
     */
   protected def replayProcessor(es: EventSource) = {
     val projector = Projector(this.projector) _
+
     new HzMonotonicReplayProcessor[ID, EVT, S, Unit](
         tickWatermark,
         imap,
         finalizeReplayProcessingTimeout,
-        persistenceContext,
         newPartitionedExecutionContext,
         newReplayMap) {
       def process(tx: Transaction, currState: Option[S]) = projector(tx, currState)
     }
+
   }
 
-  protected def liveProcessor(es: EventSource, replayResult: Option[ReplayResult]): Transaction => Any = {
+  protected def liveProcessor(es: EventSource): LiveProcessor =
     new HzMonotonicProcessor[ID, EVT, S](
       es, imap, projector, reportFailure,
-      missingRevisionsReplayScheduler, missingRevisionsReplayDelay)
-  }
+      missingRevisionsReplayDelay)
 
 }

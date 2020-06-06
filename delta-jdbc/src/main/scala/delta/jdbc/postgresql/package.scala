@@ -10,6 +10,8 @@ package postgresql {
 }
 
 package object postgresql {
-  def WithTimestamp(): WithTimestamp = new WithTimestamp(sqlType = "TIMESTAMPTZ")
-  def WithTimestamp(colName: String): WithTimestamp = new WithTimestamp(colName = colName, sqlType = "TIMESTAMPTZ")
+  def TimestampColumn(): TimestampColumn =
+    new TimestampColumn(sqlType = "TIMESTAMPTZ")
+  def TimestampColumn(columnName: String): TimestampColumn =
+    new TimestampColumn(columnName = columnName, sqlType = "TIMESTAMPTZ")
 }

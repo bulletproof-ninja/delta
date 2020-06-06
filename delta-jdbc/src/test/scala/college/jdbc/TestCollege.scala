@@ -1,18 +1,12 @@
 package college.jdbc
 
-import scuff.jdbc.ConnectionSource
-import delta.process.StreamProcessStore
-import college.TestCollege._
+import scuff.jdbc.AsyncConnectionSource
+import college.validation.EmailValidationProcessStore
 
 abstract class TestCollege extends college.TestCollege {
 
-  def connSource: ConnectionSource
-
-  override def newLookupServiceProcStore: StreamProcessStore[Int, StudentEmails, StudentEmailsUpdate]
-
-  override def lookupService(procStore: StreamProcessStore[Int, StudentEmails, StudentEmailsUpdate]) = procStore match {
-    case store: StudentEmailsStore => new JdbcLookupService(store)
-    case _ => sys.error(s"This method was called with unexpected implementation: ${procStore.getClass}")
-  }
+  def connSource: AsyncConnectionSource
+  override def newEmailValidationProcessStore(): EmailValidationProcessStore
+  override def newEventStore(): college.CollegeEventStore
 
 }

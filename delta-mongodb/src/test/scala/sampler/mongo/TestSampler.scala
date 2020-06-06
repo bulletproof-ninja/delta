@@ -2,11 +2,11 @@ package sampler.mongo
 
 import com.mongodb.MongoNamespace
 
-import delta.mongo.MongoEventStore
-import delta.testing.RandomDelayExecutionContext
-import sampler.aggr.DomainEvent
 import delta.MessageTransportPublishing
 import delta.util.LocalTransport
+import delta.testing.RandomDelayExecutionContext
+
+import sampler.aggr.DomainEvent
 
 import org.junit._, Assert._
 

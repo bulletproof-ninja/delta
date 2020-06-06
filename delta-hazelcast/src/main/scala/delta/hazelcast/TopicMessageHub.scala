@@ -1,14 +1,13 @@
 package delta.hazelcast
 
-import com.hazelcast.core.{ ITopic, Message => HzMessage, MessageListener }
+import scala.concurrent._
+import scala.util.control.NonFatal
+
+import com.hazelcast.core._
 
 import scuff.Subscription
-import concurrent.blocking
-import com.hazelcast.core.ITopic
+
 import delta.MessageTransport
-import com.hazelcast.core.HazelcastInstance
-import scala.concurrent.ExecutionContext
-import scala.util.control.NonFatal
 import delta.process.Update
 
 object TopicMessageTransport {
@@ -56,7 +55,7 @@ class TopicMessageTransport[M](
   protected def subscribeToKey(topic: Topic)(callback: (Topic, M) => Unit): Subscription = {
     val hzTopic = getITopic(topic)
     val regId = hzTopic addMessageListener new MessageListener[M] {
-      def onMessage(msg: HzMessage[M]): Unit = callback(topic, msg.getMessageObject)
+      def onMessage(msg: Message[M]): Unit = callback(topic, msg.getMessageObject)
     }
     new Subscription {
       def cancel(): Unit = try hzTopic.removeMessageListener(regId) catch {

@@ -1,34 +1,49 @@
 package delta.process
 
-import collection.Map
 import delta.SnapshotStore
-import scala.concurrent._
-import scala.concurrent.duration._
-import scuff.concurrent._
-import scala.Right
-import scuff._
+
+import collection.Map
+import concurrent._
+import concurrent.duration._
 import scala.annotation.tailrec
+
+import scuff._
+import scuff.concurrent._
 
 /**
  * A `StreamProcessStore` keeps track of how far a stream
  * has been processed, and stores any necessary state derived
  * from that stream.
- * @tparam K The key/id type
- * @tparam S The state type. NOTE: Consider using a type that
- * is optimized for reading, if this store will serve as a read
- * model, and then `adapt` it for the actual processing setup.
+ *
+ * @note For state type `S`, consider using a type that is
+ * optimized for reading (e.g. a plain JSON `String`) as this makes
+ * it easily available as a [[delta.read.ReadModel]] with mostly just
+ * pushing bytes. In such cases, the `adapt` methods can be used to
+ * accomodate the actual processing setup.
+ *
+ * @tparam SID The stream id type
+ * @tparam S The state type.
  * @tparam U The update type. For small datasets, this is often
  * just the same as `S`. But for larger datasets, it can be a
  * diff'ed format.
  */
-trait StreamProcessStore[K, S, U] extends SnapshotStore[K, S] {
+trait StreamProcessStore[SID, S, U]
+extends SnapshotStore[SID, S] {
+
+  type StreamId = SID
+  type Tick = delta.Tick
+  type Revision = delta.Revision
+
+  def name: String
+
+  override def toString() = s"${getClass.getSimpleName}($name)"
 
   type Update = delta.process.Update[U]
 
-  def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]]
-  def writeBatch(batch: Map[K, Snapshot]): Future[Unit]
-  def refresh(key: K, revision: Int, tick: Long): Future[Unit]
-  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit]
+  def readBatch(keys: Iterable[SID]): Future[Map[SID, Snapshot]]
+  def writeBatch(batch: Map[SID, Snapshot]): Future[Unit]
+  def refresh(key: SID, revision: Revision, tick: Tick): Future[Unit]
+  def refreshBatch(revisions: Map[SID, (Int, Long)]): Future[Unit]
 
   /**
    *  Tick watermark. This is a best-effort
@@ -38,7 +53,7 @@ trait StreamProcessStore[K, S, U] extends SnapshotStore[K, S] {
    *  determine where to resume any interrupted
    *  stream processing.
    */
-  def tickWatermark: Option[Long]
+  def tickWatermark: Option[Tick]
 
   /**
    * Update/Insert.
@@ -47,54 +62,59 @@ trait StreamProcessStore[K, S, U] extends SnapshotStore[K, S] {
    * @param updateContext Execution context for running the update thunk
    * @return The result of the `updateThunk` function
    */
-  def upsert[R](key: K)(
+  def upsert[R](key: SID)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
       updateContext: ExecutionContext): Future[(Option[Update], R)]
 
-  def adaptState[W](stateCodec: Codec[W, S]): StreamProcessStore[K, W, U] =
+  /** Adapt `S` state type for processing. */
+  def adaptState[W](stateCodec: Codec[W, S]): StreamProcessStore[SID, W, U] =
     adapt(Codec.noop, AsyncCodec(stateCodec), Threads.PiggyBack)
 
+  /** Adapt `S` state type for processing. */
   def adaptState[W](stateCodec: AsyncCodec[W, S], asyncContext: ExecutionContext)
-      : StreamProcessStore[K, W, U] =
+      : StreamProcessStore[SID, W, U] =
     adapt(Codec.noop, stateCodec, asyncContext)
 
-  def adaptKeys[W](keyCodec: Codec[W, K])
+  /** Adapt `SID` key/id type for processing. */
+  def adaptKeys[W](keyCodec: Codec[W, SID])
       : StreamProcessStore[W, S, U] =
     adapt(keyCodec, AsyncCodec.noop, Threads.PiggyBack)
 
-
+  /** Adapt `SID` key/id and `S` state types for processing. */
   def adapt[WK, W](
-      keyCodec: Codec[WK, K],
+      keyCodec: Codec[WK, SID],
       stateCodec: AsyncCodec[W, S],
       asyncContext: ExecutionContext): StreamProcessStore[WK, W, U] =
-    new StreamProcessStoreAdapter[WK, W, K, S, U](this, keyCodec, stateCodec, asyncContext)
+    new StreamProcessStoreAdapter[WK, W, SID, S, U](this, keyCodec, stateCodec, asyncContext)
 
 }
 
 /**
  * Trait supporting side-effecting stream processing.
- * NOTE: Side-effects are always at-least-once semantics.
+ *
+ * @note Side-effects are always at-least-once semantics,
+ * so ensure idempotent behavior if possible.
  */
-trait SideEffect[K, S <: AnyRef, U]
-extends StreamProcessStore[K, S, U] {
+trait SideEffect[SID, S <: AnyRef, U]
+extends StreamProcessStore[SID, S, U] {
 
   /** Perform side-effect, if necessary, and return final state. */
   protected def doSideEffect(state: S): Future[S]
 
   @inline
-  private def replaceContent(snapshot: Snapshot, newContent: S): Snapshot =
-    if (snapshot.content eq newContent) snapshot
-    else snapshot.copy(content = newContent)
+  private def replaceContent(snapshot: Snapshot, newState: S): Snapshot =
+    if (snapshot.state eq newState) snapshot
+    else snapshot.copy(state = newState)
 
-  final abstract override def upsert[R](key: K)(
+  final abstract override def upsert[R](key: SID)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
       updateContext: ExecutionContext): Future[(Option[Update], R)] = {
     super.upsert(key) { optSnapshot =>
       updateThunk(optSnapshot).flatMap {
         case (Some(snapshot), r) =>
-          doSideEffect(snapshot.content)
+          doSideEffect(snapshot.state)
             .map(state => Some(replaceContent(snapshot, state)) -> r)(Threads.PiggyBack)
         case t =>
           Future successful t
@@ -102,13 +122,13 @@ extends StreamProcessStore[K, S, U] {
     }
   }
 
-  final abstract override def write(key: K, snapshot: Snapshot): Future[Unit] = {
-    doSideEffect(snapshot.content).flatMap { state =>
+  final abstract override def write(key: SID, snapshot: Snapshot): Future[Unit] = {
+    doSideEffect(snapshot.state).flatMap { state =>
       super.write(key, replaceContent(snapshot, state))
     }(Threads.PiggyBack)
   }
 
-  final abstract override def writeBatch(batch: Map[K, Snapshot]): Future[Unit] = {
+  final abstract override def writeBatch(batch: Map[SID, Snapshot]): Future[Unit] = {
     val futureWrites = batch.map {
       case (key, snapshot) => write(key, snapshot)
     }
@@ -119,14 +139,14 @@ extends StreamProcessStore[K, S, U] {
 
 }
 
-sealed trait RecursiveUpsert[K, S, U] {
-  store: StreamProcessStore[K, S, U] =>
+sealed trait RecursiveUpsert[SID] {
+  store: StreamProcessStore[SID, _, _] =>
   /** Retry limit. `0` means no retry (generally not recommneded). */
   protected def upsertRetryLimit: Int = 10
   protected type ConflictingSnapshot = Snapshot
   protected type ContentUpdated = Boolean
 
-  protected def retriesExhausted(key: K, curr: Snapshot, upd: Snapshot): Nothing = {
+  protected def retriesExhausted(id: SID, curr: Snapshot, upd: Snapshot): Nothing = {
     val retryLimit = upsertRetryLimit max 0
     val retryMsg = retryLimit match {
       case 0 => "no retries attempted."
@@ -134,19 +154,19 @@ sealed trait RecursiveUpsert[K, S, U] {
       case _ => s"after $retryLimit retries."
     }
     throw new IllegalStateException(
-      s"Failed to update existing snapshot for key $key, from rev:${curr.revision}/tick:${curr.tick} to rev:${upd.revision}/tick:${upd.tick}, $retryMsg")
+      s"Failed to update existing snapshot for id $id, from rev:${curr.revision}/tick:${curr.tick} to rev:${upd.revision}/tick:${upd.tick}, $retryMsg")
   }
 }
 
-trait NonBlockingRecursiveUpsert[K, S, U]
-extends RecursiveUpsert[K, S, U] {
-  store: StreamProcessStore[K, S, U] =>
+trait NonBlockingRecursiveUpsert[SID, S, U]
+extends RecursiveUpsert[SID] {
+  store: StreamProcessStore[SID, S, U] =>
 
   /** Update and return updated snapshot, if any. */
   final protected def upsertRecursive[R](
-      key: K, existing: Option[Snapshot],
+      id: SID, existing: Option[Snapshot],
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
-      writeIfExpected: (K, Option[Snapshot], Snapshot) => Future[Either[ConflictingSnapshot, ContentUpdated]],
+      writeIfExpected: (SID, Option[Snapshot], Snapshot) => Future[Either[ConflictingSnapshot, ContentUpdated]],
       retries: Int)(
       implicit
       updateContext: ExecutionContext,
@@ -157,14 +177,14 @@ extends RecursiveUpsert[K, S, U] {
         if (result.isEmpty || result == existing) Future.successful(None -> payload)
         else {
           val newSnapshot = result.get // ! isEmpty
-          writeIfExpected(key, existing, newSnapshot) flatMap {
+          writeIfExpected(id, existing, newSnapshot) flatMap {
             case Right(contentUpdated) =>
               val update = updateCodec.asUpdate(existing, newSnapshot, contentUpdated)
               Future successful Some(update) -> payload
             case Left(conflict) =>
               if (retries > 0) {
-                upsertRecursive(key, Some(conflict), updateThunk, writeIfExpected, retries - 1)
-              } else retriesExhausted(key, conflict, newSnapshot)
+                upsertRecursive(id, Some(conflict), updateThunk, writeIfExpected, retries - 1)
+              } else retriesExhausted(id, conflict, newSnapshot)
           }
         }
     }
@@ -172,15 +192,13 @@ extends RecursiveUpsert[K, S, U] {
 
 }
 
-trait BlockingRecursiveUpsert[K, S, U]
-  extends RecursiveUpsert[K, S, U] {
-  store: StreamProcessStore[K, S, U] =>
-
-  protected def blockingCtx: ExecutionContext
+trait BlockingRecursiveUpsert[SID, S, U]
+extends RecursiveUpsert[SID] {
+  store: StreamProcessStore[SID, S, U] =>
 
   /**
    * Update and return updated snapshot, if any.
-   * NOTE: The `upsertThunk` will be run on the
+   * @note The `upsertThunk` will be run on the
    * provided execution context, but all other
    * code will stay on the thread used to call
    * this method, by blocking and awaiting
@@ -188,10 +206,10 @@ trait BlockingRecursiveUpsert[K, S, U]
    */
   @tailrec
   final protected def upsertRecursive[R](
-      key: K, existing: Option[Snapshot],
+      id: SID, existing: Option[Snapshot],
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
       updateThunkTimeout: FiniteDuration,
-      writeIfExpected: (K, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated],
+      writeIfExpected: (SID, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated],
       retries: Int)(
       implicit
       updateContext: ExecutionContext,
@@ -203,17 +221,17 @@ trait BlockingRecursiveUpsert[K, S, U]
         if (result.isEmpty || result == existing) None -> payload
         else {
           val newSnapshot = result.get // ! isEmpty
-          writeIfExpected(key, existing, newSnapshot) match {
+          writeIfExpected(id, existing, newSnapshot) match {
             case Right(contentUpdated) =>
               val update = updateCodec.asUpdate(existing, newSnapshot, contentUpdated)
               Some(update) -> payload
             case Left(conflict) =>
               if (retries > 0) {
                 upsertRecursive(
-                  key, Some(conflict),
+                  id, Some(conflict),
                   updateThunk, updateThunkTimeout,
                   writeIfExpected, retries - 1)
-              } else retriesExhausted(key, conflict, newSnapshot)
+              } else retriesExhausted(id, conflict, newSnapshot)
           }
         }
     }
@@ -227,47 +245,47 @@ trait BlockingRecursiveUpsert[K, S, U]
  * relying on non-blocking atomic `writeIfAbsent` and
  * `writeReplacement` behavior.
  */
-trait NonBlockingCASWrites[K, S, U]
-extends NonBlockingRecursiveUpsert[K, S, U] {
-  store: StreamProcessStore[K, S, U] =>
+trait NonBlockingCASWrites[SID, S, U]
+extends NonBlockingRecursiveUpsert[SID, S, U] {
+  store: StreamProcessStore[SID, S, U] =>
 
   /**
    *  Write snapshot, if absent.
    *  Otherwise return present snapshot.
    *  @return `None` if write was successful, or `Some` present snapshot
    */
-  protected def writeIfAbsent(key: K, snapshot: Snapshot): Future[Option[Snapshot]]
+  protected def writeIfAbsent(key: SID, snapshot: Snapshot): Future[Option[Snapshot]]
   /**
    *  Write replacement snapshot, if old snapshot matches.
    *  Otherwise return current snapshot.
    *  @return `None` if write was successful, or `Some` current snapshot
    */
-  protected def writeReplacement(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]]
+  protected def writeReplacement(key: SID, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]]
 
   implicit protected def updateCodec: UpdateCodec[S, U]
 
-  def upsert[R](key: K)(
+  def upsert[R](id: SID)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
       updateContext: ExecutionContext): Future[(Option[Update], R)] = {
 
       // Write snapshot, if current expectation holds.
       def writeIfExpected(
-          key: K, expected: Option[Snapshot], snapshot: Snapshot)
+          id: SID, expected: Option[Snapshot], snapshot: Snapshot)
           : Future[Either[ConflictingSnapshot, ContentUpdated]] = {
-        val contentUpdated = !expected.exists(_.contentEquals(snapshot))
+        val contentUpdated = !expected.exists(_ stateEquals snapshot)
         if (contentUpdated) {
           val potentialWriteConflict = expected match {
-            case Some(expected) => writeReplacement(key, expected, snapshot)
-            case _ => writeIfAbsent(key, snapshot)
+            case Some(expected) => writeReplacement(id, expected, snapshot)
+            case _ => writeIfAbsent(id, snapshot)
           }
           potentialWriteConflict.map(_.toLeft(right = true))
         } else {
-          refresh(key, snapshot.revision, snapshot.tick).map(_ => Right(false))
+          refresh(id, snapshot.revision, snapshot.tick).map(_ => RightFalse)
         }
       }
 
-    read(key).flatMap(upsertRecursive(key, _, updateThunk, writeIfExpected, upsertRetryLimit))
+    read(id).flatMap(upsertRecursive(id, _, updateThunk, writeIfExpected, upsertRetryLimit))
   }
 
 }
@@ -276,69 +294,70 @@ extends NonBlockingRecursiveUpsert[K, S, U] {
  * Partial implementation of upsert method,
  * expecting non-thread-safe blocking connection.
  */
-trait BlockingCASWrites[K, S, U, Conn]
-extends BlockingRecursiveUpsert[K, S, U] {
-  store: StreamProcessStore[K, S, U] =>
+trait BlockingCASWrites[SID, S, U, Conn]
+extends BlockingRecursiveUpsert[SID, S, U] {
+  store: StreamProcessStore[SID, S, U] =>
 
   /** Read existing snapshot for updating. */
-  protected def readForUpdate[R](key: K)(thunk: (Conn, Option[Snapshot]) => R): R
+  protected def readForUpdate[R](id: SID)(thunk: (Conn, Option[Snapshot]) => R): Future[R]
   /** Refresh snapshot. */
-  protected def refreshKey(conn: Conn)(key: K, revision: Int, tick: Long): Unit
+  protected def refreshKey(conn: Conn)(id: SID, revision: Revision, tick: Tick): Unit
   /**
    *  Write snapshot, if absent.
    *  Otherwise return present snapshot.
    *  @return `None` if write was successful, or `Some` present snapshot
    */
-  protected def writeIfAbsent(conn: Conn)(key: K, snapshot: Snapshot): Option[Snapshot]
+  protected def writeIfAbsent(conn: Conn)(id: SID, snapshot: Snapshot): Option[Snapshot]
   /**
    *  Write replacement snapshot, if old snapshot matches.
    *  Otherwise return current snapshot.
    *  @return `None` if write was successful, or `Some` current snapshot
    */
-  protected def writeReplacement(conn: Conn)(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot]
+  protected def writeReplacement(conn: Conn)(id: SID, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot]
 
   protected val updateThunkTimeout: FiniteDuration = 11.seconds
 
   implicit protected def updateCodec: UpdateCodec[S, U]
 
-  def upsert[R](key: K)(
+  def upsert[R](id: SID)(
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit
       updateContext: ExecutionContext): Future[(Option[Update], R)] = {
 
       // Write snapshot, if current expectation holds.
       def tryWriteSnapshot(conn: Conn)(
-          key: K, expected: Option[Snapshot], snapshot: Snapshot)
+          id: SID, expected: Option[Snapshot], snapshot: Snapshot)
           : Either[ConflictingSnapshot, ContentUpdated] = {
-        val contentUpdated = !expected.exists(_ contentEquals snapshot)
+        val contentUpdated = !expected.exists(_ stateEquals snapshot)
         if (contentUpdated) {
           val writeConflict: Option[Snapshot] = expected match {
-            case Some(expected) => writeReplacement(conn)(key, expected, snapshot)
-            case _ => writeIfAbsent(conn)(key, snapshot)
+            case Some(expected) => writeReplacement(conn)(id, expected, snapshot)
+            case _ => writeIfAbsent(conn)(id, snapshot)
           }
           writeConflict.toLeft(right = contentUpdated)
         } else {
-          refreshKey(conn)(key, snapshot.revision, snapshot.tick)
-          Right(false)
+          refreshKey(conn)(id, snapshot.revision, snapshot.tick)
+          RightFalse
         }
       }
 
-    Future {
-      readForUpdate(key) {
-        case (conn, existing) =>
-          upsertRecursive(key, existing, updateThunk, updateThunkTimeout, tryWriteSnapshot(conn), upsertRetryLimit)
-      }
-    }(blockingCtx) // <- MUST run on the blocking context, otherwise will dead-lock
+    readForUpdate(id) {
+      case (conn, existing) =>
+        upsertRecursive(id, existing, updateThunk, updateThunkTimeout, tryWriteSnapshot(conn), upsertRetryLimit)
+    }
+
   }
 
 }
 
-class StreamProcessStoreAdapter[WKey, Work, SKey, Stored, U](
+private class StreamProcessStoreAdapter[WKey, Work, SKey, Stored, U](
   underlying: StreamProcessStore[SKey, Stored, U],
   keyAdapter: scuff.Codec[WKey, SKey],
   valueAdapter: AsyncCodec[Work, Stored],
   asyncContext: ExecutionContext)
 extends StreamProcessStore[WKey, Work, U] {
+
+  def name: String = underlying.name
 
   import scuff.concurrent.Threads.PiggyBack
 
@@ -346,8 +365,8 @@ extends StreamProcessStore[WKey, Work, U] {
   private final def w2s(w: WKey): SKey = keyAdapter encode w
   @inline
   private final def w2s(w: Snapshot): Future[delta.Snapshot[Stored]] = {
-    valueAdapter.encode(w.content)(asyncContext).map { s =>
-      w.copy(content = s)
+    valueAdapter.encode(w.state)(asyncContext).map { s =>
+      w.copy(state = s)
     }(PiggyBack)
   }
   @inline
@@ -371,7 +390,7 @@ extends StreamProcessStore[WKey, Work, U] {
       }
     }(PiggyBack)
 
-  def refresh(key: WKey, revision: Int, tick: Long): Future[Unit] =
+  def refresh(key: WKey, revision: Revision, tick: Tick): Future[Unit] =
     underlying.refresh(this w2s key, revision, tick)
 
   def refreshBatch(revisions: Map[WKey, (Int, Long)]): Future[Unit] =
@@ -392,7 +411,7 @@ extends StreamProcessStore[WKey, Work, U] {
       }
   }
 
-  def tickWatermark: Option[Long] = underlying.tickWatermark
+  def tickWatermark: Option[Tick] = underlying.tickWatermark
 
   def upsert[R](key: WKey)(updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)])(
       implicit

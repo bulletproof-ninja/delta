@@ -7,8 +7,9 @@ import scala.util.control.NonFatal
 import com.hazelcast.core.IMap
 import com.hazelcast.logging.ILogger
 
-import delta.SnapshotStore
+import delta._
 import delta.process._
+
 import scuff.concurrent.Threads
 
 /**
@@ -77,10 +78,10 @@ abstract class IMapStreamProcessStore[K, V, U](
     }
     Future.sequence(futures).map(_ => ())
   }
-  def refresh(key: K, revision: Int, tick: Long): Future[Unit] =
+  def refresh(key: K, revision: Revision, tick: Tick): Future[Unit] =
     write(key, Left(revision -> tick))
 
-  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] = {
+  def refreshBatch(revisions: Map[K, (Revision, Tick)]): Future[Unit] = {
     implicit def ec = Threads.PiggyBack
     val futures = revisions.iterator.map {
       case (key, update) => write(key, Left(update))
@@ -145,7 +146,7 @@ object IMapStreamProcessStore {
     }
 
   final case class WriteReplacement[K, V](
-      expectedRev: Int, expectedTick: Long, newSnapshot: Snapshot[V])
+      expectedRev: Revision, expectedTick: Tick, newSnapshot: Snapshot[V])
     extends Updater[K, V] {
 
     def process(entry: Entry[K, Snapshot[V]]): Object =

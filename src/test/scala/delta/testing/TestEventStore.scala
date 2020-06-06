@@ -18,7 +18,7 @@ case class User(name: String, age: Int)
 
 class TestEventStore {
 
-  final val Channel = Transaction.Channel("USER")
+  final val channel = Channel("USER")
 
   object EvtFmt
       extends EventFormat[Event, Array[Byte]] {
@@ -38,7 +38,7 @@ class TestEventStore {
       def toTopic(ch: Channel) = Topic(s"transactions/$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
       val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
-      val txChannels = Set(Channel)
+      val txChannels = Set(channel)
       val txCodec = Codec.noop[Transaction]
   }
 
@@ -46,7 +46,7 @@ class TestEventStore {
   def serialization(): Unit = {
     val id12 = Symbol("id12")
     val wallClock = System.currentTimeMillis
-    val tx = new es.Transaction(99, Channel, id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
+    val tx = new es.Transaction(99, channel, id12, 42, Map("wallClock" -> wallClock.toString), List(Event.AgeChanged(100), Event.NameChanged("Hansi")))
     val out = new ByteOutputStream
     val objOut = new ObjectOutputStream(out)
     objOut.writeObject(tx)

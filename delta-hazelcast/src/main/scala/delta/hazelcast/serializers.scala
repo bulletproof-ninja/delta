@@ -40,14 +40,14 @@ trait SnapshotSerializer
 extends StreamSerializer[Snapshot[Any]] {
 
   def write(out: ObjectDataOutput, s: Snapshot[Any]): Unit = {
-    out writeObject s.content
+    out writeObject s.state
     out writeInt s.revision
     out writeLong s.tick
   }
 
   def read(inp: ObjectDataInput) = {
     new delta.Snapshot(
-      content = inp.readObject[Any],
+      state = inp.readObject[Any],
       revision = inp.readInt,
       tick = inp.readLong)
   }
@@ -186,7 +186,7 @@ extends StreamSerializer[delta.process.ConcurrentMapStore.State[Any]] {
   type State = delta.process.ConcurrentMapStore.State[Any]
   def write(out: ObjectDataOutput, value: State): Unit = {
     out writeBoolean value.modified
-    out writeObject value.snapshot.content
+    out writeObject value.snapshot.state
     out writeInt value.snapshot.revision
     out writeLong value.snapshot.tick
   }

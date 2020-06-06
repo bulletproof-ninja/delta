@@ -4,14 +4,13 @@ import java.sql.{ Connection, SQLException }
 
 import scala.collection.compat._
 import scala.collection.immutable.HashMap
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.Future
 import scala.util.Try
 
-import delta.Snapshot
+import delta._
 import delta.process._
 
-import scuff._
-import scuff.jdbc.ConnectionSource
+import scuff.jdbc.AsyncConnectionSource
 
 
 /**
@@ -19,29 +18,21 @@ import scuff.jdbc.ConnectionSource
  * to ensure a complete audit trail.
  */
 class JdbcStreamProcessHistory[ID: ColumnType, S: ColumnType, U](
-    jdbcCtx: ExecutionContext,
-    protected val cs: ConnectionSource,
-    version: Short, withTimestamp: WithTimestamp,
-    table: String, schema: Option[String] = None)(
+    protected val cs: AsyncConnectionSource,
+    version: Short, withTimestamp: TimestampColumn,
+    pkColName: String, table: String,
+    schema: Option[String] = None)(
     implicit
     protected val updateCodec: UpdateCodec[S, U])
-  extends AbstractStore(Some(version), table, schema)(jdbcCtx)
-  with StreamProcessStore[ID, S, U] with BlockingCASWrites[ID, S, U, Connection] {
-
-  def this(
-      updateCodec: UpdateCodec[S, U],
-      jdbcCtx: ExecutionContext,
-      cs: ConnectionSource,
-      version: Short, withTimestamp: WithTimestamp,
-      table: String, schema: String)(
-      implicit
-      updCodec: UpdateCodec[S, U]) =
-    this(jdbcCtx, cs, version, withTimestamp, table, schema.optional)
+  extends AbstractStore(Some(version), table, schema)
+  with StreamProcessStore[ID, S, U]
+  with BlockingCASWrites[ID, S, U, Connection] {
 
   private def insertTransaction(withData: Boolean): String = s"""
 INSERT INTO $tableRef
-(version, $idColName, tick, revision, ${withTimestamp.colName}, data)
+(version, $pkColName, tick, revision, ${withTimestamp.columnName}, data)
 VALUES($version, ?, ?, ?, ${withTimestamp.sqlFunction}, ${if (withData) "?" else "NULL"})"""
+
   protected val insertTransactionSQL = insertTransaction(withData = false)
   protected val insertSnapshotSQL = insertTransaction(withData = true)
 
@@ -49,7 +40,7 @@ VALUES($version, ?, ?, ?, ${withTimestamp.sqlFunction}, ${if (withData) "?" else
 UPDATE $tableRef
 SET tick = ?, revision = ?
 WHERE version = $version
-AND $idColName = ?
+AND $pkColName = ?
 AND tick <= ?
 AND revision <= ?
 AND data is NULL
@@ -57,25 +48,23 @@ AND data is NULL
 
   protected val updateSnapshotSQL: String = s"""
 UPDATE $tableRef
-SET ${withTimestamp.colName} = ${withTimestamp.sqlFunction}, data = ?, revision = ?
+SET ${withTimestamp.columnName} = ${withTimestamp.sqlFunction}, data = ?, revision = ?
 WHERE version = $version
-AND $idColName = ?
+AND $pkColName = ?
 AND tick = ?
 AND revision = ?
 """
 
-  protected def idColName: String = "id"
-
   protected def createTableDDL = s"""
 CREATE TABLE IF NOT EXISTS $tableRef (
   version SMALLINT NOT NULL,
-  $idColName ${implicitly[ColumnType[ID]].typeName} NOT NULL,
+  $pkColName ${implicitly[ColumnType[ID]].typeName} NOT NULL,
   tick BIGINT NOT NULL,
   revision INT NOT NULL,
-  ${withTimestamp.colName} ${withTimestamp.sqlType} NOT NULL,
+  ${withTimestamp.columnName} ${withTimestamp.sqlType} NOT NULL,
   data ${implicitly[ColumnType[S]].typeName} NULL,
 
-  PRIMARY KEY (version, $idColName, tick)
+  PRIMARY KEY (version, $pkColName, tick)
 )"""
 
   protected val selectSnapshotSQL = s"""
@@ -83,26 +72,26 @@ SELECT t.revision, t.tick, s.data
 FROM $tableRef t
 JOIN $tableRef s
 ON t.version = s.version
-AND t.$idColName = s.$idColName
+AND t.$pkColName = s.$pkColName
 AND s.tick = (
   SELECT MAX(tick) FROM $tableRef ms
   WHERE ms.version = t.version
-    AND ms.$idColName = s.$idColName
+    AND ms.$pkColName = s.$pkColName
     AND ms.data IS NOT NULL)
 WHERE t.version = $version
-AND t.$idColName = ?
+AND t.$pkColName = ?
 AND t.tick = (
   SELECT MAX(tick)
   FROM $tableRef mt
   WHERE mt.version = t.version
-    AND mt.$idColName = t.$idColName)
+    AND mt.$pkColName = t.$pkColName)
 """
 
   protected def createTable(conn: Connection): Unit = createTable(conn, createTableDDL)
   protected def createTickIndex(conn: Connection): Unit = createIndex(conn, createTickIndexDDL)
 
-  protected def readForUpdate[R](key: ID)(thunk: (Connection, Option[Snapshot]) => R): R = {
-    cs.forUpdate { conn =>
+  protected def readForUpdate[R](key: ID)(thunk: (Connection, Option[Snapshot]) => R): Future[R] = {
+    cs.asyncUpdate { conn =>
       val existing = getOne(conn, key)
       thunk(conn, existing)
     }
@@ -118,9 +107,8 @@ AND t.tick = (
     }
 
   private def getOne(conn: Connection, key: ID): Option[Snapshot] = getAll(conn, key :: Nil) get key
-  private def getAll(conn: Connection, keys: Iterable[ID]): Map[ID, Snapshot] = {
-    val ps = conn prepareStatement selectSnapshotSQL
-    try {
+  private def getAll(conn: Connection, keys: Iterable[ID]): Map[ID, Snapshot] =
+    conn.prepare(selectSnapshotSQL) { ps =>
       keys.foldLeft(HashMap.empty[ID, Snapshot]) {
         case (map, key) =>
           ps.setValue(1, key)
@@ -135,8 +123,7 @@ AND t.tick = (
             } else map
           } finally Try(rs.close)
       }
-    } finally Try(ps.close)
-  }
+    }
 
   def write(key: ID, snapshot: Snapshot): Future[Unit] = futureUpdate { conn =>
     val existing = conditionalWrite(conn, key) {
@@ -156,7 +143,7 @@ AND t.tick = (
     }
   }
   def writeBatch(snapshots: collection.Map[ID, Snapshot]): Future[Unit] =
-    if (snapshots.isEmpty) Future successful (())
+    if (snapshots.isEmpty) Future.unit
     else futureUpdate { conn =>
       // Optimistically insert, since writing large batches is mostly done when processing streams from scratch
       // NOTE: Some JDBC drivers may fail on the entire batch, if a single row fails
@@ -178,8 +165,7 @@ AND t.tick = (
   protected def insertRevisions(conn: Connection, revisions: collection.Map[ID, (Int, Long)]): Iterable[ID] =
     if (revisions.isEmpty) Nil else {
       val isBatch = revisions.tail.nonEmpty
-      val ps = conn.prepareStatement(insertTransactionSQL)
-      try {
+      conn.prepare(insertTransactionSQL) { ps =>
         val keys = revisions.toSeq.map {
           case (key, (revision, tick)) =>
             ps.setValue(1, key)
@@ -188,18 +174,19 @@ AND t.tick = (
             if (isBatch) ps.addBatch()
             key
         }
-        if (isBatch) executeBatch(ps, keys)
-        else if (ps.executeUpdate() == 1) Nil
-        else keys
-      } catch {
-        case sqlEx: SQLException if isDuplicateKeyViolation(sqlEx) =>
-          revisions.keys
-      } finally Try(ps.close)
+        try {
+          if (isBatch) executeBatch(ps, keys)
+          else if (ps.executeUpdate() == 1) Nil
+          else keys
+        } catch {
+          case sqlEx: SQLException if isDuplicateKeyViolation(sqlEx) =>
+            revisions.keys
+        }
+      }
     }
 
-  protected def updateTransaction(conn: Connection, key: ID, rev: Int, tick: Long): Boolean = {
-    val ps = conn.prepareStatement(updateTransactionRevTickSQL)
-    try {
+  protected def updateTransaction(conn: Connection, key: ID, rev: Revision, tick: Tick): Boolean =
+    conn.prepare(updateTransactionRevTickSQL) { ps =>
       // SET
       ps.setLong(1, tick)
       ps.setInt(2, rev)
@@ -208,31 +195,30 @@ AND t.tick = (
       ps.setLong(4, tick)
       ps.setInt(5, rev)
       ps.executeUpdate() == 1
-    } finally Try(ps.close)
-  }
+    }
 
   /** Insert snapshots, return any failed keys. */
   protected def insertSnapshots(conn: Connection, snapshots: collection.Map[ID, Snapshot]): Iterable[ID] =
-    if (snapshots.isEmpty) Nil else {
+    if (snapshots.isEmpty) Nil
+    else conn.prepare(insertSnapshotSQL) { ps =>
       val isBatch = snapshots.tail.nonEmpty
-      val ps = conn.prepareStatement(insertSnapshotSQL)
+      val keys = snapshots.toSeq.map {
+        case (key, Snapshot(data, revision, tick)) =>
+          ps.setValue(1, key)
+          ps.setLong(2, tick)
+          ps.setInt(3, revision)
+          ps.setValue(4, data)
+          if (isBatch) ps.addBatch()
+          key
+      }
       try {
-        val keys = snapshots.toSeq.map {
-          case (key, Snapshot(data, revision, tick)) =>
-            ps.setValue(1, key)
-            ps.setLong(2, tick)
-            ps.setInt(3, revision)
-            ps.setValue(4, data)
-            if (isBatch) ps.addBatch()
-            key
-        }
         if (isBatch) executeBatch(ps, keys)
         else if (ps.executeUpdate() == 1) Nil
         else keys
       } catch {
         case sqlEx: SQLException if isDuplicateKeyViolation(sqlEx) =>
           snapshots.keys
-      } finally Try(ps.close)
+      }
     }
 
   /**
@@ -241,21 +227,19 @@ AND t.tick = (
    * Basically only when there's a tick collision,
    * which is only possible on join data.
    */
-  protected def updateSnapshot(conn: Connection, key: ID, snapshot: Snapshot): Boolean = {
-    val ps = conn.prepareStatement(updateSnapshotSQL)
-    try {
+  protected def updateSnapshot(conn: Connection, key: ID, snapshot: Snapshot): Boolean =
+    conn.prepare(updateSnapshotSQL) { ps =>
       // SET
-      ps.setValue(1, snapshot.content)
+      ps.setValue(1, snapshot.state)
       ps.setInt(2, snapshot.revision)
       // WHERE
       ps.setValue(3, key)
       ps.setLong(4, snapshot.tick)
       ps.setInt(5, snapshot.revision)
       ps.executeUpdate() == 1
-    } finally Try(ps.close)
-  }
+    }
 
-  protected def refreshKey(conn: Connection)(key: ID, revision: Int, tick: Long): Unit =
+  protected def refreshKey(conn: Connection)(key: ID, revision: Revision, tick: Tick): Unit =
     refreshAll(conn, Map(key -> (revision -> tick)))
 
   private def refreshAll(conn: Connection, revisions: collection.Map[ID, (Int, Long)]): Unit = {
@@ -268,11 +252,11 @@ AND t.tick = (
     // No data is lost, so no point throwing exception
   }
 
-  def refresh(key: ID, revision: Int, tick: Long): Future[Unit] =
+  def refresh(key: ID, revision: Revision, tick: Tick): Future[Unit] =
     refreshBatch(Map(key -> (revision -> tick)))
 
   def refreshBatch(revisions: collection.Map[ID, (Int, Long)]): Future[Unit] =
-    if (revisions.isEmpty) Future successful (())
+    if (revisions.isEmpty) Future.unit
     else futureUpdate(refreshAll(_, revisions))
 
   private def conditionalWrite(conn: Connection, key: ID)(write: Option[Snapshot] => Boolean): Option[Snapshot] = {

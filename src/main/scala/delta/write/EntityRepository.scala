@@ -3,16 +3,15 @@ package delta.write
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 
-import delta.EventStore
-import delta.SnapshotStore
+import delta._
 
 /**
   * [[delta.write.Entity]]-based [[delta.write.Repository]] implementation.
-  * @tparam ESID Event store id type
+  * @tparam SID Stream id type
   * @tparam EVT Repository event type
-  * @tparam S Repository state type
-  * @tparam ID Repository (Entity) id type. Must be the same as, or translatable to, the event store id type
-  * @tparam ET The entity type
+  * @tparam S Internal repository state type. Must be an immutable type
+  * @tparam ID Entity id type. Must be the same as, or translatable to, the event store id type
+  * @tparam E The entity type
   * @param entity Entity type class
   * @param exeCtx ExecutionContext for basic Future transformations
   * @param eventStore The event store implementation
@@ -22,57 +21,65 @@ import delta.SnapshotStore
   * be assumed to be current? I.e. are the snapshots available to all
   * running processes, or isolated to this process, and if the latter,
   * is this process exclusively snapshotting the available ids?
-  * NOTE: This is a performance switch. Regardless of setting, it will
+  * @note This is a performance switch. Regardless of setting, it will
   * not affect correctness.
   */
-class EntityRepository[ESID, EVT, S >: Null, ID, ET](
-    entity: Entity[S, EVT] { type Id = ID; type Type = ET },
-    exeCtx: ExecutionContext)(
-    eventStore: EventStore[ESID, _ >: EVT],
-    snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
-    assumeCurrentSnapshots: Boolean = false)(
-    implicit idConv: ID => ESID)
-  extends Repository[ID, ET] with MutableEntity {
+class EntityRepository[SID, EVT, S >: Null, ID, E](
+  entity: Entity[S, EVT] { type Id = ID; type Type = E })(
+  eventStore: EventStore[SID, _ >: EVT],
+  snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
+  assumeCurrentSnapshots: Boolean = false)(
+  implicit
+  ec: ExecutionContext,
+  idConv: ID => SID)
+extends Repository[ID, E]
+with MutableEntity {
+
+  import EventStoreRepository._
 
   private[this] val repo =
     new EventStoreRepository(
-        entity.channel, entity.newState, exeCtx, snapshots, assumeCurrentSnapshots)(eventStore)
+        entity.channel, entity.newState, snapshots, assumeCurrentSnapshots)(eventStore)
 
-  @inline implicit private def ec = exeCtx
+  protected def revision(loaded: Loaded) = loaded._2
 
-  def exists(id: ID): Future[Option[Int]] = repo.exists(id)
+  def exists(id: ID): Future[Option[Revision]] = repo.exists(id)
 
-  def load(id: ID): Future[(ET, Int)] = {
+  def load(id: ID): Future[(E, Revision)] = {
     repo.load(id).map {
-      case ((state, _), revision) =>
+      case Loaded(state, revision, _, _) =>
         entity.initEntity(state, Nil) -> revision
-    }(exeCtx)
+    }
   }
 
   protected def update[R](
-      expectedRevision: Option[Int], id: ID,
-      updateThunk: (ET, Int) => Future[R])(
+      updateThunk: Loaded => Future[UT[R]],
+      id: ID, causalTick: Tick, expectedRevision: Option[Revision])(
       implicit
-      metadata: Metadata): Future[(R, Int)] = {
+      metadata: Metadata): Future[UM[R]] = {
+
     @volatile var returnValue = null.asInstanceOf[R]
-    val futureRev = repo.update(id, expectedRevision) {
-      case ((state, mergeEvents), revision) =>
-        val instance = entity.initEntity(state, mergeEvents)
-        updateThunk(instance, revision).map { ret =>
-          returnValue = ret
-          val state = entity.validatedState(instance)
-          state.curr -> state.appliedEvents
-        }
+    val revision = repo.update(id, expectedRevision, causalTick) {
+      case Loaded(state, revision, _, concurrentUpdates) =>
+        val instance = entity.initEntity(state, concurrentUpdates)
+        updateThunk(instance -> revision)
+          .map { ret =>
+            returnValue = ret
+            val state = entity.validatedState(instance)
+            Save(state.get, state.appliedEvents)
+          }
     }
-    futureRev.map(returnValue -> _)
+
+    revision.map(returnValue -> _)
+
   }
 
-  def insert(newId: => ID, instance: ET)(
+  def insert(newId: => ID, instance: E, causalTick: Tick)(
       implicit
       metadata: Metadata): Future[ID] = {
     try {
       val state = entity.validatedState(instance)
-      repo.insert(newId, state.curr -> state.appliedEvents)
+      repo.insert(newId, Save(state.get, state.appliedEvents), causalTick)
     } catch {
       case NonFatal(e) => Future failed e
     }

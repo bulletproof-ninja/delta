@@ -1,12 +1,14 @@
 package delta.testing
 
 import org.junit._, Assert._
+
 import scuff.Codec
-import delta.Transaction, Transaction.Channel
+
+import delta._
+import delta.util.json._
+
 import java.util.UUID
 import java.time.LocalDateTime
-import delta.util.json._
-import delta.EventFormat
 
 class TestJson {
   type JSON = String
@@ -54,7 +56,7 @@ class TestJson {
     val uuid = UUID.randomUUID()
     val txCodec = new JsonTransaction(JsonUUID, eventCodec)
     val codec = JsonTuple2(JsonUUID, txCodec)
-    val tx = Transaction.apply(23424, Transaction.Channel("Hello"), uuid, 45, Map.empty, 4 :: 3 :: 2 :: 1 :: Nil)
+    val tx = Transaction.apply(23424, Channel("Hello"), uuid, 45, Map.empty, 4 :: 3 :: 2 :: 1 :: Nil)
     val tupleJson = codec.encode(uuid -> tx)
     println(tupleJson)
     val (uuid2, tx2) = codec decode tupleJson

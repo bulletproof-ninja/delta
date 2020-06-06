@@ -14,7 +14,7 @@ package read {
 
   /** The provided revision is unknown, i.e. hasn't occurred yet. */
   sealed trait UnknownRevisionRequested extends ReadRequestFailure {
-    def knownRevision: Int
+    def knownRevision: Revision
   }
 
   /** The provided id is unknown. */
@@ -22,7 +22,7 @@ package read {
 
   /** The provided tick is unknown for given id, i.e. hasn't occurred yet. */
   sealed trait UnknownTickRequested extends ReadRequestFailure {
-    def knownTick: Long
+    def knownTick: Tick
   }
 
   /**
@@ -32,9 +32,8 @@ package read {
    * we time out.
    */
   class Timeout private[read] (val id: Any, val timeout: FiniteDuration, msg: String)
-    extends java.util.concurrent.TimeoutException(msg) {
-    withTrait: ReadRequestFailure =>
-  }
+    extends java.util.concurrent.TimeoutException(msg)
+    with ReadRequestFailure
 
 }
 
@@ -50,10 +49,10 @@ package object read {
 
   private[read] def Timeout[ID](
       id: ID, snapshot: Option[Snapshot[_]],
-      minRevision: Int, minTick: Long, timeout: FiniteDuration): ReadRequestFailure = {
+      minRevision: Revision, minTick: Tick, timeout: FiniteDuration): ReadRequestFailure = {
     snapshot match {
       case None =>
-        val errMsg = s"Failed to find $id, within timeout of $timeout"
+        val errMsg = s"Failed to find `$id`, within timeout of $timeout"
         new Timeout(id, timeout, errMsg) with UnknownIdRequested
       case Some(snapshot) =>
         assert(minRevision != -1 || minTick != Long.MinValue)
@@ -86,30 +85,30 @@ package object read {
 
   private[delta] def verifySnapshot[ID, S](
       id: ID, optSnapshot: Option[Snapshot[S]],
-      minRevision: Int): Snapshot[S] =
+      minRevision: Revision): Snapshot[S] =
     verifySnapshot(id, verify(id, optSnapshot), minRevision, Long.MinValue)
 
   private[delta] def verifySnapshot[ID, S](
       id: ID, optSnapshot: Option[Snapshot[S]],
-      minTick: Long): Snapshot[S] =
+      minTick: Tick): Snapshot[S] =
     verifySnapshot(id, verify(id, optSnapshot), -1, minTick)
 
   private[delta] def verifySnapshot[ID, S](
       snapshotId: ID, snapshot: Snapshot[S],
-      minRev: Int, minTick: Long): snapshot.type = {
+      minRev: Revision, minTick: Tick): snapshot.type = {
     verifyRevision(snapshotId, snapshot, minRev)
     verifyTick(snapshotId, snapshot, minTick)
   }
   private[delta] def verifySnapshot[ID, S](
       snapshotId: ID, optSnapshot: Option[Snapshot[S]],
-      minRev: Int, minTick: Long): Snapshot[S] = {
+      minRev: Revision, minTick: Tick): Snapshot[S] = {
     val snapshot = verify(snapshotId, optSnapshot)
     verifyRevision(snapshotId, snapshot, minRev)
     verifyTick(snapshotId, snapshot, minTick)
   }
 
   private[delta] def verifyRevision[ID, S](
-      snapshotId: ID, snapshot: Snapshot[S], revision: Int): snapshot.type = {
+      snapshotId: ID, snapshot: Snapshot[S], revision: Revision): snapshot.type = {
     if (snapshot.revision < revision)
       throw new IllegalArgumentException(
         s"Unknown revision: $revision") with UnknownRevisionRequested {
@@ -119,7 +118,7 @@ package object read {
   }
 
   private[delta] def verifyTick[ID, S](
-      snapshotId: ID, snapshot: Snapshot[S], tick: Long): snapshot.type = {
+      snapshotId: ID, snapshot: Snapshot[S], tick: Tick): snapshot.type = {
     if (snapshot.tick < tick)
       throw new IllegalArgumentException(
         s"Unknown tick: $tick") with UnknownTickRequested {
@@ -130,7 +129,7 @@ package object read {
 
   private[delta] def verify[ID, S](
       snapshotId: ID, snapshot: Option[Snapshot[S]],
-      minRev: Int, minTick: Long): Future[Snapshot[S]] =
+      minRev: Revision, minTick: Tick): Future[Snapshot[S]] =
     try Future successful verifySnapshot(snapshotId, snapshot, minRev, minTick) catch {
       case NonFatal(cause) => Future failed cause
     }

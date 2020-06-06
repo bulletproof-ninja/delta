@@ -4,14 +4,11 @@ import org.junit._, Assert._
 import delta.mongo._
 import delta.testing.RandomDelayExecutionContext
 import delta.testing._
-import org.bson.BsonWriter
+import org.bson._
 import org.bson.codecs._
-import org.bson.BsonReader
-import org.bson.Document
 
 object TestMongoStreamProcessStore {
   import com.mongodb.async.client._
-  import org.bson.Document
 
   implicit val TestKeyCodec = new Codec[TestKey] {
     def getEncoderClass = classOf[TestKey].asInstanceOf[Class[TestKey]]
@@ -33,7 +30,7 @@ object TestMongoStreamProcessStore {
   implicit val ec = RandomDelayExecutionContext
 
   val snapshotVersion = 1: Short
-  @volatile var coll: MongoCollection[Document] = _
+  @volatile var coll: MongoCollection[BsonDocument] = _
   @volatile private var client: MongoClient = _
 
   @BeforeClass
@@ -43,6 +40,7 @@ object TestMongoStreamProcessStore {
       client
       .getDatabase("test_snapshot_store")
       .getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_") + "_" + snapshotVersion)
+      .withDocumentClass(classOf[BsonDocument])
     withBlockingCallback[Void]()(coll.drop(_))
   }
   @AfterClass
@@ -56,11 +54,15 @@ class TestMongoStreamProcessStore extends TestStreamProcessStore {
 
   import TestMongoStreamProcessStore._
   implicit def exeCtx = ec
-  val strCdc = new scuff.Codec[String, Document] {
-    def encode(str: String) = new Document("string", str)
-    def decode(doc: Document) = doc.getString("string")
-  }
-  override def newStore = new MongoStreamProcessStore[Long, String, String](strCdc, coll)
+  implicit def snapshotCodec =
+    SnapshotCodec[String]("string") {
+      scuff.Codec(
+        new BsonString(_),
+        _.asString.getValue)
+    }
+
+  override def newStore() =
+    new MongoStreamProcessStore[Long, String, String](coll)
 
   @Test
   def mock(): Unit = {

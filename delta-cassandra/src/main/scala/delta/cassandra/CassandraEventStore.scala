@@ -14,9 +14,8 @@ import com.datastax.driver.core._
 
 import scuff.{ Memoizer, StreamConsumer }
 import scuff.concurrent._
-import delta.{ EventFormat, EventStore }
-import delta.Transaction.Channel
-import delta.Ticker
+
+import delta._
 
 private[cassandra] object CassandraEventStore {
 
@@ -52,7 +51,7 @@ private[cassandra] object CassandraEventStore {
   private val TxColumnsIdx = Columns(TxColumns.indexOf(_))
 
   private case class Columns(
-      stream_id: Int, revision: Int,
+      stream_id: Int, revision: Revision,
       tick: Int, channel: Int,
       event_names: Int, event_versions: Int, event_data: Int,
       metadata: Int)
@@ -84,16 +83,15 @@ trait TableDescriptor {
  * @param session The Cassandra session (connection pool)
  * @param td The table descriptor
  */
-class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
-    session: Session, td: TableDescriptor,
-    evtFmt: EventFormat[EVT, SF],
-    exeCtx: ExecutionContext)(
-    initTicker: CassandraEventStore[ID, EVT, SF] => Ticker)
-  extends EventStore[ID, EVT] {
+abstract class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
+  session: Session, td: TableDescriptor,
+  evtFmt: EventFormat[EVT, SF])(
+  initTicker: CassandraEventStore[ID, EVT, SF] => Ticker)(
+  implicit
+  ec: ExecutionContext)
+extends EventStore[ID, EVT] {
 
   lazy val ticker = initTicker(this)
-
-  private implicit def ec = exeCtx
 
   import CassandraEventStore._
 
@@ -135,7 +133,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     val listener = new Runnable {
       def run: Unit = promise complete Try(handler(result.get))
     }
-    result.addListener(listener, exeCtx)
+    result.addListener(listener, ec)
     promise.future
   }
 
@@ -235,7 +233,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       FROM $TableName
       WHERE tick >= ?
       ALLOW FILTERING""").setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (sinceTick: Long) => ps.bind(Long box sinceTick)
+    (sinceTick: Tick) => ps.bind(Long box sinceTick)
   }
 
   private def where(name: String, count: Int): String = {
@@ -262,6 +260,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       ps.bind(args: _*)
     }
   }
+
   private val ReplayByChannelsSince: (Set[Channel], Long) => BoundStatement = {
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
@@ -273,7 +272,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
         ALLOW FILTERING
         """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     })
-    (channels: Set[Channel], sinceTick: Long) => {
+    (channels: Set[Channel], sinceTick: Tick) => {
       val ps = getStatement(channels.size)
       val args = channels.toSeq :+ Long.box(sinceTick)
       ps.bind(args: _*)
@@ -301,7 +300,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       AND tick >= ?
       ALLOW FILTERING
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (channel: Channel, evtType: Class[_ <: EVT], sinceTick: Long) => {
+    (channel: Channel, evtType: Class[_ <: EVT], sinceTick: Tick) => {
       val evtName = evtFmt.signature(evtType).name
       ps.bind(channel, evtName, Long box sinceTick)
     }
@@ -320,9 +319,9 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   private lazy val ReplayStreamFrom: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision >= ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, fromRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
+    (id: ID, fromRev: Revision) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
   }
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit = {
     if (fromRevision == 0) {
       replayStream(stream)(callback)
     } else {
@@ -334,9 +333,9 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   private lazy val ReplayStreamTo: (ID, Int) => BoundStatement = {
     val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision <= ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, toRev: Int) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
+    (id: ID, toRev: Revision) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
   }
-  override def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit = {
+  override def replayStreamTo[R](stream: ID, toRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit = {
     val stm = ReplayStreamTo(stream, toRevision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -375,9 +374,9 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       FROM $TableName
       WHERE stream_id = ?
       AND revision = ?""").setConsistencyLevel(ConsistencyLevel.SERIAL)
-    (stream: ID, rev: Int) => ps.bind(ct[ID].writeAs(stream), Int box rev)
+    (stream: ID, rev: Revision) => ps.bind(ct[ID].writeAs(stream), Int box rev)
   }
-  private def replayStreamRevision[U](stream: ID, revision: Int)(callback: StreamConsumer[Transaction, U]): Unit = {
+  private def replayStreamRevision[U](stream: ID, revision: Revision)(callback: StreamConsumer[Transaction, U]): Unit = {
     val stm = ReplayStreamRevision(stream, revision)
     queryAsync(Some(stream), callback, stm)
   }
@@ -387,7 +386,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, channel, revision)
       VALUES(?,?,?,?,?,?,?,0) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, channel: Channel, tick: Long, events: List[EVT], metadata: Map[String, String]) => {
+    (id: ID, channel: Channel, tick: Tick, events: List[EVT], metadata: Map[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
         ct[ID].writeAs(id),
@@ -402,7 +401,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, revision)
       VALUES(?,?,?,?,?,?,?) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
-    (id: ID, revision: Int, tick: Long, events: List[EVT], metadata: Map[String, String]) => {
+    (id: ID, revision: Revision, tick: Tick, events: List[EVT], metadata: Map[String, String]) => {
       val (jTypes, jVers, jData) = toJLists(events)
       ps.bind(
         ct[ID].writeAs(id),
@@ -413,7 +412,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
     }
   }
   protected def insert(
-      channel: Channel, stream: ID, revision: Int, tick: Long,
+      channel: Channel, stream: ID, revision: Revision, tick: Tick,
       events: List[EVT], metadata: Map[String, String])(
       handler: ResultSet => Transaction): Future[Transaction] = {
     if (revision == 0) {
@@ -428,7 +427,7 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
   }
 
   def commit(
-      channel: Channel, stream: ID, revision: Int, tick: Long,
+      channel: Channel, stream: ID, revision: Revision, tick: Tick,
       events: List[EVT], metadata: Map[String, String]): Future[Transaction] = {
     insert(channel, stream, revision, tick, events, metadata) { rs =>
       if (rs.wasApplied) {
@@ -447,25 +446,25 @@ class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
         processMultiple(callback.onNext, stms).onComplete {
           case Success(_) => callback.onDone()
           case Failure(NonFatal(th)) => callback.onError(th)
-        }(exeCtx)
+        }
       case Left((id, stm)) =>
         queryAsync(Some(id), callback, stm)
     }
   }
 
-  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
+  def querySince[U](sinceTick: Tick, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
     resolve(selector, Some(sinceTick)) match {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {
           case Success(_) => callback.onDone()
           case Failure(NonFatal(th)) => callback.onError(th)
-        }(exeCtx)
+        }
       case Left((id, stm)) =>
         queryAsync(Some(id), callback, stm)
     }
   }
 
-  private def resolve(selector: Selector, sinceTick: Option[Long]): Either[(ID, BoundStatement), Seq[BoundStatement]] = {
+  private def resolve(selector: Selector, sinceTick: Option[Tick]): Either[(ID, BoundStatement), Seq[BoundStatement]] = {
 
     selector match {
       case Everything => Right {

@@ -6,10 +6,11 @@ import scala.collection.immutable.TreeMap
 import java.util.concurrent.TimeoutException
 
 import scala.concurrent._, duration.FiniteDuration
-import delta._
+import delta.{ Snapshot, Transaction, Revision }
 import scala.annotation.tailrec
-import scala.util.Try
 import scuff.concurrent._
+import scala.util.control.NonFatal
+import java.{util => ju}
 
 private object MonotonicProcessor {
 
@@ -26,8 +27,8 @@ private object MonotonicProcessor {
  * @tparam S State type
  */
 trait MonotonicProcessor[ID, EVT, S >: Null, U]
-  extends TransactionProcessor[ID, EVT, S]
-  with (Transaction[ID, _ >: EVT] => Future[Unit]) {
+extends (Transaction[ID, _ >: EVT] => Future[S])
+with TransactionProcessor[ID, EVT, S] {
 
   type Snapshot = delta.Snapshot[S]
   type Update = delta.process.Update[U]
@@ -36,7 +37,6 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
   protected def processContext(id: ID): ExecutionContext
 
   import MonotonicProcessor.UnappliedOps
-  private type Revision = Int
   private[this] val Empty = TreeMap.empty[Revision, Transaction]
   private type Unapplied = TreeMap[Revision, Transaction]
 
@@ -44,20 +44,20 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
     def revision: Revision
     def isActive: Boolean
     def unapplied: Unapplied
-    def promise: Promise[Unit]
+    def promise: Promise[S]
   }
   /** Currently being processed. */
-  private final class Active(val unapplied: Unapplied, val promise: Promise[Unit], val revision: Revision = -1)
+  private final class Active(val unapplied: Unapplied, val promise: Promise[S], val revision: Revision = -1)
     extends StreamStatus { def isActive = true }
   /** Not currently being processed. */
-  private final class Inactive(val unapplied: Unapplied, val promise: Promise[Unit], val revision: Revision = -1)
+  private final class Inactive(val unapplied: Unapplied, val promise: Promise[S], val revision: Revision = -1)
     extends StreamStatus { def isActive = false }
 
   /** Set active. A non-empty map indicates success. */
-  private def setActive(tx: Transaction): (Unapplied, Future[Unit]) = {
+  private def setActive(tx: Transaction): (Unapplied, Future[S]) = {
     streamStatus.get(tx.stream) match {
       case None =>
-        val promise = Promise[Unit]
+        val promise = Promise[S]
         val active = new Active(Empty, promise)
         if (streamStatus.putIfAbsent(tx.stream, active).isEmpty) {
           Empty.add(tx) -> promise.future
@@ -94,25 +94,28 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
 
   /** Set inactive. An empty list indicates success. */
   @tailrec
-  private def setInactive(stream: ID, stillUnapplied: Unapplied, currRevision: Int): (Unapplied, Future[Unit]) = {
+  private def setInactive(
+      stream: ID, procState: ProcessingState, currRevision: Revision): (Unapplied, Future[S]) = {
     streamStatus(stream) match {
       case active: Active =>
         val promise = active.promise
         if (active.unapplied.isEmpty) {
-          if (stillUnapplied.isEmpty) {
-            if (streamStatus.remove(stream, active)) {
-              promise.success(())
-              Empty -> promise.future
-            } else setInactive(stream, stillUnapplied, currRevision)
-          } else { // Still has unapplied
-            if (streamStatus.replace(stream, active, new Inactive(stillUnapplied, promise, currRevision))) {
-              Empty -> promise.future
-            } else setInactive(stream, stillUnapplied, currRevision)
+          procState match {
+            case Finished(snapshot) =>
+              if (streamStatus.remove(stream, active)) {
+                promise success snapshot.state
+                Empty -> promise.future
+              } else setInactive(stream, procState, currRevision)
+            case _ => // Still has unapplied
+              if (streamStatus.replace(stream, active, new Inactive(procState.unapplied, promise, currRevision))) {
+                Empty -> promise.future
+              } else setInactive(stream, procState, currRevision)
+
           }
         } else {
           if (streamStatus.replace(stream, active, new Active(Empty, promise, currRevision))) {
-            active.unapplied ++ stillUnapplied -> promise.future
-          } else setInactive(stream, stillUnapplied, currRevision)
+            active.unapplied ++ procState.unapplied -> promise.future
+          } else setInactive(stream, procState, currRevision)
         }
       case _ => ???
     }
@@ -122,7 +125,7 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
 
   private[process] case class IncompleteStream(
       id: ID, stillActive: Boolean, expectedRevision: Revision, unappliedRevisions: Option[Range],
-      status: Future[Unit])
+      status: Future[S])
   protected def incompleteStreams: Iterable[IncompleteStream] = streamStatus.map {
     case (id, status) =>
       val unappliedRevisions = for {
@@ -137,28 +140,74 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
   protected def onUpdate(id: ID, update: Update): Unit
   protected def onMissingRevisions(id: ID, missing: Range): Unit
 
+  private sealed abstract class ProcessingState {
+    def unapplied: Unapplied
+    def optSnapshot: Option[Snapshot]
+    def snapshotState: Option[S]
+    def expectedRevision: Revision
+    def maxTick(alt: Long): Long
+  }
+  private object ProcessingState {
+    def apply(snapshot: Snapshot, unapplied: Unapplied): ProcessingState =
+      if (unapplied.isEmpty) new Finished(snapshot)
+      else new Intermediate(snapshot, unapplied)
+    def apply(snapshot: Option[Snapshot], unapplied: Unapplied): ProcessingState =
+      snapshot match {
+        case Some(snapshot) => this.apply(snapshot, unapplied)
+        case _ => Beginning(unapplied)
+      }
+  }
+  private case class Beginning(
+    unapplied: Unapplied)
+  extends ProcessingState { assert(unapplied.nonEmpty)
+    def optSnapshot: Option[Snapshot] = None
+    def snapshotState = None
+    def expectedRevision = 0
+    def maxTick(alt: Long) = alt
+  }
+  private case class Intermediate(
+    snapshot: Snapshot, unapplied: Unapplied)
+  extends ProcessingState { assert(unapplied.nonEmpty)
+    def optSnapshot: Option[Snapshot] = Some(snapshot)
+    def snapshotState = Some(snapshot.state)
+    def expectedRevision = snapshot.revision + 1
+    def maxTick(alt: Long) = snapshot.tick max alt
+  }
+  private case class Finished(
+    snapshot: Snapshot)
+  extends ProcessingState {
+    def unapplied: Unapplied = Empty
+    def optSnapshot: Option[Snapshot] = Some(snapshot)
+    def snapshotState = Some(snapshot.state)
+    def expectedRevision = snapshot.revision + 1
+    def maxTick(alt: Long) = snapshot.tick max alt
+  }
+
   /**
    * @return Most current snapshot and any unapplied transactions
    */
   private def applyTransactions(
-      unapplied: Unapplied, snapshot: Option[Snapshot])(
+      procState: ProcessingState)(
       implicit
-      ec: ExecutionContext): Future[(Option[Snapshot], Unapplied)] = {
-    if (unapplied.isEmpty) {
-      Future successful (snapshot -> unapplied)
+      ec: ExecutionContext): Future[ProcessingState] = {
+
+    if (procState.unapplied.isEmpty) {
+      Future successful procState
     } else {
-      val expectedRev = snapshot.map(_.revision + 1) getOrElse 0
-      val tx = unapplied.head._2
+      val snapshotState = procState.snapshotState
+      val expectedRev = procState.expectedRevision
+      val tx = procState.unapplied.head._2
       if (tx.revision == expectedRev) {
-        callProcess(tx, snapshot.map(_.content)).flatMap { newState =>
-          val tick = snapshot.map(_.tick max tx.tick) getOrElse tx.tick
-          applyTransactions(unapplied.tail, Some(Snapshot(newState, tx.revision, tick)))
+        callProcess(tx, snapshotState).flatMap { newState =>
+          val tick = procState maxTick tx.tick
+          val snapshot = Snapshot(newState, tx.revision, tick)
+          applyTransactions(ProcessingState(snapshot, procState.unapplied.tail))
         }
       } else if (tx.revision < expectedRev) { // Already processed
-        applyTransactions(unapplied.tail, snapshot)
+        applyTransactions(ProcessingState(procState.optSnapshot, procState.unapplied.tail))
       } else { // tx.revision > expectedRev
         onMissingRevisions(tx.stream, expectedRev until tx.revision)
-        Future successful (snapshot -> unapplied)
+        Future successful ProcessingState(procState.optSnapshot, procState.unapplied)
       }
     }
 
@@ -167,18 +216,27 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
   private def upsertUntilInactive(
       stream: ID, unapplied: Unapplied)(
       implicit
-      ec: ExecutionContext): Future[Unit] = {
+      ec: ExecutionContext): Future[S] = {
 
-    val upsertResult: Future[(Option[Update], Unapplied)] =
+    val upsertResult: Future[(Option[Update], ProcessingState)] =
       processStore.upsert(stream) { existingSnapshot =>
-        applyTransactions(unapplied, existingSnapshot)
+        applyTransactions(ProcessingState(existingSnapshot, unapplied))
+          .map { procState =>
+            procState.optSnapshot -> procState
+          }(Threads.PiggyBack)
       }
 
     val inactiveFuture = upsertResult.flatMap {
-      case (maybeUpdate, stillUnapplied) =>
-        Try(maybeUpdate.foreach(onUpdate(stream, _))).failed.foreach(ec.reportFailure)
-        val currRevision = maybeUpdate.map(_.revision) getOrElse -1
-        setInactive(stream, stillUnapplied, currRevision) match {
+      case (maybeUpdate, procState) =>
+        val currRevision = maybeUpdate match {
+          case Some(update) =>
+            try onUpdate(stream, update) catch {
+              case NonFatal(cause) => ec reportFailure cause
+            }
+            update.revision
+          case _ => -1
+        }
+        setInactive(stream, procState, currRevision) match {
           case (Empty, future) => future
           case (moreUnapplied, _) => upsertUntilInactive(stream, moreUnapplied)
         }
@@ -192,7 +250,7 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
     }
   }
 
-  def apply(tx: Transaction): Future[Unit] = {
+  def apply(tx: Transaction): Future[S] = {
     setActive(tx) match {
       case (Empty, future) => future
       case (unapplied, _) =>
@@ -208,23 +266,29 @@ trait MonotonicProcessor[ID, EVT, S >: Null, U]
  * @tparam ID Stream identifier
  * @tparam EVT Event type
  * @tparam S State type
- * @tparam BR Batch result. Typically just `Unit`
+ * @tparam BR Batch result. Often just `Unit`
  */
 abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U, BR](
-  finishProcessingTimeout: FiniteDuration,
-  protected val processStore: StreamProcessStore[ID, S, U])
+  postReplayTimeout: FiniteDuration,
+  protected val processStore: StreamProcessStore[ID, S, U])(
+  implicit protected val executionContext: ExecutionContext)
 extends MonotonicProcessor[ID, EVT, S, U]
 with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
-  protected final def completionTimeout = finishProcessingTimeout
+  // Enable JMX
+  override protected def mxBean = new AsyncStreamConsumerBean
+  override def toString() = s"${getClass.getSimpleName}(${processStore.name})"
 
-  override def onDone(): Future[BR] = {
+  protected final def completionTimeout = postReplayTimeout
+
+  override def onDone(): Future[BR] =
     // Reminder: Once `super.onDone()` future completes, `whenDone()` has already run.
     super.onDone().recover {
       case timeout: TimeoutException =>
         val incompletes = incompleteStreams
-        if (incompletes.exists(_.stillActive)) { // This is inherently racy, but if we catch an active stream, we can provide a more accurate error message.
-          throw new IllegalStateException(s"Stream processing still active. Timeout of $completionTimeout is too tight", timeout)
+        val activeCount = incompletes.count(_.stillActive)
+        if (activeCount > 0) { // This is inherently racy, but if we catch an active stream, we can provide a more definite error message.
+          throw new IllegalStateException(s"${processStore} has $activeCount unfinished transactions. Timeout of $completionTimeout is too short! Increase timeout and try again", timeout)
         } else {
           val cause = incompletes
             .map(_.status.failed)
@@ -264,8 +328,7 @@ Possible causes:
 """
           throw new IllegalStateException(errMsg, cause)
         }
-    }(scuff.concurrent.Threads.PiggyBack)
-  }
+    }
 
   /** Don't broadcast snapshot updates during replay. */
   protected def onUpdate(id: ID, update: Update): Unit = ()
@@ -278,35 +341,58 @@ Possible causes:
   protected def onMissingRevisions(id: ID, missing: Range): Unit = ()
 
   /**
-   *  Called when replay processing is done.
-   *  This is the time to persist all generated
-   *  state, and return any information that
-   *  will be handed over to the live
-   *  processor. Should generally only be concerned
-   *  with a successful `Future`.
+   * Called when replay processing is successfully
+   * completed.
+   * This is the time to persist all generated
+   * state, and return any information that
+   * will be handed over to the live
+   * processor.
    */
   protected def whenDone(): Future[BR]
 }
 
+/**
+  * Replay persistence coordination, expecting a
+  * `concurrent.Map` to hold replay state.
+  */
 trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U, BR] {
   proc: MonotonicReplayProcessor[ID, EVT, S, U, BR] =>
 
   type Snapshot = delta.Snapshot[S]
   protected type State = ConcurrentMapStore.State[S]
 
-  /** Execution context for persisting final replay state. */
-  protected def persistenceContext: ExecutionContext
+  /**
+    * Persist snapshots from completed replay.
+    * @note This is a critical step. If persistence is interrupted,
+    * and it's not persisted in tick order (default), it can lead to
+    * an invalid store state, which will fail upon restart.
+    * To prevent this, clear the store before restart
+    * *OR* persist in ascending tick order (default).
+    *
+    * @see persistInTickOrder To persist in tick order. Defaults to `true`
+    *
+    * @param snapshots
+    */
   protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[BR]
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]]
+  protected def persistInTickOrder: Boolean = true
+  private[this] val tickComparator = new ju.Comparator[(ID, Snapshot)] {
+    def compare(o1: (ID, Snapshot), o2: (ID, Snapshot)): Int =
+      (o1._2.tick - o2._2.tick).toInt
+  }
   protected def whenDone(): Future[BR] = {
-      implicit def ec = persistenceContext
     onReplayCompletion()
       .flatMap { cmap =>
         require(incompleteStreams.isEmpty, s"Incomplete streams are present. This code should not execute. This is a bug.")
         val snapshots = cmap.iterator.collect {
           case (id, value) if value.modified => id -> value.snapshot
         }
-        persistReplayState(snapshots).andThen {
+        if (persistInTickOrder) {
+          val array = snapshots.toArray
+          cmap.clear()
+          ju.Arrays.sort(array, tickComparator)
+          persistReplayState(array.iterator)
+        } else persistReplayState(snapshots).andThen {
           case _ => cmap.clear()
         }
       }

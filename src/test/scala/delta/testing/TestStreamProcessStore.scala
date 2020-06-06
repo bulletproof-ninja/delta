@@ -1,7 +1,7 @@
 package delta.testing
 
 import org.junit._, Assert._
-import delta.Snapshot
+import delta.{ Tick, Revision, Snapshot }
 import scala.collection.concurrent.TrieMap
 import scala.collection.compat._
 
@@ -28,7 +28,7 @@ class TestStreamProcessStore {
   type State = ConcurrentMapStore.State[String]
 
   def newStore(): StreamProcessStore[Long, String, String] =
-    ConcurrentMapStore(new TrieMap[Long, State], None)(_ => Future.none)
+    ConcurrentMapStore(new TrieMap[Long, State], "", None)(_ => Future.none)
 
   def newStore[S](implicit codec: Codec[S, String]): StreamProcessStore[Long, S, String] =
     newStore() adaptState codec
@@ -78,7 +78,7 @@ class TestStreamProcessStore {
   @Test
   def `snapshot map`(): Unit = {
     val snapshot = Snapshot(98765, 123, 9999L).map(_.toString)
-    assertEquals("98765", snapshot.content)
+    assertEquals("98765", snapshot.state)
     assertEquals(123, snapshot.revision)
     assertEquals(9999L, snapshot.tick)
   }
@@ -86,8 +86,6 @@ class TestStreamProcessStore {
   @Test
   def `mix of new and old`(): Unit = {
     type ID = Long
-    type Tick = Long
-    type Revision = Int
     type JSON = String
 
     val store = newStore
@@ -141,7 +139,7 @@ class TestStreamProcessStore {
         fail("Should not happen"); ???
       case Some(existing) =>
         assertEquals(snapshot2, existing)
-        Future successful Some(Snapshot(existing.content, -1, 555L)) -> (())
+        Future successful Some(Snapshot(existing.state, -1, 555L)) -> (())
     }.await._1
     assertEquals(None, stillNoUpdate)
     assertEquals(snapshot2, store.read(key).await.get)
@@ -154,7 +152,7 @@ class TestStreamProcessStore {
     }.await._1.get
     assertTrue(update3.changed.isEmpty)
     assertEquals(Update(None, -1, 556L), update3)
-    val snapshot3 = Snapshot(snapshot2.content, update3.revision, update3.tick)
+    val snapshot3 = Snapshot(snapshot2.state, update3.revision, update3.tick)
     assertEquals(snapshot3, store.read(key).await.get)
     val update4 = store.upsert(key) {
       case None =>
@@ -165,7 +163,7 @@ class TestStreamProcessStore {
     }.await._1.get
     // assertTrue(update4.change.isDefined)
     assertEquals(Update(Some("[1,2,3]"), -1, 556L), update4)
-    assertEquals(update4.changed.get, store.read(key).await.get.content)
+    assertEquals(update4.changed.get, store.read(key).await.get.state)
   }
 
 }

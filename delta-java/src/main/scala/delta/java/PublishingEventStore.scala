@@ -1,13 +1,18 @@
 package delta.java
 
-import delta.EventStore
-import delta.MessageTransport
-import delta.MessageTransportPublishing
+import delta.{
+  Tick, Revision, Channel,
+  Transaction, EventStore,
+  MessageTransport, MessageTransportPublishing
+}
+
 import scuff.StreamConsumer
-import delta.Transaction, Transaction.Channel
+
 import scala.concurrent.Future
 
-trait PublishingEventStore[ID, EVT] extends EventStore[ID, EVT] with MessageTransportPublishing[ID, EVT]
+trait PublishingEventStore[ID, EVT]
+extends EventStore[ID, EVT]
+with MessageTransportPublishing[ID, EVT]
 
 object PublishingEventStore {
 
@@ -24,12 +29,12 @@ object PublishingEventStore {
 }
 
 private abstract class EventStoreProxy[ID, EVT, M](
-    evtStore: EventStore[ID, EVT],
-    protected val txTransport: MessageTransport { type TransportType = M },
-    protected val txChannels: Set[Channel],
-    protected val txCodec: scuff.Codec[Transaction[ID, EVT], M],
-    ch2tp: java.util.function.Function[String, String])
-  extends EventStore[ID, EVT] {
+  evtStore: EventStore[ID, EVT],
+  protected val txTransport: MessageTransport { type TransportType = M },
+  protected val txChannels: Set[Channel],
+  protected val txCodec: scuff.Codec[delta.Transaction[ID, EVT], M],
+  ch2tp: java.util.function.Function[String, String])
+extends EventStore[ID, EVT] {
   publishing: MessageTransportPublishing[ID, EVT] =>
 
   protected def toTopic(ch: Channel) = Topic(ch2tp(ch.toString))
@@ -46,16 +51,16 @@ private abstract class EventStoreProxy[ID, EVT, M](
   def maxTick() = evtStore.maxTick()
   def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
     evtStore.query(selector)(callback)
-  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
+  def querySince[U](sinceTick: Tick, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
     evtStore.querySince(sinceTick, selector)(callback)
   def replayStream[U](stream: ID)(callback: StreamConsumer[Transaction, U]): Unit =
     evtStore.replayStream(stream)(callback)
-  def replayStreamFrom[U](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, U]): Unit =
+  def replayStreamFrom[U](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, U]): Unit =
     evtStore.replayStreamFrom(stream, fromRevision)(callback)
   def replayStreamRange[U](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, U]): Unit =
     evtStore.replayStreamRange(stream, revisionRange)(callback)
 
-  def commit(channel: Channel, stream: ID, revision: Int, tick: Long,
+  def commit(channel: Channel, stream: ID, revision: Revision, tick: Tick,
       events: List[EVT], metadata: Map[String, String] = Map.empty): Future[Transaction] =
     evtStore.commit(channel, stream, revision, tick, events, metadata)
 

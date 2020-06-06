@@ -13,12 +13,13 @@ trait EventStore[ID, EVT]
   extends EventSource[ID, EVT] {
 
   protected def Transaction(
-      tick: Long,
+      tick: Tick,
       channel: Channel,
       stream: ID,
-      revision: Int,
+      revision: Revision,
       metadata: Map[String, String],
-      events: List[EVT]) = new Transaction(tick, channel, stream, revision, metadata, events)
+      events: List[EVT]) =
+    new Transaction(tick, channel, stream, revision, metadata, events)
 
   final class DuplicateRevisionException(val conflict: Transaction)
     extends RuntimeException(s"Revision ${conflict.revision} already exists for: ${conflict.stream}")
@@ -36,7 +37,7 @@ trait EventStore[ID, EVT]
    * @return Transaction, or if failed a possible
    * [[DuplicateRevisionException]] if the revision already exists.
    */
-  def commit(channel: Channel, stream: ID, revision: Int, tick: Long,
+  def commit(channel: Channel, stream: ID, revision: Revision, tick: Tick,
       events: List[EVT], metadata: Map[String, String] = Map.empty): Future[Transaction]
 
 }

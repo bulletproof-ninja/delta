@@ -4,7 +4,7 @@ import java.util.concurrent.ArrayBlockingQueue
 
 import scala.concurrent.{ Future, Promise, TimeoutException }
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
-import scala.reflect.{ ClassTag }
+import scala.reflect.ClassTag
 import scala.util.{ Failure, Success, Try }
 
 import org.bson.{ BsonReader, BsonWriter, UuidRepresentation }
@@ -15,6 +15,7 @@ import java.util.UUID
 import org.bson._
 import org.bson.types.Decimal128
 import scala.jdk.CollectionConverters._
+import org.bson.types.ObjectId
 
 package object mongo {
 
@@ -133,5 +134,32 @@ package object mongo {
       case result => Option(result.get)
     }
   }
+
+  implicit val codec4Bin: scuff.Codec[Array[Byte], BsonValue] = new scuff.Codec[Array[Byte], BsonValue] {
+    def encode(bytes: Array[Byte]) = new BsonBinary(bytes)
+    def decode(bson: BsonValue): Array[Byte] = bson.asBinary().getData
+  }
+
+  implicit val codec4ObjectId: scuff.Codec[ObjectId, BsonValue] = new scuff.Codec[ObjectId, BsonValue] {
+    def encode(a: ObjectId) = new BsonObjectId(a)
+    def decode(b: BsonValue) = b.asObjectId.getValue
+  }
+  implicit val codec4Uuid: scuff.Codec[UUID, BsonValue] = new scuff.Codec[UUID, BsonValue] {
+    def encode(a: UUID) = new BsonBinary(a)
+    def decode(b: BsonValue) = b.asBinary.asUuid
+  }
+  implicit val codec4String: scuff.Codec[String, BsonValue] = new scuff.Codec[String, BsonValue] {
+    def encode(a: String) = new BsonString(a)
+    def decode(b: BsonValue) = b.asString.getValue
+  }
+  implicit val codec4Int: scuff.Codec[Int, BsonValue] = new scuff.Codec[Int, BsonValue] {
+    def encode(a: Int) = new BsonInt32(a)
+    def decode(b: BsonValue) = b.asInt32.intValue
+  }
+  implicit val codec4Long: scuff.Codec[Long, BsonValue] = new scuff.Codec[Long, BsonValue] {
+    def encode(a: Long) = new BsonInt64(a)
+    def decode(b: BsonValue) = b.asInt64.longValue
+  }
+
 
 }

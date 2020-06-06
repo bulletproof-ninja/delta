@@ -150,7 +150,7 @@ abstract class AbstractEventStoreRepositoryTest {
                 repo.update("Foo", Some(0)) {
                   case (foo, rev) =>
                     assertEquals(1, rev)
-                    assertTrue(foo.mergeEvents contains NewNumberWasAdded(44))
+                    assertTrue(foo.concurrentUpdates contains NewNumberWasAdded(44))
                     assertEquals("New", foo.aggr.status)
                     foo(AddNewNumber(44))
                 }.onComplete {
@@ -160,7 +160,7 @@ abstract class AbstractEventStoreRepositoryTest {
                     repo.update("Foo", Some(1)) {
                       case (foo, rev) =>
                         assertEquals(1, rev)
-                        assertTrue(foo.mergeEvents.isEmpty)
+                        assertTrue(foo.concurrentUpdates.isEmpty)
                         assertEquals("New", foo.aggr.status)
                         foo(ChangeStatus("NotNew"))
                     }.onComplete {
@@ -292,12 +292,12 @@ abstract class AbstractEventStoreRepositoryTest {
   }
 }
 
-class Aggr(val state: TheOneAggr.State, val mergeEvents: Seq[AggrEvent]) {
+class Aggr(val state: TheOneAggr.State, val concurrentUpdates: Seq[AggrEvent]) {
   def appliedEvents: List[AggrEvent] = {
     val surgeon = new Surgeon(state)
     surgeon.getAll[List[AggrEvent]].head._2.reverse
   }
-  private[delta] def aggr = state.curr
+  private[delta] def aggr = state.get
   def apply(cmd: AddNewNumber): Unit = {
     if (!aggr.numbers.contains(cmd.n)) {
       state(NewNumberWasAdded(cmd.n))
@@ -316,7 +316,8 @@ object TheOneAggr extends Entity("", AggrStateProjector) {
   type Id = String
   type Type = Aggr
 
-  def init(state: State, mergeEvents: List[AggrEvent]): Aggr = new Aggr(state, mergeEvents)
+  def init(state: State, concurrentUpdates: List[Transaction]): Aggr =
+    new Aggr(state, concurrentUpdates.flatMap(_.events.collectAs[AggrEvent]))
   def state(entity: Aggr) = entity.state
   override def validate(state: AggrState): Unit = {
     require(state.numbers.filter(_ < 0).isEmpty, "Cannot contain negative numbers")
@@ -363,7 +364,7 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
       val txChannels = Set(TheOneAggr.channel)
       val txCodec = Codec.noop[Transaction]
     }
-    repo = new EntityRepository(TheOneAggr, ec)(es)
+    repo = new EntityRepository(TheOneAggr)(es)
   }
 
 }
@@ -418,7 +419,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
     }
     type State = ConcurrentMapStore.State[AggrState]
     val snapshotMap = new TrieMap[String, State]
-    val snapshotStore = ConcurrentMapStore[String, AggrState, AggrState](snapshotMap, None)(_ => Future.none)
-    repo = new EntityRepository(TheOneAggr, ec)(es, snapshotStore)
+    val snapshotStore = ConcurrentMapStore[String, AggrState, AggrState](snapshotMap, "aggr", None)(_ => Future.none)
+    repo = new EntityRepository(TheOneAggr)(es, snapshotStore)
   }
 }

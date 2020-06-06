@@ -13,14 +13,14 @@ trait SubscriptionAdapter[ID, View, U] {
 
   /**
    * Subscribe to snapshot updates with an initial snapshot.
-   * NOTE: The callback will receiver *either* snapshot or update, never both.
+   * @note The callback will receiver *either* snapshot or update, never both.
    * In other words, the first callback will be a snapshot and all subsequent
    * callbacks will be updates.
    */
-  def subscribe(
+  def readContinuously(
       id: ID, callbackEC: ExecutionContext,
       callback: BiConsumer[Snapshot, Update]): Future[Subscription] = {
-    this.subscribe(id, callbackEC) {
+    this.readContinuously(id, callbackEC) {
       case Right(update) => callback.accept(null, update)
       case Left(snapshot) => callback.accept(snapshot, null)
     }
@@ -28,16 +28,16 @@ trait SubscriptionAdapter[ID, View, U] {
 
   /**
    * Subscribe to snapshot updates with an initial snapshot.
-   * NOTE: The callback will receiver *either* snapshot or update, never both.
+   * @note The callback will receiver *either* snapshot or update, never both.
    * In other words, the first callback will be a snapshot and all subsequent
    * callbacks will be updates.
    */
-  def subscribe(
+  def readContinuously(
       id: ID, callbackExe: Executor, reportFailure: Consumer[Throwable],
       callback: BiConsumer[Snapshot, Update]): Future[Subscription] = {
 
     val callbackEC = ExecutionContext.fromExecutor(callbackExe, reportFailure.accept)
-    this.subscribe(id, callbackEC) {
+    this.readContinuously(id, callbackEC) {
       case Right(update) => callback.accept(null, update)
       case Left(snapshot) => callback.accept(snapshot, null)
     }

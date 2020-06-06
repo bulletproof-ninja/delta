@@ -1,6 +1,6 @@
 package delta.process
 
-import delta.Snapshot
+import delta._
 
 private[delta] object Exceptions {
   def refreshNonExistent(key: Any) = new IllegalStateException(
@@ -9,8 +9,8 @@ private[delta] object Exceptions {
     writeOlder(key, existing.revision, update.revision, existing.tick, update.tick)
   def writeOlder(
       key: Any,
-      existingRev: Int, updateRev: Int,
-      existingTick: Long, updateTick: Long): IllegalStateException = {
+      existingRev: Revision, updateRev: Revision,
+      existingTick: Tick, updateTick: Tick): IllegalStateException = {
     val msg =
       if (updateRev < existingRev) {
         s"Tried to update snapshot $key (rev:$existingRev, tick:$existingTick) with older revision $updateRev"

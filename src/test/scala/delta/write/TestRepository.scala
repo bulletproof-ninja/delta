@@ -1,14 +1,14 @@
 package delta.write
 
-import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
+import delta._
+import delta.util.ConcurrentMapRepository
+import delta.util.PublishingRepository
+import delta.testing._
 
-import scala.concurrent.Future
+import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
 
 import org.junit.Assert._
 import org.junit.Test
-import delta.util.ConcurrentMapRepository
-import delta.util.PublishingRepository
-import delta.testing.RandomDelayExecutionContext
 
 class TestRepository {
 
@@ -18,7 +18,6 @@ class TestRepository {
     assertTrue(latch.await(5, TimeUnit.SECONDS))
   }
 
-  implicit def toFut[T](t: T) = Future successful t
   case class Customer(name: String, postCode: String)
 
   implicit def ec = RandomDelayExecutionContext
@@ -27,12 +26,12 @@ class TestRepository {
   @Test
   def `insert success`(): Unit = {
     withLatch(5) { latch =>
-      val repo = new ConcurrentMapRepository[BigInt, Customer](ec)
+      val repo = new ConcurrentMapRepository[BigInt, Customer]
       val hank = Customer("Hank", "12345")
       repo.insert(5, hank).foreach { id5 =>
         assertEquals(BigInt(5), id5)
         latch.countDown()
-        val update1 = repo.update(5, Some(0)) {
+        val update1 = repo.update(5, 0) {
           case (customer, rev) =>
             assertEquals(0, rev)
             latch.countDown()
@@ -62,11 +61,11 @@ class TestRepository {
 
   @Test
   def `event publishing`(): Unit = {
-    case class Notification(id: Long, revision: Int, events: List[VeryBasicEvent], metadata: Metadata)
+    case class Notification(id: Long, revision: Revision, events: List[VeryBasicEvent], metadata: Metadata)
     val notifications = new LinkedBlockingQueue[Notification]
-    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](new ConcurrentMapRepository(ec), ec) {
-      type Event = VeryBasicEvent
-      def publish(id: Long, revision: Int, events: List[Event], metadata: Metadata): Unit = {
+    val repo = new PublishingRepository[Long, Customer, VeryBasicEvent](
+        new ConcurrentMapRepository, ec) {
+      def publish(id: Long, revision: Revision, events: List[VeryBasicEvent], metadata: Metadata): Unit = {
         notifications offer Notification(id, revision, events, metadata)
       }
     }
@@ -78,7 +77,7 @@ class TestRepository {
     assertEquals(1, n1.events.size)
     assertEquals(CustomerCreated, n1.events.head)
     repo.update[Nothing](5, Some(0)) {
-      case ((hank, _), _) =>
+      case (hank, _) =>
         hank.copy(name = "Hankster") -> List(CustomerUpdated)
     }
     val n2 = notifications.take
@@ -89,7 +88,7 @@ class TestRepository {
 
     withLatch(1) { latch =>
       repo.load(5).foreach {
-        case ((hank, _), rev) =>
+        case (hank, rev) =>
           assertEquals(1, rev)
           assertEquals("Hankster", hank.name)
           latch.countDown()

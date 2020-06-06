@@ -5,20 +5,19 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
 import scuff.StreamConsumer
-import delta.{ EventFormat, EventStore }
-import delta.Ticker
+import delta._
 
 /**
   * Non-persistent implementation, probably only useful for testing.
   */
-class TransientEventStore[ID, EVT, SF](
+abstract class TransientEventStore[ID, EVT, SF](
   execCtx: ExecutionContext, evtFmt: EventFormat[EVT, SF])(
   initTicker: TransientEventStore[ID, EVT, SF] => Ticker)
     extends EventStore[ID, EVT] {
 
   lazy val ticker = initTicker(this)
 
-  private def Tx(id: ID, rev: Int, channel: Channel, tick: Long, metadata: Map[String, String], events: List[EVT]): Tx = {
+  private def Tx(id: ID, rev: Revision, channel: Channel, tick: Tick, metadata: Map[String, String], events: List[EVT]): Tx = {
     val eventsSF = events.map { evt =>
       val EventFormat.EventSig(name, version) = evtFmt.signature(evt)
       (name, version, evtFmt encode evt)
@@ -27,9 +26,9 @@ class TransientEventStore[ID, EVT, SF](
   }
   private class Tx(
       id: ID,
-      val rev: Int,
+      val rev: Revision,
       channel: Channel,
-      val tick: Long,
+      val tick: Tick,
       metadata: Map[String, String],
       eventsSF: List[(String, Byte, SF)]) {
     def toTransaction: Transaction = {
@@ -57,7 +56,7 @@ class TransientEventStore[ID, EVT, SF](
   def currRevision(stream: ID): Future[Option[Int]] = Future(findCurrentRevision(stream))
 
   def commit(
-    channel: Channel, stream: ID, revision: Int, tick: Long,
+    channel: Channel, stream: ID, revision: Revision, tick: Tick,
     events: List[EVT], metadata: Map[String, String]): Future[Transaction] = Future {
     val transactions = txMap.getOrElse(stream, Vector[Tx]())
     val expectedRev = transactions.size
@@ -92,7 +91,7 @@ class TransientEventStore[ID, EVT, SF](
     val txs = txMap.getOrElse(stream, Vector.empty)
     txs.map(_.toTransaction).foreach(callback.onNext)
   }
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit =
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit =
     replayStreamRange(stream, fromRevision to Int.MaxValue)(callback)
   def replayStreamRange[R](stream: ID, revisionRange: collection.immutable.Range)(callback: StreamConsumer[Transaction, R]): Unit = withCallback(callback) {
     val txs = txMap.getOrElse(stream, Vector.empty)
@@ -102,13 +101,17 @@ class TransientEventStore[ID, EVT, SF](
     }
     sliced.map(_.toTransaction).foreach(callback.onNext)
   }
-  def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = withCallback(callback) {
+  def query[U](
+      selector: Selector)(
+      callback: StreamConsumer[Transaction, U]): Unit = withCallback(callback) {
     txMap.valuesIterator.flatten
       .map(_.toTransaction)
       .filter(selector.include)
       .foreach(callback.onNext)
   }
-  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = withCallback(callback) {
+  def querySince[U](
+      sinceTick: Tick, selector: Selector)(
+      callback: StreamConsumer[Transaction, U]): Unit = withCallback(callback) {
     txMap.valuesIterator.flatten
       .filter(_.tick >= sinceTick)
       .map(_.toTransaction)

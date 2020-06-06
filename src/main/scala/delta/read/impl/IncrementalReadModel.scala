@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
-import delta.process._, AsyncCodec.noop
+import delta.process._
 import scala.reflect.ClassTag
 import scuff.Subscription
 import delta.read._
@@ -16,7 +16,7 @@ import delta._
  * storing state and subscribes to a [[delta.EventSource]]
  * for any new events, and updates the process store
  * if anything changed.
- * NOTE: *Cannot* be used for state derived
+ * @note *Cannot* be used for state derived
  * from joined streams.
  * @tparam ID The id type
  * @tparam ESID The event source id
@@ -28,8 +28,8 @@ import delta._
 abstract class IncrementalReadModel[ID, ESID, EVT: ClassTag, Work >: Null, Stored, U](
   es: EventSource[ESID, _ >: EVT])(
   implicit
-  convId: ID => ESID,
-  protected val stateCodec: AsyncCodec[Work, Stored])
+  stateCodec: AsyncCodec[Work, Stored],
+  convId: ID => ESID)
 extends EventSourceReadModel[ID, ESID, EVT, Work, Stored](es)
 with MessageHubSupport[ID, Stored, U]
 with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
@@ -42,7 +42,7 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
       case some => Future successful some
     }
 
-  protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
+  protected override def readAgain(id: ID, minRevision: Revision, minTick: Tick)(
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]] =
     readAndUpdate(id, minRevision, minTick)
@@ -54,7 +54,7 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 
   /**
    * Start processing.
-   * NOTE: If the process store is a centralized database (normal)
+   * @note If the process store is a centralized database (normal)
    * and there are multiple instances of a given read model (normal,
    * if load-balanced/clustered/HA), make sure only one is started,
    * to avoid unnecessary processing and database access.
@@ -100,9 +100,8 @@ abstract class SimpleIncrementalReadModel[ID, ESID, EVT: ClassTag, S >: Null](
   implicit
   convId: ID => ESID)
 extends IncrementalReadModel[ID, ESID, EVT, S, S, S](es) {
-  import scuff.concurrent.Threads
 
-  protected def updateState(id: ID,prevState: Option[S],update: S): Option[S] = Option(update)
-  protected def stateCodecContext = Threads.PiggyBack
+  protected def stateCodecContext = scuff.concurrent.Threads.PiggyBack
+  protected def updateState(id: ID, prevState: Option[S], currState: S) = Some(currState)
 
 }

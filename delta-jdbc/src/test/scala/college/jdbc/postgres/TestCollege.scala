@@ -3,20 +3,23 @@ package college.jdbc.postgres
 import org.junit.Assert._
 import org.junit._
 
-import college.CollegeEvent
-import delta.EventStore
+import college._
+import college.jdbc.JdbcEmailValidationProcessStore
+
 import delta.jdbc.JdbcEventStore
 import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalTransport
-import scuff.jdbc.DataSourceConnection
 import delta.MessageTransportPublishing
-import org.postgresql.ds.PGSimpleDataSource
-import scuff.SysProps
 import delta.jdbc.postgresql._
-import scuff.jdbc.ConnectionSource
-import college.CollegeEventFormat
-import college.jdbc.StudentEmailsStore
+import delta.validation.ConsistencyValidation
+
+import scuff.SysProps
+import scuff.jdbc._
+
+import org.postgresql.ds.PGSimpleDataSource
+
 import java.{util => ju}
+import scala.concurrent.ExecutionContext
 
 object TestCollege {
   val schema = s"delta_testing_${ju.UUID.randomUUID}".replace('-', '_')
@@ -25,10 +28,9 @@ object TestCollege {
     ds.setUser("postgres")
     ds.setPassword(SysProps.required("delta.postgresql.password"))
     ds setUrl s"jdbc:postgresql://localhost/"
+    ds setCurrentSchema schema
     ds
   }
-
-  implicit def Blob = ByteaColumn
 
 }
 
@@ -36,21 +38,30 @@ class TestCollege extends college.jdbc.TestCollege {
 
   import TestCollege._
 
-  val connSource = new ConnectionSource with DataSourceConnection {
+  val connSource = new AsyncConnectionSource with DataSourceConnection {
+
+    override def updateContext: ExecutionContext = RandomDelayExecutionContext
+
+    override def queryContext: ExecutionContext = RandomDelayExecutionContext
+
     val dataSource = ds
   }
 
-  override def newLookupServiceProcStore =
-    (new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec)).ensureTable()
+  override def newEmailValidationProcessStore() = {
+    new JdbcEmailValidationProcessStore(connSource, 1, Some(schema), TimestampColumn("last_updated"))
+  }.ensureTable()
 
-  override def newEventStore: EventStore[Int, CollegeEvent] = {
+  override def newEventStore(): CollegeEventStore = {
+    implicit def Blob = ByteaColumn
     val sql = new PostgreSQLDialect[Int, CollegeEvent, Array[Byte]](schema)
-    new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
-    with MessageTransportPublishing[Int, CollegeEvent] {
+    new JdbcEventStore(CollegeEventFormat, sql, connSource)(initTicker)
+    with MessageTransportPublishing[Int, CollegeEvent]
+    with ConsistencyValidation[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(s"trans:$ch")
       val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
+      def validationContext(stream: Int) = RandomDelayExecutionContext
     }.ensureSchema()
   }
 

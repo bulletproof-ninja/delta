@@ -14,9 +14,11 @@ import delta.read._
 private[impl]
 abstract class EventSourceReadModel[ID, ESID, EVT: ClassTag, Work >: Null, Stored] protected (
   protected val eventSource: EventSource[ESID, _ >: EVT])(
-  implicit idConv: ID => ESID)
+  implicit
+  stateCodec: AsyncCodec[Work, Stored],
+  idConv: ID => ESID)
 extends ReadModel[ID, Stored]
-with StreamId[ID] {
+with StreamId {
 
   protected type StreamId = ESID
   protected def StreamId(id: ID) = idConv(id)
@@ -24,7 +26,6 @@ with StreamId[ID] {
   protected type WSnapshot = delta.Snapshot[Work]
 
   protected def projector(tx: Transaction): Projector[Work, EVT]
-  protected def stateCodec: AsyncCodec[Work, Stored]
   protected def stateCodecContext: ExecutionContext
 
   protected def replayToComplete(
@@ -45,7 +46,7 @@ with StreamId[ID] {
     val newSnapshot: Future[Option[WSnapshot]] =
       StreamPromise.fold(wSnapshot, replay) {
         case (wSnapshot, tx) => {
-          projector(tx, wSnapshot.map(_.content)) match {
+          projector(tx, wSnapshot.map(_.state)) match {
             case null => None // Should not return null, but certain edge cases exist
             case newState => Some {
               new WSnapshot(newState, tx.revision, tx.tick)
@@ -58,8 +59,8 @@ with StreamId[ID] {
 
     newSnapshot.flatMap {
       case Some(newSnapshot) =>
-        stateCodec.encode(newSnapshot.content)
-          .map(ss => Some(newSnapshot.copy(content = ss)))
+        stateCodec.encode(newSnapshot.state)
+          .map(ss => Some(newSnapshot.copy(state = ss)))
       case None =>
         Future.none
     }

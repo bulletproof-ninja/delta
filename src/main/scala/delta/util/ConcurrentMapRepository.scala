@@ -3,6 +3,7 @@ package delta.util
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
 
+import delta._
 import delta.write.{ DuplicateIdException, Repository, UnknownIdException }
 import delta.write.ImmutableEntity
 import delta.write.Metadata
@@ -11,20 +12,25 @@ import delta.write.Metadata
  * Repository backed by concurrent map.
  * Mostly useful for testing.
  */
-class ConcurrentMapRepository[K, V <: AnyRef](
-    exeCtx: ExecutionContext,
-    map: CMap[K, (V, Int)] = new TrieMap[K, (V, Int)])
-  extends Repository[K, V] with ImmutableEntity[V] {
+class ConcurrentMapRepository[K, E <: AnyRef](
+  map: CMap[K, (E, Revision)] = new TrieMap[K, (E, Revision)])(
+  implicit
+  ec: ExecutionContext)
+extends Repository[K, E]
+with ImmutableEntity {
 
-  private implicit def ec = exeCtx
+  protected type Loaded = (E, Revision)
+  protected def revision(loaded: Loaded) = loaded._2
 
-  def insert(id: => K, entity: V)(
+  def insert(id: => K, entity: E, causalTick: Tick)(
       implicit
       metadata: Metadata): Future[K] = Future {
     insertImpl(id, id, entity, metadata.toMap)
   }
 
-  private def insertImpl(id: K, generateId: => K, entity: V, metadata: Map[String, String]): K = {
+  private def insertImpl(
+      id: K, generateId: => K, entity: E,
+      metadata: Map[String, String]): K = {
     map.putIfAbsent(id, entity -> 0) match {
       case None => id
       case _ =>
@@ -34,21 +40,23 @@ class ConcurrentMapRepository[K, V <: AnyRef](
     }
   }
 
-  def exists(id: K): Future[Option[Int]] = Future(map.get(id).map(_._2))
+  def exists(id: K): Future[Option[Revision]] = Future(map.get(id).map(_._2))
 
-  def load(id: K): Future[(V, Int)] = Future {
+  def load(id: K): Future[Loaded] = Future {
     map.get(id) match {
       case None => throw new UnknownIdException(id)
       case Some(found) => found
     }
   }
 
-  private def tryUpdate[R](id: K, expectedRevision: Option[Int], metadata: Map[String, String], updateThunk: (V, Int) => Future[V]): Future[Int] = {
+  private def tryUpdate[R](
+      id: K, expectedRevision: Option[Revision], metadata: Map[String, String],
+      updateThunk: Loaded => Future[E]): Future[Revision] = {
     map.get(id) match {
       case None => Future failed new UnknownIdException(id)
-      case Some(oldE @ (ar, rev)) =>
-        updateThunk(ar, rev).flatMap { ar =>
-          val newRev = rev + 1
+      case Some(oldE) =>
+        updateThunk(oldE).flatMap { ar =>
+          val newRev = oldE._2 + 1
           if (map.replace(id, oldE, ar -> newRev)) {
             Future successful newRev
           } else {
@@ -58,11 +66,12 @@ class ConcurrentMapRepository[K, V <: AnyRef](
     }
   }
 
-  protected def update[_](
-      expectedRevision: Option[Int], id: K,
-      updateThunk: (V, Int) => Future[V])(
+  protected def update[R](
+      updateThunk: Loaded => Future[UT[R]],
+      id: K, causalTick: Tick,
+      expectedRevision: Option[Revision])(
       implicit
-      metadata: Metadata): Future[Int] =
+      metadata: Metadata): Future[UM[R]] =
     Future(tryUpdate(id, expectedRevision, metadata.toMap, updateThunk)).flatMap(identity)
 
 }

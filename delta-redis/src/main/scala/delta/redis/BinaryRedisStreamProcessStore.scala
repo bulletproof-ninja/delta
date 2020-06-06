@@ -1,5 +1,7 @@
 package delta.redis
 
+import java.util.concurrent.atomic.AtomicLong
+
 import _root_.redis.clients.jedis.BinaryJedis
 
 import scala.jdk.CollectionConverters._
@@ -7,30 +9,32 @@ import scala.collection.immutable.HashMap
 import scala.concurrent.{ ExecutionContext, Future }
 
 import scuff._
-import java.util.concurrent.atomic.AtomicLong
-import delta.process.{ StreamProcessStore, BlockingCASWrites }
-import delta.process.UpdateCodec
+
+import delta.process._
 
 /**
-  * Binary Redis implementation of [[delta.util.StreamProcessStore]]
+  * Binary Redis implementation of [[delta.process.StreamProcessStore]]
   */
 class BinaryRedisStreamProcessStore[K, T, U](
-    keyCodec: Serializer[K],
-    snapshotCodec: Serializer[delta.Snapshot[T]],
-    hashName: String,
-    protected val blockingCtx: ExecutionContext)(
-    jedisProvider: ((BinaryJedis => Any) => Any))(
-    implicit
-    protected val updateCodec: UpdateCodec[T, U])
-  extends BinaryRedisSnapshotStore(keyCodec, snapshotCodec, hashName, blockingCtx)(jedisProvider)
-  with StreamProcessStore[K, T, U] with BlockingCASWrites[K, T, U, BinaryJedis] {
+  keyCodec: Serializer[K],
+  snapshotCodec: Serializer[delta.Snapshot[T]],
+  hashName: String,
+  blockingCtx: ExecutionContext)(
+  jedisProvider: ((BinaryJedis => Any) => Any))(
+  implicit
+  protected val updateCodec: UpdateCodec[T, U])
+extends BinaryRedisSnapshotStore(keyCodec, snapshotCodec, hashName, blockingCtx)(jedisProvider)
+with StreamProcessStore[K, T, U]
+with BlockingCASWrites[K, T, U, BinaryJedis] {
+
+  def name = hashName
 
   private def newJUHashMap(size: Int) = new java.util.HashMap[Array[Byte], Array[Byte]]((size / 0.67f).toInt, 0.67f)
 
   private[this] val lastTickWritten = new AtomicLong(Long.MinValue)
 
   @annotation.tailrec
-  private def updateLastTickWrittenIfNeeded(newTick: Long): Unit = {
+  private def updateLastTickWrittenIfNeeded(newTick: Tick): Unit = {
     val lastWritten = lastTickWritten.get
     if (newTick > lastWritten) {
       if (!lastTickWritten.compareAndSet(lastWritten, newTick)) {
@@ -41,7 +45,7 @@ class BinaryRedisStreamProcessStore[K, T, U](
 
   private[this] val TickKey = Array[Byte]('t')
 
-  def tickWatermark: Option[Long] = {
+  def tickWatermark: Option[Tick] = {
     val tick = jedis { conn =>
       Option(conn.hget(hash, TickKey)).map(_.utf8.toLong)
     }
@@ -75,7 +79,7 @@ class BinaryRedisStreamProcessStore[K, T, U](
   }(blockingCtx)
 
   def writeBatch(snapshots: collection.Map[K, Snapshot]): Future[Unit] = {
-    if (snapshots.isEmpty) Future successful (())
+    if (snapshots.isEmpty) Future.unit
     else Future {
       val (jmap, maxTick) = snapshots.iterator.foldLeft(newJUHashMap(snapshots.size) -> Long.MinValue) {
         case ((jmap, maxTick), (key, snapshot)) =>
@@ -94,14 +98,14 @@ class BinaryRedisStreamProcessStore[K, T, U](
     }(blockingCtx)
   }
 
-  protected def refreshKey(conn: BinaryJedis)(key: K, revision: Int, tick: Long): Unit = {
+  protected def refreshKey(conn: BinaryJedis)(key: K, revision: Revision, tick: Tick): Unit = {
     val binKey = keyCodec encode key
     val snapshot = snapshotCodec decode conn.hget(hash, binKey)
     val revised = snapshot.copy(revision = revision, tick = tick)
     conn.hset(hash, binKey, snapshotCodec encode revised)
   }
 
-  def refresh(key: K, revision: Int, tick: Long): Future[Unit] = Future {
+  def refresh(key: K, revision: Revision, tick: Tick): Future[Unit] = Future {
     jedis { conn =>
       refreshKey(conn)(key, revision, tick)
     }
@@ -145,7 +149,7 @@ class BinaryRedisStreamProcessStore[K, T, U](
   }
 
   def refreshBatch(revisions: collection.Map[K, (Int, Long)]): Future[Unit] = {
-    if (revisions.isEmpty) Future successful (())
+    if (revisions.isEmpty) Future.unit
     else {
       var binKeys: List[Array[Byte]] = Nil
       var revTicks: List[(Int, Long)] = Nil
@@ -162,14 +166,16 @@ class BinaryRedisStreamProcessStore[K, T, U](
     }
   }
 
-  protected def readForUpdate[R](key: K)(updateThunk: (BinaryJedis, Option[Snapshot]) => R): R = {
-    jedis { conn =>
-      val binKey = keyCodec encode key
-      conn.watch(binKey)
-      val existing = read(conn)(binKey)
-      updateThunk(conn, existing)
-    }
-  }
+  protected def readForUpdate[R](key: K)(updateThunk: (BinaryJedis, Option[Snapshot]) => R): Future[R] =
+    Future {
+      jedis { conn =>
+        val binKey = keyCodec encode key
+        conn.watch(binKey)
+        val existing = read(conn)(binKey)
+        updateThunk(conn, existing)
+      }
+    }(blockingCtx)
+
   protected def writeIfAbsent(conn: BinaryJedis)(key: K, snapshot: Snapshot): Option[Snapshot] = {
     val binKey = keyCodec encode key
     val binSnapshot = snapshotCodec encode snapshot

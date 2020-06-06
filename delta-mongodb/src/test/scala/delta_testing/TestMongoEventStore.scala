@@ -76,8 +76,8 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
       val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
-    }
-    repo = new EntityRepository(TheOneAggr, ec)(es)
+    }.ensureIndexes()
+    repo = new EntityRepository(TheOneAggr)(es)
   }
   private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>

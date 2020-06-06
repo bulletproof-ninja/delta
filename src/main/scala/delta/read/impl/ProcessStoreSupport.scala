@@ -1,8 +1,10 @@
 package delta.read.impl
 
 import scala.concurrent.ExecutionContext
-import delta.process.StreamProcessStore
 import scala.concurrent.Future
+
+import delta.{ Revision, Tick }
+import delta.process.StreamProcessStore
 
 private[impl] trait ProcessStoreSupport[ID, ESID, Work >: Null, Stored, U] {
   rm: EventSourceReadModel[ID, ESID, _, Work, Stored] =>
@@ -12,7 +14,7 @@ private[impl] trait ProcessStoreSupport[ID, ESID, Work >: Null, Stored, U] {
 
   private type Update = delta.process.Update[U]
 
-  protected def readAndUpdate(id: ID, minRevision: Int = -1, minTick: Long = Long.MinValue)(
+  protected def readAndUpdate(id: ID, minRevision: Revision = -1, minTick: Tick = Long.MinValue)(
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]] = {
 

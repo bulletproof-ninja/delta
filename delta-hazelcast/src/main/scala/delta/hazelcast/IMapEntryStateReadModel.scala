@@ -1,17 +1,19 @@
 package delta.hazelcast
 
-import scala.concurrent.{ Future, Promise }
+
+import java.util.concurrent.ScheduledExecutorService
+
+import scala.concurrent.{ Future, Promise, ExecutionContext }
+import scala.concurrent.duration._
 
 import com.hazelcast.core.{ EntryEvent, ExecutionCallback, IMap }
-import com.hazelcast.map.listener.{ EntryAddedListener, EntryUpdatedListener }
+import com.hazelcast.map.listener.{ EntryAddedListener, EntryUpdatedListener, EntryMergedListener }
 
 import delta.read._
-import scuff.Subscription
-import java.util.concurrent.ScheduledExecutorService
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext
-import com.hazelcast.map.listener.EntryMergedListener
 import delta.process.UpdateCodec
+
+import scuff.Subscription
+
 
 object IMapEntryStateReadModel {
 
@@ -19,59 +21,64 @@ object IMapEntryStateReadModel {
 
   def apply[ID, S, U](
       imap: IMap[ID, _ <: EntryState[S, _]],
-      scheduler: ScheduledExecutorService,
       failureReporter: Throwable => Unit)(
-      implicit updateCodec: UpdateCodec[S, U]) =
+      implicit
+      scheduler: ScheduledExecutorService,
+      updateCodec: UpdateCodec[S, U]) =
     new IMapEntryStateReadModel[ID, S, ID, S, U](
-      imap, scheduler, failureReporter, DefaultReadTimeout)(
-      updateCodec, ?, ?, Option(_))
+      imap, failureReporter, DefaultReadTimeout)(
+      ?, updateCodec, ?, ?, Option(_))
 
   def apply[ID, S, U](
       updateCodec: UpdateCodec[S, U],
       imap: IMap[ID, _ <: EntryState[S, _]],
-      scheduler: ScheduledExecutorService,
-      failureReporter: Throwable => Unit) =
+      failureReporter: Throwable => Unit)(
+      implicit
+      scheduler: ScheduledExecutorService) =
     new IMapEntryStateReadModel[ID, S, ID, S, U](
-      imap, scheduler, failureReporter, DefaultReadTimeout)(
-      updateCodec, ?, ?, Option(_))
+      imap, failureReporter, DefaultReadTimeout)(
+      ?, updateCodec, ?, ?, Option(_))
 
   def apply[ID, S, U](
       imap: IMap[ID, _ <: EntryState[S, _]],
-      scheduler: ScheduledExecutorService,
       failureReporter: Throwable => Unit,
       defaultReadTimeout: FiniteDuration)(
-      implicit updateCodec: UpdateCodec[S, U]) =
+      implicit
+      scheduler: ScheduledExecutorService,
+      updateCodec: UpdateCodec[S, U]) =
     new IMapEntryStateReadModel[ID, S, ID, S, U](
-      imap, scheduler, failureReporter, defaultReadTimeout)(
-      updateCodec, ?, ?, Option(_))
+      imap, failureReporter, defaultReadTimeout)(
+      ?, updateCodec, ?, ?, Option(_))
 
   def apply[ID, S, U](
       updateCodec: UpdateCodec[S, U],
       imap: IMap[ID, _ <: EntryState[S, _]],
-      scheduler: ScheduledExecutorService,
       failureReporter: Throwable => Unit,
-      defaultReadTimeout: FiniteDuration) =
+      defaultReadTimeout: FiniteDuration)(
+      implicit
+      scheduler: ScheduledExecutorService) =
     new IMapEntryStateReadModel[ID, S, ID, S, U](
-      imap, scheduler, failureReporter, defaultReadTimeout)(
-      updateCodec, ?, ?, Option(_))
+      imap, failureReporter, defaultReadTimeout)(
+      ?, updateCodec, ?, ?, Option(_))
 
   def apply[ID, S](
       imap: IMap[ID, _ <: EntryState[S, _]],
-      scheduler: ScheduledExecutorService,
       failureReporter: Throwable => Unit,
-      defaultReadTimeout: FiniteDuration = DefaultReadTimeout) =
+      defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
+      implicit
+      scheduler: ScheduledExecutorService) =
     new IMapEntryStateReadModel[ID, S, ID, S, S](
-      imap, scheduler, failureReporter, defaultReadTimeout)(
-      ?, ?, ?, Option(_))
+      imap, failureReporter, defaultReadTimeout)(
+      ?, ?, ?, ?, Option(_))
 
 }
 
 class IMapEntryStateReadModel[ID, S, MID, ES, U](
   protected val imap: IMap[MID, _ <: EntryState[ES, _]],
-  protected val scheduler: ScheduledExecutorService,
   failureReporter: Throwable => Unit,
   protected val defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
   implicit
+  protected val scheduler: ScheduledExecutorService,
   updateCodec: UpdateCodec[ES, U],
   toMapKey: ID => MID,
   toView: (ID, ES) => S,
@@ -110,11 +117,6 @@ with SubscriptionSupport[ID, S, U] {
     imap.submitToKey(id, reader, callback)
     promise.future
   }
-
-  protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
-      implicit
-      ec: ExecutionContext): Future[Option[Snapshot]] =
-    readSnapshot(id)
 
   protected def subscribe(id: ID)(callback: Update => Unit): Subscription = {
     val entryListener =

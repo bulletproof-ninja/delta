@@ -2,10 +2,9 @@ package college.semester
 
 import college._
 import delta.write._
-import delta.Projector
 import college.student.Student
 
-object Semester extends Entity("semester", SemesterProjector) {
+object Semester extends Entity("semester", SemesterState) {
   type Id = IntId[Semester]
   type Type = Semester
 
@@ -15,7 +14,8 @@ object Semester extends Entity("semester", SemesterProjector) {
     semester
   }
 
-  def init(state: State, mergeEvents: List[SemesterEvent]): Semester = new Semester(state)
+  def init(state: State, concurrentUpdates: List[Transaction]) =
+    new Semester(state)
 
   def state(instance: Semester) = instance.state
 
@@ -23,23 +23,10 @@ object Semester extends Entity("semester", SemesterProjector) {
 
 }
 
-private[semester] object SemesterProjector extends Projector[SemesterState, SemesterEvent] {
-  def init(evt: SemesterEvent) = next(null, evt)
-  def next(semester: SemesterState, evt: SemesterEvent) = evt match {
-    case ClassCreated(name) => assert(semester == null); new SemesterState(name)
-    case StudentEnrolled(studentId) =>
-      val enrolled = semester.enrolled + studentId
-      semester.copy(enrolled = enrolled)
-    case StudentCancelled(studentId) =>
-      val without = semester.enrolled - studentId
-      semester.copy(enrolled = without)
-  }
-}
-
 class Semester private (
     private[Semester] val state: Semester.State = Semester.newState()) {
 
-  private def semester = state.curr
+  private def semester = state.get
 
   private def apply(cmd: CreateClass): Unit = {
     require(semester == null)

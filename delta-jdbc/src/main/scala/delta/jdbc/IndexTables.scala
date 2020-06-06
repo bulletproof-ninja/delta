@@ -9,7 +9,7 @@ import scala.collection.compat._
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 
 object IndexTables {
-  case class Table[S, C: ColumnType](indexColumn: String)(getIndexValues: S => Set[C]) {
+  final case class Table[S, C: ColumnType](indexColumn: String)(getIndexValues: S => Set[C]) {
     def getIndexValues(state: S): Set[Any] = this.getIndexValues.apply(state).asInstanceOf[Set[Any]]
     def colType = implicitly[ColumnType[C]].asInstanceOf[ColumnType[Any]]
   }
@@ -18,7 +18,7 @@ object IndexTables {
 /**
  * Enable indexed lookup for many-to-one associations,
  * by creating one or more index tables.
- * NOTE: For simple one-to-one associations,
+ * @note For simple one-to-one associations,
  * use [[delta.jdbc.JdbcStreamProcessStore.Index]]
  */
 trait IndexTables[PK, S, U]
@@ -45,7 +45,6 @@ extends JdbcStreamProcessStore[PK, S, U] {
     s"""
 CREATE TABLE IF NOT EXISTS ${indexTableRef(table)} (
   $pkColumnDefs,
-
   PRIMARY KEY ($pkNames),
   FOREIGN KEY ($fkNames)
     REFERENCES $tableRef($fkNames)
@@ -95,20 +94,16 @@ VALUES ($vQ?,?)
   protected def deleteIndexTableRows(conn: Connection, stream: PK)(table: Table, keys: Set[Any]): Unit = {
     val deleteAsBatch = keys.size >= deleteAsBatchThreshold
     val sql = if (deleteAsBatch) deleteRowsSQL(table) else deleteRowsSQL(table, keys.size)
-    val ps = conn.prepareStatement(sql)
-    try {
+    conn.prepare(sql) { ps =>
       if (deleteAsBatch) deleteRowsAsBatch(ps, stream, table, keys)
       else deleteRowsAsOne(ps, stream, table, keys)
-    } finally {
-      Try(ps.close)
     }
   }
 
   protected def insertIndexTableRows(conn: Connection, stream: PK)(table: Table, keys: Set[Any]): Unit = {
     assert(keys.nonEmpty)
     val isBatch = keys.size > 1
-    val ps = conn.prepareStatement(insertRowSQL(table))
-    try {
+    conn.prepare(insertRowSQL(table)) { ps =>
       keys.foreach { key =>
         ps.setValue(1, key)(table.colType)
         ps.setValue(2, stream)(pkColumn.colType)
@@ -116,8 +111,6 @@ VALUES ($vQ?,?)
       }
       if (isBatch) ps.executeBatch()
       else ps.executeUpdate()
-    } finally {
-      Try(ps.close)
     }
   }
 
@@ -133,7 +126,7 @@ VALUES ($vQ?,?)
       key: PK, snapshot: Snapshot): Option[Snapshot] = {
     super.writeIfAbsent(conn)(key, snapshot) orElse {
       indexTables.foreach { table =>
-        val keyValues = table getIndexValues snapshot.content
+        val keyValues = table getIndexValues snapshot.state
         if (keyValues.nonEmpty) insertIndexTableRows(conn, key)(table, keyValues)
       }
       None
@@ -144,8 +137,8 @@ VALUES ($vQ?,?)
       key: PK, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot] = {
     super.writeReplacement(conn)(key, oldSnapshot, newSnapshot) orElse {
       indexTables.foreach { table =>
-        val oldValues = table getIndexValues oldSnapshot.content
-        val newValues = table getIndexValues newSnapshot.content
+        val oldValues = table getIndexValues oldSnapshot.state
+        val newValues = table getIndexValues newSnapshot.state
         if (oldValues != newValues) {
           val deleteValues = oldValues diff newValues
           if (deleteValues.nonEmpty) deleteIndexTableRows(conn, key)(table, deleteValues)
@@ -157,31 +150,24 @@ VALUES ($vQ?,?)
     }
   }
 
-  private[this] val indexTableWHERE = version.map(version => s"WHERE i.version = $version\nAND") getOrElse "WHERE"
-  private[this] val joinON = if (version.isDefined) "ON i.version = s.version\n  AND" else "ON"
+  private[this] val WHERE_i = WHERE.replace(" version", " i.version")
+  private[this] val ON_is = if (version.isDefined) "ON i.version = s.version\n  AND" else "ON"
 
-  protected def selectStreamTickSQL(table: Table): String = {
-      def WHERE = indexTableWHERE
-      def ON = joinON
-    s"""
+  protected def selectStreamTickSQL(table: Table): String = s"""
 SELECT s.tick, s.${pkColumn.name}
 FROM ${indexTableRef(table)} AS i
 JOIN ${tableRef} AS s
-  $ON i.${pkColumn.name} = s.${pkColumn.name}
-$WHERE i.${table.indexColumn} = ?
+  $ON_is i.${pkColumn.name} = s.${pkColumn.name}
+$WHERE_i i.${table.indexColumn} = ?
 """
-  }
-  protected def selectSnapshotSQL(table: Table): String = {
-      def WHERE = indexTableWHERE
-      def ON = joinON
-    s"""
+
+  protected def selectSnapshotSQL(table: Table): String = s"""
 SELECT s.data, s.revision, s.tick, s.${pkColumn.name}
 FROM ${indexTableRef(table)} AS i
 JOIN ${tableRef} AS s
-  $ON i.${pkColumn.name} = s.${pkColumn.name}
-$WHERE i.${table.indexColumn} = ?
+  $ON_is i.${pkColumn.name} = s.${pkColumn.name}
+$WHERE_i i.${table.indexColumn} = ?
 """
-  }
 
   private[this] val TrueFuture = Future successful Function.const[Boolean, PK](true) _
 
@@ -191,6 +177,9 @@ $WHERE i.${table.indexColumn} = ?
       superKeyQuery: List[(String, Any)] => Future[Set[PK]],
       selectSQL: Table => String)(
       getEntry: ResultSet => (PK, R)): Future[Map[PK, R]] = {
+
+    import cs.queryContext
+
     val columnMatches = indexColumnMatches.map(e => e._1.toLowerCase -> e._2).toMap
     val useIndexTables = columnMatches.toList.flatMap {
       case (columnName, matchValue) =>
@@ -206,9 +195,8 @@ $WHERE i.${table.indexColumn} = ?
         if (useIndexColumns.isEmpty) TrueFuture
         else superKeyQuery(useIndexColumns)
       val indexTablesResult: List[Future[Map[PK, R]]] = useIndexTables.map {
-        case (table, matchValue) => futureQuery { conn =>
-          val ps = conn.prepareStatement(selectSQL(table))
-          try {
+        case (table, matchValue) => cs.asyncQuery { conn =>
+          conn.prepare(selectSQL(table)) { ps =>
             ps.setValue(1, matchValue)(table.colType)
             val rs = ps.executeQuery()
             var map = Map.empty[PK, R]
@@ -219,7 +207,7 @@ $WHERE i.${table.indexColumn} = ?
               }
               map
             } finally Try(rs.close)
-          } finally Try(ps.close)
+          }
         }
       }
       for {
@@ -234,7 +222,9 @@ $WHERE i.${table.indexColumn} = ?
   }
 
   override protected def querySnapshot(
-      indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] =
+      indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
+    import cs.queryContext
+
     query(
       indexColumnMatch :: more.toList,
       () => super.querySnapshot(indexColumnMatch, more: _*),
@@ -244,8 +234,11 @@ $WHERE i.${table.indexColumn} = ?
         val stream = pkColumn.colType.readFrom(rs, 4)
         stream -> snapshot
       }
+  }
 
-  override protected def queryTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] =
+  override protected def queryTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
+    import cs.queryContext
+
     query(
       indexColumnMatch :: more.toList,
       () => super.queryTick(indexColumnMatch, more: _*),
@@ -255,5 +248,31 @@ $WHERE i.${table.indexColumn} = ?
         val stream = pkColumn.colType.readFrom(rs, 2)
         stream -> tick
       }
+  }
+
+  private[this] val ON_io = version.map(_ => s"ON i.version = o.version\n  AND ") getOrElse "ON "
+  private[this] val WHERE_d = version.map(v => s"\n  WHERE d.version=$v\n") getOrElse ""
+
+  override protected def selectDuplicatesSQL(indexColumn: String): String =
+    indexTablesByColumn.get(indexColumn.toLowerCase) match {
+      case None =>
+        super.selectDuplicatesSQL(indexColumn)
+
+      case Some(table) =>
+        val indexTableRef = this.indexTableRef(table)
+s"""
+SELECT i.$indexColumn, i.$pkColumnName, o.tick
+FROM $indexTableRef AS i
+JOIN $tableRef AS o
+  $ON_io i.$pkColumnName = o.$pkColumnName
+$WHERE_i i.$indexColumn IN (
+  SELECT d.$indexColumn
+  FROM $indexTableRef AS d$WHERE_d
+  GROUP BY d.$indexColumn
+  HAVING COUNT(*) > 1
+)
+"""
+
+    }
 
 }

@@ -1,14 +1,13 @@
 package delta
 
-import scuff.FakeType
 import scala.util.control.NonFatal
 
 @SerialVersionUID(1)
 final case class Transaction[+ID, +EVT](
-    tick: Long,
-    channel: Transaction.Channel,
+    tick: Tick,
+    channel: Channel,
     stream: ID,
-    revision: Int,
+    revision: Revision,
     metadata: Map[String, String],
     events: List[EVT]) {
   private def writeObject(out: java.io.ObjectOutputStream): Unit = {
@@ -17,13 +16,13 @@ final case class Transaction[+ID, +EVT](
   private def readObject(inp: java.io.ObjectInputStream): Unit = {
     Transaction.Serialization.readObject[ID, EVT](inp) {
       case (tick, ch, id, rev, metadata, events) =>
-        val surgeon = new scuff.reflect.Surgeon(this)
-        surgeon.tick = tick
-        surgeon.channel = ch
-        surgeon.stream = id
-        surgeon.revision = rev
-        surgeon.metadata = metadata
-        surgeon.events = events
+        val tx = new scuff.reflect.Surgeon(this)
+        tx.tick = tick
+        tx.channel = ch
+        tx.stream = id
+        tx.revision = rev
+        tx.metadata = metadata
+        tx.events = events
         this
     }
   }
@@ -31,12 +30,6 @@ final case class Transaction[+ID, +EVT](
 }
 
 object Transaction {
-
-  type Channel = Channel.Type
-  val Channel: FakeType[String] { type Type <: AnyRef } = new FakeType[String] {
-    type Type = String
-    def apply(str: String) = str
-  }
 
   object Serialization {
     def writeObject(tx: Transaction[_, _], out: java.io.ObjectOutput): Unit = {
@@ -68,7 +61,7 @@ object Transaction {
       }
     def readObject[ID, EVT](
         inp: java.io.ObjectInput)(
-        ctor: (Long, Channel, ID, Int, Map[String, String], List[EVT]) => Transaction[ID, EVT]): Transaction[ID, EVT] = {
+        ctor: (Tick, Channel, ID, Revision, Map[String, String], List[EVT]) => Transaction[ID, EVT]): Transaction[ID, EVT] = {
       val tick = inp.readLong()
       val ch = Channel(inp.readUTF)
       val id = inp.readObject.asInstanceOf[ID]

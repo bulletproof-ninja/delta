@@ -5,7 +5,7 @@ import scala.concurrent.ExecutionContext
 import com.hazelcast.core.HazelcastInstance
 import delta.MessageTransportPublishing
 import delta.hazelcast.TopicMessageTransport
-import delta.Transaction.Channel
+import delta.Channel
 import scuff.Codec
 import delta.Ticker
 import delta.EventSource

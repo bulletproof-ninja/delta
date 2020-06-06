@@ -3,12 +3,14 @@ package delta.write
 import delta.Projector
 
 /**
-  * This class encapsulates and transforms
-  * domain state, based on events.
+  * Encapsulates and transforms
+  * immutable domain state by applying events.
   */
-final class State[S >: Null, EVT] private[write] (projector: Projector[S, EVT], private[this] var _state: S) {
+final class State[S >: Null, EVT] private[write] (
+    projector: Projector[S, EVT],
+    private[this] var _state: S) {
 
-  @inline
+  @inline // Just mutate, don't collect event
   private[write] final def mutate(evt: EVT): Unit = reduce(evt)
   private[this] var _applied: List[EVT] = Nil
   private[write] final def appliedEvents =
@@ -33,7 +35,7 @@ final class State[S >: Null, EVT] private[write] (projector: Projector[S, EVT], 
   }
 
   /** Current state. */
-  def curr: S = _state
+  def get: S = _state
 
   override def toString =
     if (_state == null) "<uninitialized>"

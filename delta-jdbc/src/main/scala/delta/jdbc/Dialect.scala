@@ -3,7 +3,7 @@ package delta.jdbc
 import java.sql._
 
 import scuff._
-import delta.EventFormat
+import delta._
 import scala.util.Try
 
 class DefaultDialect[ID: ColumnType, EVT, SF: ColumnType](schema: String = null)
@@ -30,7 +30,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
 
   import Dialect.executeDDL
 
-  protected type Channel = delta.Transaction.Channel
+  protected type Channel = delta.Channel
 
   private[jdbc] def idType = implicitly[ColumnType[ID]]
   private[jdbc] def sfType = implicitly[ColumnType[SF]]
@@ -135,14 +135,9 @@ CREATE TABLE IF NOT EXISTS $metadataTable (
 """
   def createMetadataTable(conn: Connection): Unit = executeDDL(conn, metadataTableDDL)
 
-  private def prepareStatement[R](sql: String)(thunk: PreparedStatement => R)(
-      implicit conn: Connection): R = {
-    val ps = conn.prepareStatement(sql)
-    try thunk(ps) finally Try(ps.close)
-  }
   private def executeQuery[R](ps: PreparedStatement)(thunk: ResultSet => R): R = {
     val rs = ps.executeQuery()
-    try thunk(rs) finally rs.close()
+    try thunk(rs) finally Try(rs.close)
   }
   protected val streamInsert: String = s"""
 INSERT INTO $streamTable
@@ -151,7 +146,7 @@ INSERT INTO $streamTable
 """
   def insertStream(stream: ID, channel: Channel)(
       implicit conn: Connection): Unit = {
-    prepareStatement(streamInsert) { ps =>
+    conn.prepare(streamInsert) { ps =>
       ps.setValue(1, stream)
       ps.setString(2, channel.toString)
       ps.executeUpdate()
@@ -162,9 +157,9 @@ INSERT INTO $transactionTable
   (stream_id, revision, tick)
   VALUES (?, ?, ?)
 """
-  def insertTransaction(stream: ID, rev: Int, tick: Long)(
+  def insertTransaction(stream: ID, rev: Revision, tick: Tick)(
       implicit conn: Connection): Unit = {
-    prepareStatement(transactionInsert) { ps =>
+    conn.prepare(transactionInsert) { ps =>
       ps.setValue(1, stream)
       ps.setInt(2, rev)
       ps.setLong(3, tick)
@@ -176,9 +171,9 @@ INSERT INTO $eventTable
   (stream_id, revision, event_idx, event_name, event_version, event_data)
   VALUES (?, ?, ?, ?, ?, ?)
 """
-  def insertEvents(stream: ID, rev: Int, events: List[EVT])(
+  def insertEvents(stream: ID, rev: Revision, events: List[EVT])(
       implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
-    prepareStatement(eventInsert) { ps =>
+    conn.prepare(eventInsert) { ps =>
       val isBatch = events.tail.nonEmpty
       ps.setValue(1, stream)
       ps.setInt(2, rev)
@@ -200,9 +195,9 @@ INSERT INTO $metadataTable
   (stream_id, revision, metadata_key, metadata_val)
   VALUES (?, ?, ?, ?)
 """
-  def insertMetadata(stream: ID, rev: Int, metadata: Map[String, String])(
+  def insertMetadata(stream: ID, rev: Revision, metadata: Map[String, String])(
       implicit conn: Connection) = if (metadata.nonEmpty) {
-    prepareStatement(metadataInsert) { ps =>
+    conn.prepare(metadataInsert) { ps =>
       val isBatch = metadata.size > 1
       ps.setValue(1, stream)
       ps.setInt(2, rev)
@@ -231,8 +226,8 @@ INSERT INTO $metadataTable
   private val StreamColumnsIdx = Columns(StreamColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
   private val TxColumnsIdx = Columns(TxColumnsPrefixed.map(_.substring(2)).indexOf(_) + 1)
 
-  private[jdbc] case class Columns(
-      stream_id: Int, revision: Int,
+  private[jdbc] final case class Columns(
+      stream_id: Int, revision: Revision,
       tick: Int, channel: Int,
       event_idx: Int, event_name: Int, event_version: Int, event_data: Int,
       metadata_key: Int, metadata_val: Int)
@@ -259,7 +254,7 @@ WHERE stream_id = ?
 GROUP BY stream_id
 """
   def selectMaxRevision(stream: ID)(implicit conn: Connection): Option[Int] = {
-    prepareStatement(maxRevisionQuery) { ps =>
+    conn.prepare(maxRevisionQuery) { ps =>
       ps.setFetchSize(1)
       ps.setValue(1, stream)
       executeQuery(ps) { rs =>
@@ -269,17 +264,22 @@ GROUP BY stream_id
     }
   }
 
-  protected val maxTickQuery = s"""
+  protected def maxTickQuery = s"""
 SELECT MAX(tick)
 FROM $transactionTable
 """
   def selectMaxTick(implicit conn: Connection): Option[Long] = {
-    prepareStatement(maxTickQuery) { ps =>
-      ps.setFetchSize(1)
-      executeQuery(ps) { rs =>
+    val stm = conn.createStatement()
+    try {
+      val rs = stm executeQuery maxTickQuery
+      try {
         if (rs.next) Some(rs.getLong(1))
         else None
+      } finally {
+        Try(rs.close)
       }
+    } finally {
+      Try(stm.close)
     }
   }
 
@@ -301,7 +301,7 @@ $WHERE
 ORDER BY e.stream_id, e.revision, e.event_idx
 """
 
-  def selectTransactionsByChannels(channels: Set[Channel], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByChannels(channels: Set[Channel], sinceTick: Tick = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -310,7 +310,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
     } else "WHERE"
     val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size)}"
     val query = makeTxQuery(WHERE)
-    prepareStatement(query) { ps =>
+    conn.prepare(query) { ps =>
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
@@ -321,7 +321,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
       }
     }
   }
-  def selectTransactionsByEvents(eventsByChannel: Map[Channel, Set[Class[_ <: EVT]]], sinceTick: Long = Long.MinValue)(
+  def selectTransactionsByEvents(eventsByChannel: Map[Channel, Set[Class[_ <: EVT]]], sinceTick: Tick = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -332,7 +332,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
     val events = eventsByChannel.values.flatten
     val WHERE = s"$prefix ${makeWHEREByChannelsOrEvents(channels.size, events.size)}"
     val query = makeTxQuery(WHERE)
-    prepareStatement(query) { ps =>
+    conn.prepare(query) { ps =>
       val colIdx = Iterator.from(1)
       if (tickBound) ps.setLong(colIdx.next, sinceTick)
       channels foreach { channel =>
@@ -346,7 +346,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
       }
     }
   }
-  def selectTransactions(sinceTick: Long = Long.MinValue)(
+  def selectTransactions(sinceTick: Tick = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -355,7 +355,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
     } else {
       makeTxQuery()
     }
-    prepareStatement(query) { ps =>
+    conn.prepare(query) { ps =>
       if (tickBound) ps.setLong(1, sinceTick)
       executeQuery(ps) { rs =>
         thunk(rs, TxColumnsIdx)
@@ -395,7 +395,7 @@ ORDER BY e.revision, e.event_idx
   private val streamQueryFull = makeStreamQuery()
   def selectStreamFull(stream: ID)(thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
-    prepareStatement(streamQueryFull) { ps =>
+    conn.prepare(streamQueryFull) { ps =>
       ps.setValue(1, stream)
       executeQuery(ps) { rs =>
         thunk(rs, StreamColumnsIdx)
@@ -404,9 +404,9 @@ ORDER BY e.revision, e.event_idx
   }
 
   private val streamQuerySingleRevision = makeStreamQuery("AND t.revision = ?")
-  def selectStreamRevision(stream: ID, revision: Int)(thunk: (ResultSet, Columns) => Unit)(
+  def selectStreamRevision(stream: ID, revision: Revision)(thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
-    prepareStatement(streamQuerySingleRevision) { ps =>
+    conn.prepare(streamQuerySingleRevision) { ps =>
       ps.setValue(1, stream)
       ps.setInt(2, revision)
       executeQuery(ps) { rs =>
@@ -420,7 +420,7 @@ ORDER BY e.revision, e.event_idx
       implicit conn: Connection): Unit = {
     val bounded = range.last != Int.MaxValue
     val query = if (bounded) streamQueryRevisionRange else streamQueryFromRevision
-    prepareStatement(query) { ps =>
+    conn.prepare(query) { ps =>
       ps.setValue(1, stream)
       ps.setInt(2, range.head)
       if (bounded) ps.setInt(3, range.last)

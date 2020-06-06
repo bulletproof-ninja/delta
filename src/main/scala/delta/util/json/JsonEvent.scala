@@ -1,27 +1,27 @@
 package delta.util.json
 
-import delta.EventFormat, EventFormat.Encoded
-import delta.Transaction
+import delta._, EventFormat.Encoded
+
 import scuff.Codec
 import scuff.json._, JsVal._
 
 /**
  * Generic event/JSON codec, leveraging any existing `EventFormat` instance.
- * NOTE: While this class requires `channel` and `metadata` per instance, and
+ * @note While this class requires `channel` and `metadata` per instance, and
  * is thus meant to be created *per* transaction, it's only necessary if the
  * supplied `EventFormat` need any of those. Otherwise it's fine to re-use an instance.
  */
 class JsonEvent[EVT, EF](evtFmt: EventFormat[EVT, EF])(
-    channel: Transaction.Channel, metadata: Map[String, String])(
+    channel: Channel, metadata: Map[String, String])(
     implicit
     toJson: EF => JSON, fromJson: JSON => EF)
   extends Codec[EVT, JSON] {
 
-  def this(evtFmt: EventFormat[EVT, EF], jsonCodec: Codec[EF, JSON])(channel: Transaction.Channel, metadata: Map[String, String]) =
+  def this(evtFmt: EventFormat[EVT, EF], jsonCodec: Codec[EF, JSON])(channel: Channel, metadata: Map[String, String]) =
     this(evtFmt)(channel, metadata)(jsonCodec.encode, jsonCodec.decode)
 
   def this(jsonCodec: Codec[EF, JSON])(
-      channel: Transaction.Channel, metadata: Map[String, String])(
+      channel: Channel, metadata: Map[String, String])(
       implicit
       evtFmt: EventFormat[EVT, EF]) =
     this(evtFmt)(channel, metadata)(jsonCodec.encode, jsonCodec.decode)

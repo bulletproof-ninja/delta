@@ -21,7 +21,7 @@ abstract class UpdateCodec[S, U] {
       : Update = {
 
     val change = if (contentUpdated) Option {
-      asUpdate(prevSnapshot.map(_.content), currSnapshot.content)
+      asUpdate(prevSnapshot.map(_.state), currSnapshot.state)
     } else None
 
     new Update(change, currSnapshot.revision, currSnapshot.tick)
@@ -38,7 +38,7 @@ abstract class UpdateCodec[S, U] {
           _.copy(revision = update.revision, tick = update.tick)
         }
       case Some(updateContent) =>
-        asSnapshot(prevSnapshot.map(_.content), updateContent)
+        asSnapshot(prevSnapshot.map(_.state), updateContent)
           .map(new Snapshot(_, update.revision, update.tick))
     }
 
@@ -47,16 +47,10 @@ abstract class UpdateCodec[S, U] {
 }
 
 object UpdateCodec {
-  private val noop = new UpdateCodec[Any, Any] {
-    def asUpdate(prevState: Option[Any], currState: Any): Any = currState
-    def asSnapshot(prevState: Option[Any], update: Any): Option[Any] = Some(update)
-  }
   private val none = new UpdateCodec[Any, Null] {
     def asUpdate(prevState: Option[Any], currState: Any): Null = null
     def asSnapshot(prevState: Option[Any], update: Null): Option[Any] = scala.None
   }
-
-  implicit def Default[S] = noop.asInstanceOf[UpdateCodec[S, S]]
   def None[S, U] = none.asInstanceOf[UpdateCodec[S, U]]
 
 }

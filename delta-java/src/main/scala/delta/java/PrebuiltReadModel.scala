@@ -8,7 +8,7 @@ import java.util.concurrent.ScheduledExecutorService
 
 abstract class PrebuiltReadModel[ID, S, MHID, U](
   defaultReadTimeout: FiniteDuration,
-  protected val hub: MessageHub[MHID, Update[U]],
+  protected val hub: MessageHub[MHID, delta.process.Update[U]],
   protected val scheduler: ScheduledExecutorService)(
   implicit
   idConv: ID => MHID)

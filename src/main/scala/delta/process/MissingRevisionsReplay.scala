@@ -19,7 +19,10 @@ trait MissingRevisionsReplay[ID, EVT] {
   private[this] val outstandingReplays = new TrieMap[ID, (Range, ScheduledFuture[_])]
 
   protected def replayMissingRevisions(
-      es: EventSource[ID, _ >: EVT], replayDelay: FiniteDuration, scheduler: ScheduledExecutorService, reportFailure: Throwable => Unit)(
+      es: EventSource[ID, _ >: EVT],
+      replayDelay: FiniteDuration,
+      scheduler: ScheduledExecutorService,
+      reportFailure: Throwable => Unit)(
       id: ID, missing: Range)(replayProcess: Transaction => _): Unit =
     if (!(outstandingReplays contains id)) {
       scheduleRevisionsReplay(id, missing, es, scheduler, replayDelay, reportFailure, replayProcess)

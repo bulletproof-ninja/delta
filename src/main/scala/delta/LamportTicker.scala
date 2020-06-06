@@ -13,17 +13,17 @@ final class LamportTicker private (impl: LamportClock, onClose: () => Unit) exte
   @inline private def checkClosed(): Unit =
     if (closed) throw new IllegalStateException(s"Ticker has been closed.")
 
-  def nextTick(): Long = {
+  def nextTick(): Tick = {
     checkClosed()
     impl.next()
   }
 
-  def nextTick(lastTick: Long): Long = {
+  def nextTick(lastTick: Tick): Tick = {
     checkClosed()
-    impl.next(lastTick)
+    impl next lastTick
   }
 
-  def close = {
+  def close = if (!closed) {
     closed = true
     Try(onClose)
   }

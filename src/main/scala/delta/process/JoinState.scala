@@ -1,12 +1,13 @@
 package delta.process
 
+import delta._
+
 import scala.concurrent.Future
-import delta.Snapshot
 import scala.reflect.ClassTag
 
 object JoinState {
 
-  final class Processor[S](processState: Option[S] => S, val revision: Int) {
+  final class Processor[S](processState: Option[S] => S, val revision: Revision) {
     def this(processState: Option[S] => S) = this(processState, -1)
 
     @inline def apply(state: Option[S]): S = processState(state)
@@ -15,7 +16,7 @@ object JoinState {
   }
 
   def Processor[S: ClassTag](process: Option[S] => S): Processor[S] = new Processor(process)
-  def Processor[S: ClassTag](process: Option[S] => S, revision: Int): Processor[S] =
+  def Processor[S: ClassTag](process: Option[S] => S, revision: Revision): Processor[S] =
     new Processor(process, revision)
 
 }
@@ -23,7 +24,7 @@ object JoinState {
 /**
  * Build additional, or exclusively, collateral
  * state, similar to an outer join.
- * NOTE: Because the state is not built from its
+ * @note Because the state is not built from its
  * own stream, there's no guarantee of ordering
  * other than the monotonic order of the stream
  * itself. Duplicate events *may* be observed and
@@ -38,7 +39,7 @@ trait JoinState[ID, EVT, S >: Null] {
 
   protected final def Processor(process: Option[S] => S): Processor =
     new Processor(process)
-  protected final def Processor(process: Option[S] => S, revision: Int): Processor =
+  protected final def Processor(process: Option[S] => S, revision: Revision): Processor =
     new Processor(process, revision)
 
   /** Process stream as normally implemented through `process`. */
@@ -59,8 +60,8 @@ trait JoinState[ID, EVT, S >: Null] {
    *  @return Map of joined stream ids and state processor(s) derivable from event
    */
   protected def prepareJoin(
-      streamId: ID, streamRevision: Int,
-      tick: Long, metadata: Map[String, String])(evt: EVT): Map[ID, _ <: Processor]
+      streamId: ID, streamRevision: Revision,
+      tick: Tick, metadata: Map[String, String])(evt: EVT): Map[ID, _ <: Processor]
 
   protected def prepareJoin(tx: Transaction): Map[ID, Processor] = {
     import scuff._
@@ -95,7 +96,7 @@ trait MonotonicJoinState[ID, EVT, S >: Null, U]
           val result: Future[(Option[Update], _)] =
             this.processStore.upsert(id) { snapshot =>
               val tick = snapshot.map(_.tick max tx.tick) getOrElse tx.tick
-              val updatedSnapshot = processor(snapshot.map(_.content)) match {
+              val updatedSnapshot = processor(snapshot.map(_.state)) match {
                 case null => None
                 case updatedState => Some {
                   Snapshot(updatedState, processor.revision, tick)

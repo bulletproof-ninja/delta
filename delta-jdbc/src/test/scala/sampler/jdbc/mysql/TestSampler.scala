@@ -1,6 +1,6 @@
 package sampler.jdbc.mysql
 
-import org.junit.Assert.assertTrue
+import org.junit.Assert._
 import org.junit._
 
 //import com.mysql.jdbc.jdbc2.optional.MysqlConnectionPoolDataSource
@@ -8,15 +8,17 @@ import com.mysql.cj.jdbc.MysqlConnectionPoolDataSource
 
 import sampler.{ JSON, JsonDomainEventFormat }
 import sampler.aggr.DomainEvent
+
 import delta.jdbc._
 import delta.jdbc.mysql.MySQLDialect
 import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalTransport
-import org.junit.AfterClass
-import scuff.jdbc.DataSourceConnection
 import delta.MessageTransportPublishing
-import scuff.jdbc.ConnectionSource
+
+
+import scuff.jdbc._
 import scuff.SysProps
+import scala.concurrent.ExecutionContext
 
 object TestSampler {
   val db = "delta_testing_sampler"
@@ -43,10 +45,12 @@ final class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     val sql = new MySQLDialect[Int, DomainEvent, JSON]
-    val cs = new ConnectionSource with DataSourceConnection {
+    val cs = new AsyncConnectionSource with DataSourceConnection {
+      override def updateContext: ExecutionContext = RandomDelayExecutionContext
+      override def queryContext: ExecutionContext = RandomDelayExecutionContext
       def dataSource = TestSampler.ds
     }
-    new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)(initTicker)
+    new JdbcEventStore(JsonDomainEventFormat, sql, cs)(initTicker)
     with MessageTransportPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(s"tx-$ch")
       def toTopic(tx: Transaction): Topic = toTopic(tx.channel)

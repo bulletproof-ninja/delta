@@ -16,25 +16,25 @@ class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null: ClassTag](
   imap: IMap[ID, _ <: EntryState[S, EVT]],
   getProjector: delta.Transaction[ID, _ >: EVT] => Projector[S, EVT],
   reportFailure: Throwable => Unit,
-  missingRevisionsReplayScheduler: ScheduledExecutorService,
-  missingRevisionsReplayDelay: FiniteDuration)
-extends (delta.Transaction[ID, _ >: EVT] => Future[Any])
+  missingRevisionsReplayDelay: FiniteDuration)(
+  implicit
+  ec: ExecutionContext,
+  scheduler: ScheduledExecutorService)
+extends (delta.Transaction[ID, _ >: EVT] => Future[EntryUpdateResult])
 with MissingRevisionsReplay[ID, EVT] {
 
-  implicit private[this] val ec =
-    ExecutionContext.fromExecutorService(missingRevisionsReplayScheduler, reportFailure)
-
   private[this] val replay =
-    replayMissingRevisions(es, missingRevisionsReplayDelay, missingRevisionsReplayScheduler, reportFailure) _
+    replayMissingRevisions(es, missingRevisionsReplayDelay, scheduler, reportFailure) _
 
   type Transaction = delta.Transaction[ID, _ >: EVT]
   def apply(tx: Transaction) = {
     val projector = getProjector(tx)
     DistributedMonotonicProcessor(imap, projector)(tx)
       .andThen {
-      case Success(MissingRevisions(range)) =>
-        replay(tx.stream, range)(apply)
-      case Failure(th) => reportFailure(th)
-    }
+        case Success(MissingRevisions(range)) =>
+          replay(tx.stream, range)(apply)
+        case Failure(th) =>
+          reportFailure(th)
+      }
   }
 }

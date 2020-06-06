@@ -3,18 +3,19 @@ package delta.testing
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
 import scala.collection.concurrent.TrieMap
+import scala.concurrent._, duration._
+import scala.util.{ Random => rand }
 
 import org.junit.Assert._
 import org.junit.Test
 
-import delta.{ Projector, Snapshot, Transaction }
-import Transaction.Channel
-import scuff.concurrent.{ PartitionedExecutionContext, ScuffFutureObject }
-import scala.concurrent._, duration._
-import scala.util.{ Random => rand }
+import delta._
 import delta.process.MonotonicReplayProcessor
 import delta.process.ConcurrentMapStore
 import delta.process.Update
+
+import scuff.concurrent.{ PartitionedExecutionContext, ScuffFutureObject }
+
 
 class TestMonotonicProcessor {
   private[this] val NoFallback = (_: Int) => Future.none
@@ -31,11 +32,11 @@ class TestMonotonicProcessor {
       @volatile var lastUpdate: Update[String] = _
       @volatile var latch: CountDownLatch = _
     }
-    class Mono(ec: ExecutionContext)
+    class Mono(implicit ec: ExecutionContext)
       extends MonotonicReplayProcessor[Int, Char, String, String, Unit](
         20.seconds,
-        ConcurrentMapStore(Tracker.snapshotMap, None)(NoFallback)) {
-      def whenDone() = Future successful (())
+        ConcurrentMapStore(Tracker.snapshotMap, "", None)(NoFallback)) {
+      def whenDone() = Future.unit
       override def onUpdate(id: Int, update: Update) = {
         // println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
         // assertEquals(42, update.id)
@@ -88,7 +89,7 @@ class TestMonotonicProcessor {
         Tracker.clear()
         val txSequence = { txs.map(_.revision).mkString(",") }
         //        println(s"----------------- $n: $txSequence using $ec ---------------")
-        val mp = new Mono(ec)
+        val mp = new Mono()(ec)
         txs.map(mp).foreach(_.await)
         assertTrue(
           s"(Latch: ${Tracker.latch.getCount}) Timed out on number $n with the following revision sequence: $txSequence, using EC $ec",
@@ -120,12 +121,12 @@ class TestMonotonicProcessor {
         val snapshotMap = new TrieMap[Int, State]
         val processor = new MonotonicReplayProcessor[Int, Char, String, String, Unit](
           20.seconds,
-          ConcurrentMapStore(snapshotMap, None)(NoFallback)) {
+          ConcurrentMapStore(snapshotMap, "", None)(NoFallback)) {
           protected def processContext(id: Int): ExecutionContext = ec match {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
           }
-          protected def whenDone() = Future successful (())
+          protected def whenDone() = Future.unit
           protected def process(tx: Transaction, currState: Option[String]) = {
             val sb = new StringBuilder(currState getOrElse "")
             tx.events.foreach {

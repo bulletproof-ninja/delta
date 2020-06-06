@@ -6,19 +6,22 @@ import org.junit._
 //import com.mysql.jdbc.jdbc2.optional.MysqlDataSource
 import com.mysql.cj.jdbc.MysqlDataSource
 
-import college.CollegeEvent
-import delta.EventStore
+import college._
+import college.jdbc.JdbcEmailValidationProcessStore
+
 import delta.jdbc._
 import delta.jdbc.mysql._
 import delta.testing.RandomDelayExecutionContext
 import delta.util.LocalTransport
-import scuff.jdbc.DataSourceConnection
 import delta.MessageTransportPublishing
-import scuff.jdbc.ConnectionSource
-import college.CollegeEventFormat
-import college.jdbc.StudentEmailsStore
+
 import scuff.SysProps
+import scuff.jdbc._
+
 import java.{util => ju}
+
+import delta.validation.ConsistencyValidation
+import scala.concurrent.ExecutionContext
 
 object TestCollege {
   val db = s"delta_testing_${ju.UUID.randomUUID}".replace('-', '_')
@@ -43,21 +46,29 @@ class TestCollege extends college.jdbc.TestCollege {
 
   import TestCollege._
 
-  lazy val connSource = new ConnectionSource with DataSourceConnection {
+  lazy val connSource = new AsyncConnectionSource with DataSourceConnection {
+
+    override def updateContext: ExecutionContext = RandomDelayExecutionContext
+
+    override def queryContext: ExecutionContext = RandomDelayExecutionContext
+
     val dataSource = ds
   }
 
-  override def newLookupServiceProcStore =
-    (new StudentEmailsStore(connSource, 1, WithTimestamp("last_updated"), ec) with MySQLSyntax).ensureTable()
+  override def newEmailValidationProcessStore() = {
+    new JdbcEmailValidationProcessStore(connSource, 1, None, TimestampColumn("last_updated")) with MySQLSyntax
+  }.ensureTable()
 
-  override def newEventStore: EventStore[Int, CollegeEvent] = {
+  override def newEventStore(): CollegeEventStore = {
     val sql = new MySQLDialect[Int, CollegeEvent, Array[Byte]]
-    new JdbcEventStore(CollegeEventFormat, sql, connSource, RandomDelayExecutionContext)(initTicker)
-    with MessageTransportPublishing[Int, CollegeEvent] {
+    new JdbcEventStore(CollegeEventFormat, sql, connSource)(initTicker)
+    with MessageTransportPublishing[Int, CollegeEvent]
+    with ConsistencyValidation[Int, CollegeEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
       val txCodec = scuff.Codec.noop[Transaction]
+      def validationContext(stream: Int) = RandomDelayExecutionContext
     }.ensureSchema()
   }
 

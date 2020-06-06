@@ -12,9 +12,11 @@ import scala.annotation.implicitNotFound
 trait EventFormat[EVT, SF] {
 
   type Encoded = EventFormat.Encoded[SF]
-  type Channel = Transaction.Channel
   type EventClass = Class[_ <: EVT]
   final def NoVersion = EventFormat.NoVersion
+
+  final def adapt[A](implicit adapter: Codec[SF, A]): EventFormat[EVT, A] =
+    new EventFormatAdapter[EVT, A, SF](adapter, this)
 
   final def signature(evt: EVT): EventFormat.EventSig = signatures.get(evt.getClass)
   final def signature(cls: EventClass): EventFormat.EventSig = signatures.get(cls)
@@ -52,7 +54,7 @@ object EventFormat {
   /** Use this if versioning is not desired. */
   final val NoVersion: Byte = -1
 
-  case class EventSig(name: String, version: Byte)
+  final case class EventSig(name: String, version: Byte)
 
   /**
    * Encoded event with transaction channel and metadata.
@@ -62,7 +64,7 @@ object EventFormat {
    * @param channel Stream channel
    * @param metadata Transaction metadata
    */
-  class Encoded[SF] (val name: String, _version: Byte, val data: SF, val channel: Transaction.Channel, val metadata: Map[String, String]) {
+  class Encoded[SF] (val name: String, _version: Byte, val data: SF, val channel: Channel, val metadata: Map[String, String]) {
 
     def withData[T](t: T): Encoded[T] = new Encoded(name, _version, t, channel, metadata)
     def mapData[T](f: SF => T): Encoded[T] = new Encoded(name, _version, f(data), channel, metadata)
@@ -76,6 +78,7 @@ object EventFormat {
       else throw new IllegalStateException(s"Versioning not supported for event '$name'")
 
   }
+
 }
 
 class EventFormatAdapter[EVT, A, B](

@@ -40,8 +40,6 @@ package object sampler {
 
   type JSON = String
 
-  implicit def toFuture[T](t: T): Future[T] = Future successful t
-
   type DeptId = Id[Department]
   type EmpId = Id[Employee]
 

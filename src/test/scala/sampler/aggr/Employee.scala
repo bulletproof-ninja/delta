@@ -35,7 +35,7 @@ object Employee {
   object Def extends Entity("Employee", EmpProjector) {
     type Id = EmpId
     type Type = Employee
-    def init(state: State, mergeEvents: List[EmpEvent]) = new Employee(state)
+    def init(state: State, concurrentUpdates: List[Transaction]) = new Employee(state)
     def state(employee: Employee) = employee.state
     def validate(state: EmpState) = require(state != null)
   }
@@ -44,7 +44,7 @@ object Employee {
 
 class Employee private[aggr] (
     private[aggr] val state: Employee.State = Employee.Def.newState()) {
-  @inline private def emp = state.curr
+  @inline private def emp = state.get
 
   def apply(cmd: UpdateSalary): this.type =  {
     checkAndUpdateSalary(cmd.newSalary)

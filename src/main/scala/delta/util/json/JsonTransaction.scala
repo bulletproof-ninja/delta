@@ -2,14 +2,14 @@ package delta.util.json
 
 import scuff.Codec
 import scuff.json._, JsVal._
-import delta.Transaction
-import delta.EventFormat
+
+import delta._
 
 /**
  * @tparam ID Id type
  * @tparam EVT Event type
  */
-class JsonTransaction[ID, EVT](jsonIdCodec: Codec[ID, JSON], jsonEventCodec: (Transaction.Channel, Map[String, String]) => Codec[EVT, JSON])
+class JsonTransaction[ID, EVT](jsonIdCodec: Codec[ID, JSON], jsonEventCodec: (Channel, Map[String, String]) => Codec[EVT, JSON])
   extends Codec[Transaction[ID, EVT], JSON] {
 
   def this(jsonIdCodec: Codec[ID, JSON], jsonEventFormat: EventFormat[EVT, JSON]) =
@@ -38,7 +38,7 @@ class JsonTransaction[ID, EVT](jsonIdCodec: Codec[ID, JSON], jsonEventCodec: (Tr
   def decode(json: JSON): Transaction[ID, EVT] = {
     val jsTx = (JsVal parse json).asObj
     val tick = jsTx(tickField).asNum.toLong
-    val channel = Transaction.Channel(jsTx(channelField).asStr.value)
+    val channel = Channel(jsTx(channelField).asStr.value)
     val streamId = jsonIdCodec.decode(jsTx(streamField).toJson)
     val revision = jsTx(revisionField).asNum.toInt
     val metadata = jsTx(metadataField).asObj.props.map(e => e._1 -> e._2.asStr.value)

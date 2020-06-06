@@ -33,7 +33,7 @@ class JsonSnapshot[T](contentJsonCodec: Codec[T, String], contentFieldName: Stri
       this(contentJsonCodec, JsonSnapshot.DefaultContentFieldName)
 
   def encode(snapshot: Snapshot[T]): String = {
-    val contentField: String = s""","$contentFieldName":${contentJsonCodec encode snapshot.content}"""
+    val contentField: String = s""","$contentFieldName":${contentJsonCodec encode snapshot.state}"""
     val revisionField = if (snapshot.revision < 0) "" else s""","revision":${snapshot.revision}"""
     s"""{"tick":${snapshot.tick}$revisionField$contentField}"""
   }

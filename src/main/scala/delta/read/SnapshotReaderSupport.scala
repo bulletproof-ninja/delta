@@ -3,9 +3,18 @@ package delta.read
 import delta.SnapshotReader
 import scala.concurrent._
 
+/**
+  * Support use of [[delta.SnapshotReader]] as
+  * backend for read model.
+  * @note The [[delta.process.StreamProcessStore]] is
+  * a sub-type of [[delta.SnapshotReader]] and is the
+  * most common usage.
+  */
 trait SnapshotReaderSupport[ID, S]
-extends StreamId[ID] {
+extends StreamId {
   rm: ReadModel[ID, S] =>
+
+  implicit protected def toUnit[T](any: T): Unit = ()
 
   protected def snapshotReader: SnapshotReader[StreamId, _ >: S]
 

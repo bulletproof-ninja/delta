@@ -1,6 +1,7 @@
 package delta.read.impl
 
 import scala.concurrent._, duration._
+
 import delta.read._
 
 /**
@@ -24,9 +25,14 @@ with SubscriptionSupport[ID, V, U] {
   protected type StreamId = SID
   protected def StreamId(id: ID) = idConv(id)
 
-  protected def readAgain(id: ID, minRevision: Int, minTick: Long)(
-      implicit
-      ec: ExecutionContext): Future[Option[Snapshot]] =
-    readSnapshot(id)
+}
+
+abstract class SimplePrebuiltReadModel[ID, S, SID](
+  defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
+  implicit
+  idConv: ID => SID)
+extends PrebuiltReadModel[ID, S, SID, S](defaultReadTimeout) {
+
+  protected def updateState(id: ID, prevState: Option[S], currState: S): Option[S] = Some(currState)
 
 }

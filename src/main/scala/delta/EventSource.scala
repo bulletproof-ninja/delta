@@ -3,9 +3,9 @@ package delta
 import scala.concurrent.Future
 
 import scuff.Subscription
-import scuff.StreamConsumer
 import scala.annotation.varargs
 import scala.reflect.ClassTag
+import scuff.StreamConsumer
 
 /**
   * Event source.
@@ -13,35 +13,46 @@ import scala.reflect.ClassTag
 trait EventSource[ID, EVT] {
 
   protected implicit val channelTag: ClassTag[Channel] = ClassTag(classOf[String])
-  type Channel = Transaction.Channel
+  type Channel = delta.Channel
   type Transaction = delta.Transaction[ID, EVT]
 
-  def currRevision(stream: ID): Future[Option[Int]]
-  def maxTick(): Future[Option[Long]]
+  def currRevision(stream: ID): Future[Option[Revision]]
+  def maxTick(): Future[Option[Tick]]
   def ticker: Ticker
 
   /** Replay complete stream. */
-  def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit
+  def replayStream[R](stream: ID)(
+      callback: StreamConsumer[Transaction, R]): Unit
+
   /** Replay stream from provided revision range. */
-  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(
+      callback: StreamConsumer[Transaction, R]): Unit
+
   /** Replay stream from provided revision to current. */
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(
+      callback: StreamConsumer[Transaction, R]): Unit
+
   /** Replay stream from revision 0 to specific revision (inclusive). */
-  def replayStreamTo[R](stream: ID, toRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit =
+  def replayStreamTo[R](stream: ID, toRevision: Revision)(
+      callback: StreamConsumer[Transaction, R]): Unit =
     replayStreamRange(stream, 0 to toRevision)(callback)
 
   /** Query across streams, optionally providing a selector to filter results. */
-  def query[U](selector: Selector = Everything)(callback: StreamConsumer[Transaction, U]): Unit
-  /** Query across streams, optionally providing a selector to filter results. */
-  def querySince[U](sinceTick: Long, selector: Selector = Everything)(callback: StreamConsumer[Transaction, U]): Unit
+  def query[R](
+      selector: Selector = Everything)(
+      callback: StreamConsumer[Transaction, R]): Unit
 
-  /** Subscribe to all transactions, if publishing. */
+  /** Query across streams, optionally providing a selector to filter results. */
+  def querySince[R](
+      sinceTick: Tick, selector: Selector = Everything)(
+      callback: StreamConsumer[Transaction, R]): Unit
+
+  /** Subscribe to all transactions. */
   final def subscribe[U]()(callback: Transaction => U): Subscription = subscribe(Everything)(callback)
-  /** Subscribe to selected transactions, if publishing. */
+  /** Subscribe to selected transactions. */
   def subscribe[U](
       selector: StreamsSelector)(
-      callback: Transaction => U): Subscription =
-    sys.error(s"Subscribe not enabled! Consider applying trait ${classOf[MessageTransportPublishing[_, _]].getName}")
+      callback: Transaction => U): Subscription
 
   type CEVT = Class[_ <: EVT]
 
@@ -69,7 +80,7 @@ trait EventSource[ID, EVT] {
   }
 
   /** All streams, all channels, unbroken. */
-  case object Everything extends StreamsSelector {
+  final case object Everything extends StreamsSelector {
     def channelSubset: Set[Channel] = Set.empty
     def include(tx: Transaction) = true
   }
@@ -79,7 +90,7 @@ trait EventSource[ID, EVT] {
   def ChannelSelector(channels: Seq[Channel]): StreamsSelector =
     new ChannelSelector(channels.toSet)
   /** All streams in the provided channels, unbroken. */
-  case class ChannelSelector private[EventSource] (channels: Set[Channel]) extends StreamsSelector {
+  final case class ChannelSelector private[EventSource] (channels: Set[Channel]) extends StreamsSelector {
     require(channels.nonEmpty)
     def channelSubset: Set[Channel] = channels
     def include(tx: Transaction) = channels.contains(tx.channel)
@@ -96,18 +107,17 @@ trait EventSource[ID, EVT] {
     * be used if necessary, i.e. on data sets so large that
     * it would otherwise take too long to process.
     *
-    * NOTE:
-    *
-    *   * Steps should be taken to ensure that the stream
+    * @note
+    *   - Steps should be taken to ensure that the stream
     *     revision number is still current, since this cannot
     *     be guaranteed when consuming incomplete streams.
-    *   * Transactions will still contain all events
+    *   - Transactions will still contain all events
     *     for that transaction, not just those selected. Only
     *     transactions not including the selected events at all
     *     will be excluded.
     *
     */
-  case class EventSelector private[EventSource] (byChannel: Map[Channel, Set[CEVT]])
+  final case class EventSelector private[EventSource] (byChannel: Map[Channel, Set[CEVT]])
     extends Selector {
     require(byChannel.nonEmpty)
     require(byChannel.forall(_._2.nonEmpty), s"No events: ${byChannel.filter(_._2.isEmpty).map(_._1).mkString(", ")}")
@@ -123,7 +133,7 @@ trait EventSource[ID, EVT] {
   }
 
   def SingleStreamSelector(stream: ID, channel: Channel): StreamsSelector = new SingleStreamSelector(stream, channel)
-  case class SingleStreamSelector private[EventSource] (stream: ID, channel: Channel) extends StreamsSelector {
+  final case class SingleStreamSelector private[EventSource] (stream: ID, channel: Channel) extends StreamsSelector {
     def channelSubset: Set[Channel] = Set(channel)
     def include(tx: Transaction) = {
       assert(tx.channel == channel) // Stream ids are unique across channels, thus merely assert

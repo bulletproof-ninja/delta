@@ -7,16 +7,14 @@ import scala.collection.immutable.TreeMap
 import scala.concurrent._, duration._
 import scala.reflect.{ ClassTag, classTag }
 
-import delta.{ Snapshot, Transaction, Projector }
+import delta._
+import delta.process.{ AsyncCodec, Update }
 
 import com.hazelcast.core._
 import com.hazelcast.map.AbstractEntryProcessor
 
-import delta.process.AsyncCodec
-
 import scuff.Codec
 import scuff.concurrent._
-import delta.process.Update
 
 object DistributedMonotonicProcessor {
 
@@ -98,7 +96,7 @@ with Offloadable {
 
         if (entryState.unapplied.isEmpty) { // No unapplied, so must have snapshot
           val snapshot = entryState.snapshot
-          val updContent = if (entryState.contentUpdated) Some(snapshot.content) else None
+          val updContent = if (entryState.contentUpdated) Some(snapshot.state) else None
           Updated(Update(updContent, snapshot.revision, snapshot.tick))
         } else { // Have unapplied, so revisions still missing
           val firstMissingRev = entryState.snapshot match {
@@ -146,16 +144,16 @@ with Offloadable {
 
   private def processTransactions(
       unapplied: TreeMap[Int, delta.Transaction[_, EVT]], snapshot: Snapshot[S]): EntryState = {
-    val state = stateCodec decode snapshot.content
+    val state = stateCodec decode snapshot.state
     processTransactions(
-      unapplied, Some(snapshot.revision -> snapshot.content),
+      unapplied, Some(snapshot.revision -> snapshot.state),
       Some(state), snapshot.revision, snapshot.tick)
   }
 
   @tailrec
   private def processTransactions(
       unapplied: TreeMap[Int, delta.Transaction[_, EVT]], origState: Option[(Int, S)] = None,
-      currState: Option[W] = None, revision: Int = -1, tick: Long = Long.MinValue): EntryState = {
+      currState: Option[W] = None, revision: Revision = -1, tick: Tick = Long.MinValue): EntryState = {
 
     unapplied.headOption match {
 
@@ -173,7 +171,7 @@ with Offloadable {
                 val encoding = stateCodec.encode(currState)(Threads.PiggyBack)
                 val newState = encoding await Duration.Zero // Duration irrelevant when piggybacking
                 val snapshot = Snapshot(newState, revision, tick)
-                val contentUpdated = !origState.exists(snapshot.contentEquals)
+                val contentUpdated = !origState.exists(snapshot.stateEquals)
                 snapshot -> contentUpdated
             }
           case None => (null: Snapshot[S]) -> false

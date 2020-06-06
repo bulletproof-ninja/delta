@@ -1,12 +1,11 @@
 package delta.util
 
-import scala.reflect.{ ClassTag, classTag }
-import java.lang.reflect.Method
-import delta.EventFormat
+import scala.reflect.{ ClassTag, classTag, NameTransformer }
+
 import java.util.{ HashMap => JMap }
-import scala.reflect.NameTransformer
-import java.lang.reflect.InvocationTargetException
-import delta.Transaction
+import java.lang.reflect.{ Method, InvocationTargetException }
+
+import delta._
 
 object ReflectiveDecoder {
   sealed trait DecoderMethodMatch
@@ -30,18 +29,18 @@ object ReflectiveDecoder {
  */
 abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (
     decoderMatch: ReflectiveDecoder.DecoderMethodMatch,
-    exclusiveChannel: Option[Transaction.Channel])
+    exclusiveChannel: Option[Channel])
   extends EventFormat[EVT, SF] {
 
   import ReflectiveDecoder._
 
   protected def this() =
     this(ReflectiveDecoder.MatchOnReturnType, None)
-  protected def this(exclusiveChannel: Transaction.Channel) =
+  protected def this(exclusiveChannel: Channel) =
     this(ReflectiveDecoder.MatchOnReturnType, Option(exclusiveChannel))
   protected def this(decoderSig: ReflectiveDecoder.DecoderMethodMatch) =
     this(decoderSig, None)
-  protected def this(decoderSig: ReflectiveDecoder.DecoderMethodMatch, exclusiveChannel: Transaction.Channel) =
+  protected def this(decoderSig: ReflectiveDecoder.DecoderMethodMatch, exclusiveChannel: Channel) =
     this(decoderSig, Option(exclusiveChannel))
 
   private[this] val getEventName: (Method => String) = {

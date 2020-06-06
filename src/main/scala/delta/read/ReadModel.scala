@@ -2,6 +2,8 @@ package delta.read
 
 import scala.concurrent.{ Future, ExecutionContext }
 
+import delta.{ Revision, Tick }
+
 /**
  * Basic read-model. May be either consistent
  * or eventually consistent, depending on
@@ -9,6 +11,7 @@ import scala.concurrent.{ Future, ExecutionContext }
  */
 trait ReadModel[ID, S] {
 
+  type Id = ID
   type Snapshot = delta.Snapshot[S]
 
   protected def readSnapshot(id: ID)(
@@ -22,7 +25,7 @@ trait ReadModel[ID, S] {
    *
    * @return Latest accessible snapshot, or [[delta.read.UnknownIdRequested]] if unknown id
    */
-  def read(id: ID, minRevision: Option[Int] = None)(
+  def read(id: ID, minRevision: Option[Revision] = None)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
     minRevision match {
@@ -40,7 +43,7 @@ trait ReadModel[ID, S] {
    * @param minTick The minimum tick of snapshot
    * @return Snapshot >= `minTick` or [[delta.read.UnknownTickRequested]]
    */
-  def read(id: ID, minTick: Long)(
+  def read(id: ID, minTick: Tick)(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 
@@ -51,7 +54,7 @@ trait ReadModel[ID, S] {
    * @param minRevision The minimum revision of snapshot
    * @return Snapshot >= `minRevision` or [[delta.read.UnknownRevisionRequested]]
    */
-  def read(id: ID, minRevision: Int)(
+  def read(id: ID, minRevision: Revision)(
       implicit
       ec: ExecutionContext): Future[Snapshot]
 

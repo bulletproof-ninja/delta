@@ -1,14 +1,32 @@
 package delta
 
 import java.util.UUID
-import scala.reflect._
-import java.math.BigInteger
-import java.sql.ResultSet
-import scuff.Numbers._
 import java.io.ByteArrayInputStream
-import java.sql.PreparedStatement
+import java.math.BigInteger
+
+import scala.reflect._
+import scala.util.Try
+
+import java.sql.{ ResultSet, Connection, PreparedStatement, SQLException }
+
+import scuff._
+import scuff.Numbers._
 
 package jdbc {
+
+  final case class Config(
+    pkColumn: String,
+    table: String,
+    schema: Option[String] = None,
+    timestamp: Option[TimestampColumn] = None,
+    version: Option[Short] = None) {
+
+    def withVersion(v: Short): Config = copy(version = Some(v))
+    def withTimestamp(wt: TimestampColumn): Config = copy(timestamp = Option(wt))
+    def withSchema(s: String): Config = copy(schema = s.optional)
+
+  }
+
   object VarBinaryColumn extends VarBinaryColumn("") {
     def apply(maxLen: Int) = new VarBinaryColumn(maxLen)
     def apply(len: String) = new VarBinaryColumn(len)
@@ -113,7 +131,7 @@ package object jdbc {
   }
 
   implicit object UnitColumn extends ColumnType[Unit] {
-    private[this] final val Zero = java.lang.Byte.valueOf(0.asInstanceOf[Byte])
+    private[this] final val Zero = java.lang.Byte.valueOf(0: Byte)
     def typeName = "TINYINT"
     def readFrom(row: ResultSet, col: Int): Unit = ()
     override def writeAs(unit: Unit) = Zero
@@ -141,14 +159,30 @@ package object jdbc {
     }
   }
 
+  private[jdbc] implicit class DeltaConn(private val conn: Connection) extends AnyVal {
+
+    private def failed(action: String, sql: String, se: SQLException): SQLException =
+      new SQLException(
+        s"Failed to $action statement:\n$sql", se.getSQLState, se.getErrorCode, se)
+
+    def prepare[R](sql: String)(thunk: PreparedStatement => R): R = {
+      val ps = try conn prepareStatement sql catch {
+        case cause: SQLException => throw failed("prepare", sql, cause)
+      }
+      try thunk(ps) catch {
+        case cause: SQLException => throw failed("execute", sql, cause)
+      } finally Try(ps.close)
+    }
+  }
+
   private[jdbc] implicit class DeltaPrep(private val ps: PreparedStatement) extends AnyVal {
     def setValue[T: ColumnType](colIdx: Int, value: T): Unit =
       ps.setObject(colIdx, implicitly[ColumnType[T]] writeAs value)
-    def setChannel(colIdx: Int, ch: Transaction.Channel): Unit =
+    def setChannel(colIdx: Int, ch: Channel): Unit =
       ps.setString(colIdx, ch.toString)
   }
   private[jdbc] implicit class DeltaRes(private val rs: ResultSet) extends AnyVal {
-    def getValue[T: ColumnType](colIdx: Int): T = implicitly[ColumnType[T]].readFrom(rs, colIdx)
-    def getChannel(colIdx: Int): Transaction.Channel = Transaction.Channel(rs.getString(colIdx))
+    def getValue[T: ReadColumn](colIdx: Int): T = implicitly[ReadColumn[T]].readFrom(rs, colIdx)
+    def getChannel(colIdx: Int): Channel = Channel(rs.getString(colIdx))
   }
 }

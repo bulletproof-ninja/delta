@@ -1,6 +1,7 @@
 package delta.testing.mysql
 
-import scala.concurrent.duration.DurationInt
+import scala.util.Random
+import scala.concurrent._
 
 import org.junit._, Assert._
 
@@ -10,20 +11,18 @@ import com.mysql.cj.log.Slf4JLogger
 import com.mysql.cj.jdbc.MysqlDataSource
 
 import delta.Snapshot
-import delta.jdbc.{ JdbcStreamProcessHistory, JdbcStreamProcessStore, VarCharColumn, WithTimestamp }
+import delta.jdbc._
 import delta.jdbc.mysql.MySQLSyntax
 import delta.testing.{ RandomDelayExecutionContext, TestStreamProcessStore }
-import delta.process.StreamProcessStore
-import scuff.concurrent._
-import scuff.jdbc.{ ConnectionSource, DataSourceConnection }
-import java.sql.Connection
-import delta.jdbc.ColumnType
-import delta.testing.Foo
-import scala.util.Random
-import scala.concurrent.Future
+import delta.process._
+import delta.testing._
+
+// import scuff.concurrent._
 import scuff.SysProps
-import delta.process.UpdateCodec
-import delta.jdbc.JdbcStreamProcessStore.Config
+import scuff.jdbc._
+
+import java.sql.Connection
+
 
 object TestJdbcStreamProcessStore {
 
@@ -66,7 +65,12 @@ class TestJdbcStreamProcessStore
 extends TestStreamProcessStore {
   import TestJdbcStreamProcessStore._
 
-  private val cs = new ConnectionSource with DataSourceConnection {
+  private val cs = new AsyncConnectionSource with DataSourceConnection {
+
+    override def updateContext: ExecutionContext = RandomDelayExecutionContext
+
+    override def queryContext: ExecutionContext = RandomDelayExecutionContext
+
     def dataSource = ds
     override def getConnection = {
       val conn = super.getConnection
@@ -77,8 +81,7 @@ extends TestStreamProcessStore {
 
   override def newStore(): StreamProcessStore[Long, String, String] = {
     val store = new JdbcStreamProcessStore[Long, String, String](
-      Config("id", readModelName) timestamp WithTimestamp("last_updated"),
-      cs, RandomDelayExecutionContext) with MySQLSyntax
+      Config("id", readModelName) withTimestamp TimestampColumn("last_updated"), cs) with MySQLSyntax
     store.ensureTable()
   }
 
@@ -98,10 +101,10 @@ extends TestStreamProcessStore {
       Index(NotNull("foo_num")((foo: Foo) => foo.num)))
     implicit val FooColumn = ColumnType(Foo)
   }
-  class FooProcessStore(cs: ConnectionSource, version: Short)(implicit fooCol: ColumnType[Foo])
+  class FooProcessStore(cs: AsyncConnectionSource, version: Short)(implicit fooCol: ColumnType[Foo])
     extends JdbcStreamProcessStore[Long, Foo, String](
-      Config("id", fooTable).version(version) timestamp WithTimestamp(),
-      cs, RandomDelayExecutionContext, FooProcessStore.indexColumns) {
+      Config("id", fooTable) withVersion version withTimestamp TimestampColumn(),
+      cs, FooProcessStore.indexColumns) {
     def queryText(text: String): Future[Map[Long, Snapshot]] = {
       this.querySnapshot("foo_text" -> text)
     }
@@ -132,35 +135,42 @@ class TestJdbcStreamProcessHistory
   import TestJdbcStreamProcessStore._
 
   override def newStore(): StreamProcessStore[Long, String, String] = newStore(1)
-  private def newStore(v: Int) = {
-    val cs = new ConnectionSource with DataSourceConnection {
+  private def newStore(version: Int) = {
+    val cs = new AsyncConnectionSource with DataSourceConnection {
+
+      override def updateContext: ExecutionContext = RandomDelayExecutionContext
+
+      override def queryContext: ExecutionContext = RandomDelayExecutionContext
+
       def dataSource = ds
     }
-    val store = new JdbcStreamProcessHistory[Long, String, String](RandomDelayExecutionContext, cs, v.toShort, WithTimestamp(), readModelName) with MySQLSyntax
+    val store = new JdbcStreamProcessHistory[Long, String, String](
+        cs, version.toShort, TimestampColumn, "id", readModelName)
+      with MySQLSyntax
     store.ensureTable()
   }
 
   private def history(id: Long, store: StreamProcessStore[Long, String, String], dataPrefix: String): Unit = {
-    store.write(id, Snapshot("{}", 0, 3L)).await(1.hour)
-    store.refresh(id, 1, 5L).await(1.hour)
-    assertEquals(Snapshot("{}", 1, 5L), store.read(id).await(1.hour).get)
+    store.write(id, Snapshot("{}", 0, 3L)).await
+    store.refresh(id, 1, 5L).await
+    assertEquals(Snapshot("{}", 1, 5L), store.read(id).await.get)
 
-    store.refresh(id, 2, 8).await(1.hour)
-    assertEquals(Snapshot("{}", 2, 8L), store.read(id).await(1.hour).get)
+    store.refresh(id, 2, 8).await
+    assertEquals(Snapshot("{}", 2, 8L), store.read(id).await.get)
 
     try {
-      store.write(id, Snapshot(s"$dataPrefix{}", 1, 5)).await(1.hour)
+      store.write(id, Snapshot(s"$dataPrefix{}", 1, 5)).await
       fail("Should fail on older tick")
     } catch {
       case _: IllegalStateException => // Expected
     }
     val snap_2_8 = Snapshot(s"$dataPrefix{}", 2, 8)
-    store.write(id, snap_2_8).await(1.hour)
-    assertEquals(Some(snap_2_8), store.read(id).await(1.hour))
+    store.write(id, snap_2_8).await
+    assertEquals(Some(snap_2_8), store.read(id).await)
 
     val snap_3_34 = Snapshot(s"""$dataPrefix{"hello":", world!"}""", 3, 34)
-    store.write(id, snap_3_34).await(1.hour)
-    assertEquals(Some(snap_3_34), store.read(id).await(1.hour))
+    store.write(id, snap_3_34).await
+    assertEquals(Some(snap_3_34), store.read(id).await)
   }
 
   @Test

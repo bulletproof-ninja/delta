@@ -9,12 +9,12 @@ package object testing {
     .getInputArguments
     .toString.contains("jdwp")
 
-  val AwaitDuration = if (isDebug) 60.hours else 60.seconds
+  val AwaitDuration = if (isDebug) 16.hours else 360.seconds
 
-  implicit class F[T](f: Future[T]) {
-    def await = Await.result(f, AwaitDuration)
+  implicit class F[T](private val f: Future[T]) extends AnyVal {
+    def await() = Await.result(f, AwaitDuration)
   }
 
-  implicit def toFut[T](t: T) = Future successful t
+  implicit def toFuture[T](t: T) = Future successful t
 
 }

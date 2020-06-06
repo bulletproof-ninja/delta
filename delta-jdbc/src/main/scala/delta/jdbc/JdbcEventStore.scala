@@ -2,27 +2,27 @@ package delta.jdbc
 
 import java.sql.{ Connection, ResultSet, SQLException }
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent._, duration._
 import scala.util.{ Failure, Success, Try }
 
-import delta.{ EventFormat, EventStore }
+import delta._
+
 import scuff.StreamConsumer
-import scuff.jdbc.ConnectionSource
-import delta.Ticker
+import scuff.concurrent._
+import scuff.jdbc.AsyncConnectionSource
 
 private object JdbcEventStore {
   final class RawEvent[SF](name: String, version: Byte, data: SF) {
-    def decode[EVT](channel: delta.Transaction.Channel, metadata: Map[String, String])(
+    def decode[EVT](channel: delta.Channel, metadata: Map[String, String])(
         implicit
         evtFmt: EventFormat[EVT, SF]): EVT =
       evtFmt.decode(name, version, data, channel, metadata)
   }
 }
 
-class JdbcEventStore[ID, EVT, SF](
+abstract class JdbcEventStore[ID, EVT, SF](
     evtFmt: EventFormat[EVT, SF],
-    dialect: Dialect[ID, EVT, SF], cs: ConnectionSource,
-    blockingJdbcCtx: ExecutionContext)(
+    dialect: Dialect[ID, EVT, SF], cs: AsyncConnectionSource)(
     initTicker: JdbcEventStore[ID, EVT, SF] => Ticker)
   extends EventStore[ID, EVT] {
 
@@ -31,20 +31,22 @@ class JdbcEventStore[ID, EVT, SF](
   @inline implicit private def ef = evtFmt
 
   def ensureSchema(ensureSchema: Boolean = true): this.type = {
-    if (ensureSchema) cs.forUpdate { conn =>
-      dialect.createSchema(conn)
-      dialect.createStreamTable(conn)
-      dialect.createChannelIndex(conn)
-      dialect.createTransactionTable(conn)
-      dialect.createTickIndex(conn)
-      dialect.createEventTable(conn)
-      dialect.createEventNameIndex(conn)
-      dialect.createMetadataTable(conn)
-    }
+    if (ensureSchema) {
+      cs.asyncUpdate { conn =>
+        dialect.createSchema(conn)
+        dialect.createStreamTable(conn)
+        dialect.createChannelIndex(conn)
+        dialect.createTransactionTable(conn)
+        dialect.createTickIndex(conn)
+        dialect.createEventTable(conn)
+        dialect.createEventNameIndex(conn)
+        dialect.createMetadataTable(conn)
+      }
+    }.await(33.seconds)
     this
   }
 
-  private def selectRevision(stream: ID, revision: Int)(
+  private def selectRevision(stream: ID, revision: Revision)(
       implicit
       conn: Connection): Option[Transaction] = {
     var dupe: Option[Transaction] = None
@@ -64,39 +66,35 @@ class JdbcEventStore[ID, EVT, SF](
   }
 
   def commit(
-      channel: Channel, stream: ID, revision: Int, tick: Long,
+      channel: Channel, stream: ID, revision: Revision, tick: Tick,
       events: List[EVT], metadata: Map[String, String] = Map.empty): Future[Transaction] = {
     require(revision >= 0, "Must be non-negative revision, was: " + revision)
     require(events.nonEmpty, "Must have at least one event")
-    Future {
-      cs.forUpdate { implicit conn =>
-        try {
-          if (revision == 0) dialect.insertStream(stream, channel)
-          dialect.insertTransaction(stream, revision, tick)
-          dialect.insertEvents(stream, revision, events)
-          dialect.insertMetadata(stream, revision, metadata)
-        } catch {
-          case sqlEx: SQLException if dialect.isDuplicateKeyViolation(sqlEx) =>
-            Try(conn.rollback)
-            selectRevision(stream, revision) match {
-              case Some(dupe) => throw new DuplicateRevisionException(dupe)
-              case None => throw sqlEx
-            }
-        }
+    cs.asyncUpdate { implicit conn =>
+      try {
+        if (revision == 0) dialect.insertStream(stream, channel)
+        dialect.insertTransaction(stream, revision, tick)
+        dialect.insertEvents(stream, revision, events)
+        dialect.insertMetadata(stream, revision, metadata)
+      } catch {
+        case sqlEx: SQLException if dialect.isDuplicateKeyViolation(sqlEx) =>
+          Try(conn.rollback)
+          selectRevision(stream, revision) match {
+            case Some(dupe) => throw new DuplicateRevisionException(dupe)
+            case None => throw sqlEx
+          }
       }
       Transaction(tick, channel, stream, revision, metadata, events)
-    }(blockingJdbcCtx)
+    }
   }
 
-  def currRevision(stream: ID): Future[Option[Int]] = Future {
-    cs.forQuery { implicit conn =>
+  def currRevision(stream: ID): Future[Option[Int]] =
+    cs.asyncQuery { implicit conn =>
       dialect.selectMaxRevision(stream)
     }
-  }(blockingJdbcCtx)
 
-  def maxTick(): Future[Option[Long]] = Future {
-    cs.forQuery(dialect.selectMaxTick(_))
-  }(blockingJdbcCtx)
+  def maxTick(): Future[Option[Long]] =
+    cs.asyncQuery(dialect.selectMaxTick(_))
 
   private def nextTransactionKey(rs: ResultSet, col: dialect.Columns): Option[(ID, Int)] = {
     nextRevision(rs, col).map { rev =>
@@ -110,16 +108,17 @@ class JdbcEventStore[ID, EVT, SF](
     else None
   }
 
-  private def FutureWith[U](cb: StreamConsumer[Transaction, U])(thunk: => Unit): Unit = Future {
-    Try(thunk) match {
+  private def complete[U](cb: StreamConsumer[Transaction, U])(thunk: => Future[Unit]): Unit = {
+    import cs.queryContext
+    thunk.onComplete {
       case Success(_) => cb.onDone()
       case Failure(th) => cb onError th
     }
-  }(blockingJdbcCtx)
+  }
 
   @annotation.tailrec
   private def processTransactions(singleStream: Boolean, onNext: Transaction => Unit)(
-      stream: ID, revision: Int, rs: ResultSet, col: dialect.Columns): Unit = {
+      stream: ID, revision: Revision, rs: ResultSet, col: dialect.Columns): Unit = {
     import JdbcEventStore.RawEvent
     val channel = rs.getChannel(col.channel)
     val tick = rs.getLong(col.tick)
@@ -167,8 +166,8 @@ class JdbcEventStore[ID, EVT, SF](
   }
 
   def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit =
-    FutureWith(callback) {
-      cs.forQuery { implicit conn =>
+    complete(callback) {
+      cs.asyncQuery { implicit conn =>
         dialect.selectStreamFull(stream) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
@@ -178,8 +177,8 @@ class JdbcEventStore[ID, EVT, SF](
       }
     }
   def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit =
-    FutureWith(callback) {
-      cs.forQuery { implicit conn =>
+    complete(callback) {
+      cs.asyncQuery { implicit conn =>
         dialect.selectStreamRange(stream, revisionRange) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
@@ -188,10 +187,10 @@ class JdbcEventStore[ID, EVT, SF](
         }
       }
     }
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit =
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit =
     if (fromRevision == 0) replayStream(stream)(callback)
-    else FutureWith(callback) {
-      cs.forQuery { implicit conn =>
+    else complete(callback) {
+      cs.asyncQuery { implicit conn =>
         dialect.selectStreamRange(stream, fromRevision to Int.MaxValue) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
@@ -202,8 +201,8 @@ class JdbcEventStore[ID, EVT, SF](
     }
 
   def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
-    FutureWith(callback) {
-      cs.forQuery { implicit conn =>
+    complete(callback) {
+      cs.asyncQuery { implicit conn =>
         val select = selector match {
           case Everything => dialect.selectTransactions() _
           case ChannelSelector(channels) => dialect.selectTransactionsByChannels(channels) _
@@ -219,9 +218,9 @@ class JdbcEventStore[ID, EVT, SF](
         }
       }
     }
-  def querySince[U](sinceTick: Long, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
-    FutureWith(callback) {
-      cs.forQuery { implicit conn =>
+  def querySince[U](sinceTick: Tick, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
+    complete(callback) {
+      cs.asyncQuery { implicit conn =>
         val (singleStream, onNext, select) = selector match {
           case Everything =>
             (None, (callback.onNext _), dialect.selectTransactions(sinceTick) _)

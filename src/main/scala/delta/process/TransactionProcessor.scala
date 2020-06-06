@@ -8,9 +8,9 @@ import scala.util.control.NonFatal
  * @tparam EVT Top event type
  * @tparam S state type
  */
-trait TransactionProcessor[ID, EVT, S >: Null] {
+trait TransactionProcessor[SID, EVT, S >: Null] {
 
-  protected type Transaction = delta.Transaction[ID, _ >: EVT]
+  protected type Transaction = delta.Transaction[SID, _ >: EVT]
 
   /**
    *  Transaction processing.

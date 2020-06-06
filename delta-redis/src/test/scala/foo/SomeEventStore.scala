@@ -6,7 +6,7 @@ import redis.clients.jedis.JedisShardInfo
 
 import delta.MessageTransportPublishing
 import delta.redis.RedisMessageTransport
-import delta.Transaction.Channel
+import delta.Channel
 import java.util.concurrent.ArrayBlockingQueue
 import scuff.JavaSerializer
 import delta.{ Ticker, EventSource }

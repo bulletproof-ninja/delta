@@ -2,14 +2,13 @@ package college.student
 
 import college._
 import delta.write._
-import delta.Projector
 import scuff.EmailAddress
 
-object Student extends Entity("student", StudentProjector) {
+object Student extends Entity("student", StudentState) {
   type Id = IntId[Student]
   type Type = Student
 
-  def init(state: State, mergeEvents: List[StudentEvent]) = new Student(state)
+  def init(state: State, concurrentUpdates: List[Transaction]) = new Student(state)
 
   def state(student: Student) = student.state
   def validate(state: StudentState) = require(state != null)
@@ -21,24 +20,14 @@ object Student extends Entity("student", StudentProjector) {
   }
 }
 
-object StudentProjector extends Projector[StudentState, StudentEvent] {
-  def init(evt: StudentEvent) = next(null, evt)
-  def next(student: StudentState, evt: StudentEvent) = evt match {
-    case StudentRegistered(name, email) => assert(student == null); new StudentState(name, Set(email.toLowerCase))
-    case StudentChangedName(newName) => student.copy(name = newName)
-    case StudentEmailAdded(newEmail) => student.copy(emails = student.emails + newEmail.toLowerCase)
-    case StudentEmailRemoved(removeEmail) => student.copy(emails = student.emails - removeEmail.toLowerCase)
-  }
-
-}
-
 class Student private[student] (val state: Student.State = Student.newState()) {
 
-  private def student = state.curr
+  private def student = state.get
 
   private[student] def apply(cmd: RegisterStudent): Unit = {
     require(student == null)
-    state(StudentRegistered(cmd.name, cmd.email.toString))
+    state(StudentRegistered(cmd.name))
+    state(StudentEmailAdded(cmd.email.toString))
   }
 
   def apply(cmd: ChangeStudentName): Unit = {

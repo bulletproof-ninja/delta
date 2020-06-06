@@ -7,7 +7,7 @@ import org.junit.Test
 
 import delta.{ EventStore, LamportTicker, MessageTransportPublishing }
 import delta.write.{ DuplicateIdException, EntityRepository }
-import delta.testing.RandomDelayExecutionContext
+import delta.testing._
 import delta.util.TransientEventStore
 import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
 import delta.util.LocalTransport
@@ -15,6 +15,7 @@ import scuff.Codec
 import delta.write.Metadata
 
 class TestSampler {
+  import delta.testing.F
 
   implicit def metadata = Metadata("timestamp" -> new scuff.Timestamp().toString)
 
@@ -33,8 +34,8 @@ class TestSampler {
 
   implicit def ec = RandomDelayExecutionContext
 
-  lazy val EmployeeRepo = new EntityRepository(Employee.Def, ec)(es)
-  lazy val DepartmentRepo = new EntityRepository(Department.Def, ec)(es)
+  lazy val EmployeeRepo = new EntityRepository(Employee.Def)(es)
+  lazy val DepartmentRepo = new EntityRepository(Department.Def)(es)
 
   @Test
   def inserting(): Unit = {

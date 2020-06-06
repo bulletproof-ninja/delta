@@ -17,7 +17,7 @@ import delta.process.StreamProcessStore
 
 /**
   * Hazelcast `MapStore` implementation, using
-  * a generic [[delta.util.StreamProcessStore]] as
+  * a generic [[delta.process.StreamProcessStore]] as
   * back-end store.
   */
 @throws[IllegalArgumentException]("if `processStore` is instance of [[IMapStreamProcessStore]]")

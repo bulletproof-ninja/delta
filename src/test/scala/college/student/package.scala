@@ -1,5 +1,7 @@
 package college
 
 package object student {
-  type Repository = delta.write.Repository[Student.Id, Student]
+
+  implicit def StudentId(int: Int): Student.Id = new Student.Id(int)
+
 }

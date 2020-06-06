@@ -89,7 +89,7 @@ trait MessageTransport {
 
   /**
    *  Subscription key, identifies scope of subscription.
-   *  NOTE: Must be an immutable value type.
+   *  @note Must be an immutable value type.
    */
   protected type SubscriptionKey
 
@@ -170,7 +170,7 @@ trait MessageTransport {
  * Apply this trait to [[delta.MessageTransport]] implementations
  * as a buffer against failed publish failures, with
  * automatic retry.
- * NOTE: After publish failures, messages may get
+ * @note After publish failures, messages may get
  * re-ordered thus eventually delivered out of order.
  * This can be mitigated by using a
  * `java.util.concurrent.PriorityBlockingQueue`
@@ -245,7 +245,7 @@ trait BufferedRetryPublish {
  * Apply this trait to [[delta.MessageTransport]] implementations,
  * if individual subscriptions lead to inefficient use
  * of resources.
- * NOTE: It is assumed that individual subscriber decoding
+ * @note It is assumed that individual subscriber decoding
  * of a given `Message` are identical, such that decoding only
  * happens, at most, once per message, not per subscriber.
  */

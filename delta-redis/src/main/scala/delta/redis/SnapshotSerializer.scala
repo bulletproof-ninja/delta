@@ -10,7 +10,7 @@ class SnapshotSerializer[T](ser: Serializer[T])
   def encodeInto(out: OutputStream)(s: Snapshot[T]) = asDataOutput(out) { out =>
     out.writeInt(s.revision)
     out.writeLong(s.tick)
-    val content = ser encode s.content
+    val content = ser encode s.state
     out.writeInt(content.length)
     out.write(content)
   }

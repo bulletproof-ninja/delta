@@ -7,12 +7,12 @@ import delta.EventSource
 import java.util.concurrent.ScheduledExecutorService
 
 abstract class PersistentMonotonicProcessor[ID, EVT: ClassTag, S >: Null, U](
-    es: EventSource[ID, _ >: EVT],
-    replayMissingDelay: FiniteDuration,
-    replayMissingScheduler: ScheduledExecutorService,
-    partitionThreads: PartitionedExecutionContext)
-  extends MonotonicProcessor[ID, EVT, S, U]
-  with MissingRevisionsReplay[ID, EVT] {
+  es: EventSource[ID, _ >: EVT],
+  replayMissingDelay: FiniteDuration,
+  replayMissingScheduler: ScheduledExecutorService,
+  partitionThreads: PartitionedExecutionContext)
+extends MonotonicProcessor[ID, EVT, S, U]
+with MissingRevisionsReplay[ID, EVT] {
 
   def this(
       es: EventSource[ID, _ >: EVT],

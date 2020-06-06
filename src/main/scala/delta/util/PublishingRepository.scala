@@ -1,64 +1,59 @@
 package delta.util
 
+import delta._
+import delta.write._
+
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
-import delta.write.Repository
-import delta.write.ImmutableEntity
-import delta.write.Metadata
 
 /**
   * [[delta.write.Repository]] wrapper for non-Event-source
   * repositories, while still publishing events.
   */
 abstract class PublishingRepository[ID, T <: AnyRef, EVT](
-    val impl: Repository[ID, T] with ImmutableEntity[T],
-    publishCtx: ExecutionContext)
-  extends Repository[ID, (T, List[EVT])] with ImmutableEntity[(T, List[EVT])] {
+  val impl: Repository[ID, T] with ImmutableEntity { type Loaded = (T, Revision) },
+  publishCtx: ExecutionContext)
+extends Repository[ID, (T, List[EVT])]
+with ImmutableEntity {
 
-  final type E = (T, List[EVT])
+  protected def publish(id: ID, revision: Revision, events: List[EVT], metadata: Metadata): Unit
 
-  protected def publish(id: ID, revision: Int, events: List[EVT], metadata: Metadata): Unit
-
-  private def publishEvents(id: ID, revision: Int, events: List[EVT], metadata: Metadata): Unit = {
+  private def publishEvents(id: ID, revision: Revision, events: List[EVT], metadata: Metadata): Unit = {
     if (events.nonEmpty) try publish(id, revision, events, metadata) catch {
       case NonFatal(e) => publishCtx.reportFailure(e)
     }
   }
 
-  def exists(id: ID): Future[Option[Int]] = impl.exists(id)
-  def load(id: ID): Future[(E, Int)] = impl.load(id).map {
-    case (entity, rev) => entity -> Nil -> rev
-  }(PiggyBack)
+  protected type Loaded = impl.Loaded
+  def revision(loaded: Loaded): Int = loaded._2
+
+  def exists(id: ID): Future[Option[Revision]] = impl.exists(id)
+  def load(id: ID): Future[Loaded] = impl.load(id)
 
   protected def update[R](
-      expectedRevision: Option[Int], id: ID,
-      updateThunk: (E, Int) => Future[UT[R]])(
+      updateThunk: Loaded => Future[UT[R]],
+      id: ID, causalTick: Tick, expectedRevision: Option[Revision])(
       implicit
-      metadata: Metadata): Future[impl.UM[R]] = {
+      metadata: Metadata): Future[UM[R]] = {
     @volatile var toPublish: List[EVT] = Nil
-    val updated = impl.update(id, expectedRevision) {
-      case (e, rev) =>
-        updateThunk(e -> Nil, rev).map {
-          case (result, events) =>
-            toPublish = events
-            result
-        }(PiggyBack)
+    val updated = impl.update(id, expectedRevision, causalTick) { loaded =>
+      updateThunk(loaded).map {
+        case (result, events) =>
+          toPublish = events
+          result
+      }(PiggyBack)
     }
-    updated.foreach {
-      case rev => publishEvents(id, rev, toPublish, metadata)
-    }(publishCtx)
+    updated.foreach(publishEvents(id, _, toPublish, metadata))(publishCtx)
     updated
   }
 
-  def insert(id: => ID, content: E)(
+  def insert(id: => ID, entity: Entity, causalTick: Tick)(
       implicit
       metadata: Metadata): Future[ID] = {
-    val (state, events) = content
-    val inserted = impl.insert(id, state)
-    inserted.foreach { id =>
-      publishEvents(id, 0, events, metadata)
-    }(publishCtx)
+    val (state, events) = entity
+    val inserted = impl.insert(id, state, causalTick)
+    inserted.foreach(publishEvents(_, 0, events, metadata))(publishCtx)
     inserted
   }
 

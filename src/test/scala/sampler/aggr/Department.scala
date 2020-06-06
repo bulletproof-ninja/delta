@@ -34,7 +34,7 @@ object Department {
   object Def extends Entity("Department", DeptProjector) {
     type Id = DeptId
     type Type = Department
-    def init(state: State, mergeEvents: List[DeptEvent]) = new Impl(state)
+    def init(state: State, concurrentUpdates: List[Transaction]) = new Impl(state)
     def state(dept: Department) = dept match {
       case dept: Impl => dept.state
     }
@@ -44,7 +44,7 @@ object Department {
   private[aggr] class Impl(val state: State = Def.newState())
       extends Department {
     @inline
-    private def dept = state.curr
+    private def dept = state.get
 
     def apply(cmd: AddEmployee) = {
       if (!dept.employees(cmd.id)) {

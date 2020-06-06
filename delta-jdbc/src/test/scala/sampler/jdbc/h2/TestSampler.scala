@@ -9,14 +9,17 @@ import org.junit.Test
 
 import sampler.{ JSON, JsonDomainEventFormat }
 import sampler.aggr.DomainEvent
+
 import delta.jdbc._
 import delta.jdbc.h2._
 import delta.util.LocalTransport
 import delta.testing.RandomDelayExecutionContext
-import scala.util.Random
-import scuff.jdbc.DataSourceConnection
 import delta.MessageTransportPublishing
-import scuff.jdbc.ConnectionSource
+
+import scala.util.Random
+
+import scuff.jdbc._
+import scala.concurrent.ExecutionContext
 
 object TestSampler {
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
@@ -34,11 +37,16 @@ final class TestSampler extends sampler.TestSampler {
 
   override lazy val es = {
     val sql = new H2Dialect[Int, DomainEvent, JSON](None)
-    val cs = new ConnectionSource with DataSourceConnection {
+    val cs = new AsyncConnectionSource with DataSourceConnection {
+
+      override def updateContext: ExecutionContext = RandomDelayExecutionContext
+
+      override def queryContext: ExecutionContext = RandomDelayExecutionContext
+
       val dataSource = new JdbcDataSource
       dataSource.setURL(s"jdbc:h2:./${h2Name}")
     }
-    new JdbcEventStore(JsonDomainEventFormat, sql, cs, RandomDelayExecutionContext)(initTicker)
+    new JdbcEventStore(JsonDomainEventFormat, sql, cs)(initTicker)
       with MessageTransportPublishing[Int, DomainEvent] {
       def toTopic(ch: Channel) = Topic(ch.toString)
       val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)

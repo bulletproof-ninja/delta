@@ -2,29 +2,25 @@ package delta.mongo
 
 import scala.concurrent.Future
 import scala.reflect.ClassTag
+import scala.annotation.varargs
+import scala.jdk.CollectionConverters._
+import scala.util._
 
 import org.bson.{ Document, BsonValue }
 import org.bson.codecs.{ Codec => BsonCodec, DecoderContext, EncoderContext }
-import org.bson.codecs.configuration.{ CodecRegistries, CodecRegistry }
-import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
+import org.bson.codecs.configuration.{ CodecRegistries, CodecRegistry, CodecConfigurationException }
 
 import com.mongodb._
 import com.mongodb.async.SingleResultCallback
 import com.mongodb.async.client.MongoCollection
+import com.mongodb.async.client.{ MongoClient, MongoClients }
 import com.mongodb.connection.ClusterType
+import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
 
 import scuff._
 import scuff.concurrent.Threads
-import delta.EventFormat
-import scala.annotation.varargs
-import com.mongodb.async.client.{ MongoClient, MongoClients }
-import scala.jdk.CollectionConverters._
-import delta.Transaction.Channel
-import scala.util.Try
-import scala.util.Success
-import scala.util.Failure
-import org.bson.codecs.configuration.CodecConfigurationException
-import delta.Ticker
+
+import delta._
 
 object MongoEventStore {
   @varargs
@@ -78,20 +74,33 @@ object MongoEventStore {
   *   }
   * }}}
   */
-class MongoEventStore[ID: BsonCodec, EVT](
+abstract class MongoEventStore[ID: BsonCodec, EVT](
   docCollection: MongoCollection[Document],
   evtFmt: EventFormat[EVT, BsonValue],
-  overrideTransactionCodec: BsonCodec[delta.Transaction[ID, EVT]])(
+  overrideTransactionCodec: BsonCodec[delta.Transaction[ID, EVT]] = null)(
   initTicker: MongoEventStore[ID, EVT] => Ticker)
-    extends delta.EventStore[ID, EVT] {
+extends delta.EventStore[ID, EVT] {
 
-  def this(
-      docCollection: MongoCollection[Document],
-      evtFmt: EventFormat[EVT, BsonValue])(
-      initTicker: MongoEventStore[ID, EVT] => Ticker) =
-    this(docCollection, evtFmt, null)(initTicker)
-
+  def ensureIndexes(ensureIndexes: Boolean = true): this.type = {
+    if (ensureIndexes) {
+      withBlockingCallback[String]() {
+        txCollection.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _)
+      }
+      withBlockingCallback[String]() {
+        txCollection.createIndex(new Document("tick", 1), _)
+      }
+      withBlockingCallback[String]() {
+        txCollection.createIndex(new Document("channel", 1), _)
+      }
+      withBlockingCallback[String]() {
+        txCollection.createIndex(new Document("events.name", 1), _)
+      }
+    }
+    this
+  }
   lazy val ticker = initTicker(this)
+
+  def codecRegistry: CodecRegistry = txCollection.getCodecRegistry
 
   protected val txCollection: MongoCollection[Transaction] = {
     val txCodec = Option(overrideTransactionCodec) getOrElse new DefaultTransactionCodec(
@@ -109,20 +118,7 @@ class MongoEventStore[ID: BsonCodec, EVT](
       case Failure(cause) => throw cause
     }
 
-    val txCollection = docCollection.withCodecRegistry(registry).withDocumentClass(classOf[Transaction])
-    withBlockingCallback[String]() {
-      txCollection.createIndex(new Document("_id.stream", 1).append("_id.rev", 1), _)
-    }
-    withBlockingCallback[String]() {
-      txCollection.createIndex(new Document("tick", 1), _)
-    }
-    withBlockingCallback[String]() {
-      txCollection.createIndex(new Document("channel", 1), _)
-    }
-    withBlockingCallback[String]() {
-      txCollection.createIndex(new Document("events.name", 1), _)
-    }
-    txCollection
+    docCollection.withCodecRegistry(registry).withDocumentClass(classOf[Transaction])
   }
 
   private[this] val OrderByRevision = new Document("_id.rev", 1)
@@ -145,7 +141,7 @@ class MongoEventStore[ID: BsonCodec, EVT](
     queryWith(new Document("_id.stream", stream), callback, OrderByRevision)
   }
 
-  def replayStreamFrom[R](stream: ID, fromRevision: Int)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit = {
     val filter = new Document("_id.stream", stream)
     if (fromRevision > 0) {
       filter.append("_id.rev", new Document("$gte", fromRevision))
@@ -169,7 +165,7 @@ class MongoEventStore[ID: BsonCodec, EVT](
   }
 
   def commit(
-    channel: Channel, stream: ID, revision: Int, tick: Long,
+    channel: Channel, stream: ID, revision: Revision, tick: Tick,
     events: List[EVT], metadata: Map[String, String]): Future[Transaction] = {
     val tx = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
@@ -185,7 +181,8 @@ class MongoEventStore[ID: BsonCodec, EVT](
     }(Threads.PiggyBack)
   }
 
-  protected def queryWith[U](filter: Document, callback: StreamConsumer[Transaction, U], ordering: Document = null): Unit = {
+  protected def queryWith[U](
+      filter: Document, callback: StreamConsumer[Transaction, U], ordering: Document = null): Unit = {
     val onTx = new Block[Transaction] {
       def apply(tx: Transaction) = callback.onNext(tx)
     }
@@ -212,12 +209,12 @@ class MongoEventStore[ID: BsonCodec, EVT](
     }(Threads.PiggyBack) // map first on same thread
   }
 
-  private def toJList[T](tr: Traversable[T]): java.util.List[T] = {
-    tr.foldLeft(new java.util.ArrayList[T](8)) {
-      case (list, t) =>
-        list add t
-        list
+  private def toJList[T](iter: Iterable[T]): java.util.List[T] = {
+    val list = new java.util.ArrayList[T](8)
+    iter.foreach { e =>
+      list add e
     }
+    list
   }
 
   private def toDoc(streamFilter: Selector, docFilter: Document = new Document): Document = {
@@ -250,7 +247,7 @@ class MongoEventStore[ID: BsonCodec, EVT](
     queryWith(toDoc(streamFilter), callback)
   }
 
-  def querySince[U](sinceTick: Long, streamFilter: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
+  def querySince[U](sinceTick: Tick, streamFilter: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
     val docFilter = new Document("tick", new Document("$gte", sinceTick))
     queryWith(toDoc(streamFilter, docFilter), callback)
   }

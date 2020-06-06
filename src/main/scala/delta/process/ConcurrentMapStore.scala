@@ -1,11 +1,14 @@
 package delta.process
 
-import collection.Map
+import delta.Tick
+
 import scala.jdk.CollectionConverters._
 import scala.concurrent.Future
 import scala.util.control.NonFatal
-import scuff.concurrent._
+import scala.collection.Map
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
+
+import scuff.concurrent._
 
 object ConcurrentMapStore {
 
@@ -15,51 +18,55 @@ object ConcurrentMapStore {
   def typed[K, S](cmap: java.util.concurrent.ConcurrentMap[Any, Any]): CMap[K, State[S]] =
     typed(cmap.asScala)
 
-  case class State[S](snapshot: delta.Snapshot[S], modified: Boolean = true)
+  final case class State[S](snapshot: delta.Snapshot[S], modified: Boolean = true)
 
   def asReplayStore[K, S, U](
       temp: CMap[K, ConcurrentMapStore.State[S]],
       persistentStore: StreamProcessStore[K, S, U]) =
     new ConcurrentMapStore[K, S, U](
-      temp, persistentStore.tickWatermark, persistentStore.read)(
+      temp, persistentStore.name, persistentStore.tickWatermark, persistentStore.read)(
       UpdateCodec.None)
 
   def asReplayStore[K, S, U](
       temp: java.util.concurrent.ConcurrentMap[K, ConcurrentMapStore.State[S]],
       persistentStore: StreamProcessStore[K, S, U]) =
     new ConcurrentMapStore[K, S, U](
-      temp.asScala, persistentStore.tickWatermark, persistentStore.read)(
+      temp.asScala, persistentStore.name, persistentStore.tickWatermark, persistentStore.read)(
       UpdateCodec.None)
 
   def asReplayStore[K, S, U](
       maxTick: Option[java.lang.Long],
       temp: java.util.concurrent.ConcurrentMap[K, ConcurrentMapStore.State[S]],
+      name: String,
       readFallback: K => Future[Option[delta.Snapshot[S]]]) =
     new ConcurrentMapStore[K, S, U](
-      temp.asScala, maxTick.map(_.longValue), readFallback)(
+      temp.asScala, name, maxTick.map(_.longValue), readFallback)(
       UpdateCodec.None)
 
   def asReplayStore[K, S, U](
       temp: CMap[K, ConcurrentMapStore.State[S]],
-      tickWatermark: Option[Long])(
+      name: String,
+      tickWatermark: Option[Tick])(
       readFallback: K => Future[Option[delta.Snapshot[S]]]) =
     new ConcurrentMapStore[K, S, U](
-      temp, tickWatermark, readFallback)(
+      temp, name, tickWatermark, readFallback)(
       UpdateCodec.None)
 
   def apply[K, S, U](
       temp: CMap[K, ConcurrentMapStore.State[S]],
-      tickWatermark: Option[Long])(
+      name: String,
+      tickWatermark: Option[Tick])(
       readFallback: K => Future[Option[delta.Snapshot[S]]])(
       implicit updateCodec: UpdateCodec[S, U]) =
-    new ConcurrentMapStore[K, S, U](temp, tickWatermark, readFallback)
+    new ConcurrentMapStore[K, S, U](temp, name, tickWatermark, readFallback)
 
   def apply[K, S, U](
       maxTick: Option[java.lang.Long],
       temp: java.util.concurrent.ConcurrentMap[K, ConcurrentMapStore.State[S]],
+      name: String,
       readFallback: K => Future[Option[delta.Snapshot[S]]])(
       implicit updateCodec: UpdateCodec[S, U]) =
-    new ConcurrentMapStore[K, S, U](temp.asScala, maxTick.map(_.longValue), readFallback)
+    new ConcurrentMapStore[K, S, U](temp.asScala, name, maxTick.map(_.longValue), readFallback)
 
 }
 
@@ -70,18 +77,19 @@ object ConcurrentMapStore {
  * If the backing map is either empty or incomplete (this would be expected, to
  * save both memory and load time), provide a fallback lookup mechanism for keys
  * not found.
- * NOTE: This implementation IS NOT a two-way cache. There's no mechanism
+ * @note This implementation IS NOT a two-way cache. There's no mechanism
  * to write through.
  * @param cmap The concurrent map implementation
  * @param lookupFallback Persistent store fallback
  */
 final class ConcurrentMapStore[K, W, U] private (
   cmap: CMap[K, ConcurrentMapStore.State[W]],
-  val tickWatermark: Option[Long],
+  val name: String,
+  val tickWatermark: Option[Tick],
   readFallback: K => Future[Option[delta.Snapshot[W]]])(
   implicit protected val updateCodec: UpdateCodec[W, U])
-  extends StreamProcessStore[K, W, U]
-  with NonBlockingCASWrites[K, W, U] {
+extends StreamProcessStore[K, W, U]
+with NonBlockingCASWrites[K, W, U] {
 
   import ConcurrentMapStore.State
 
@@ -162,14 +170,14 @@ final class ConcurrentMapStore[K, W, U] private (
     }
     Future.unit
   }
-  def refresh(key: K, revision: Int, tick: Long): Future[Unit] = {
+  def refresh(key: K, revision: Revision, tick: Tick): Future[Unit] = {
     cmap.get(key).foreach {
       case State(snapshot, _) =>
         trySave(key, snapshot.copy(revision = revision, tick = tick))
     }
     Future.unit
   }
-  def refreshBatch(revisions: Map[K, (Int, Long)]): Future[Unit] = {
+  def refreshBatch(revisions: Map[K, (Revision, Tick)]): Future[Unit] = {
     revisions.foreach {
       case (key, (revision, tick)) => refresh(key, revision, tick)
     }

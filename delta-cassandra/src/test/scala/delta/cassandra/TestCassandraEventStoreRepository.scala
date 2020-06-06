@@ -9,7 +9,7 @@ import scala.util.Try
 import delta.write.EntityRepository
 import delta._
 import delta.testing._
-import delta.Transaction.Channel
+import delta.Channel
 import scuff.Codec
 import scuff.json._, JsVal._
 
@@ -62,15 +62,14 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
   def setup(): Unit = {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
-    es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor,
-      AggrEventFormat, RandomDelayExecutionContext)(_ => ticker)
+    es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor, AggrEventFormat)(_ => ticker)
       with MessageTransportPublishing[String, AggrEvent] {
       def toTopic(ch: Channel) = Topic(s"tx:$ch")
       val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
       val txChannels = Set(Channel("any"))
       val txCodec = Codec.noop[Transaction]
     }.ensureTable()
-    repo = new EntityRepository(TheOneAggr, ec)(es)
+    repo = new EntityRepository(TheOneAggr)(es)
   }
   private def deleteAll(session: Session): Unit = {
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))
