@@ -1,4 +1,3 @@
-[![Scala version](https://img.shields.io/badge/scala-2.11-orange.svg)](http://www.scala-lang.org/api/2.11.x/)
 [![Scala version](https://img.shields.io/badge/scala-2.12-orange.svg)](http://www.scala-lang.org/api/2.12.x/)
 [![Scala version](https://img.shields.io/badge/scala-2.13-orange.svg)](http://www.scala-lang.org/api/2.13.x/)
 
