@@ -1,6 +1,6 @@
 plugins {
-    id "com.jfrog.bintray" version "1.8.1" apply true
-    id 'com.adarshr.test-logger' version '2.0.0' apply true
+    id 'com.jfrog.bintray' version "1.8.5"
+    id 'com.adarshr.test-logger' version '2.0.0'
 }
 
 ext {
@@ -49,6 +49,7 @@ allprojects {
 	        transitive = false
 	    }
     }
+
     dependencies {
         compile "org.scala-lang:scala-reflect:$vScalaFull"
         compile "org.scala-lang.modules:scala-collection-compat_$vScala:2.1.4"
@@ -62,17 +63,17 @@ allprojects {
         scalacPlugin "com.github.ghik:silencer-plugin_$vScalaFull:$vSilencer"
     }
 
-	tasks.withType(Jar) {
-	    baseName = "${project.name}_$vScala"
-	}
+    tasks.withType(Jar) {
+        baseName = "${project.name}_$vScala"
+    }
 
-	tasks.withType(ScalaCompile) {
-	    def args = System.properties.compilerArgs ?:
+    tasks.withType(ScalaCompile) {
+        def args = System.properties.compilerArgs ?:
         vScala == "2.13"
           ? "-feature -deprecation -explaintypes -unchecked -Xlint -language:implicitConversions,existentials,higherKinds -Ywarn-unused -Ywarn-unused:imports"
           : "-feature -deprecation -explaintypes -unchecked -Xlint -language:implicitConversions,existentials,higherKinds -Ywarn-unused -Ywarn-unused-import"
 	    scalaCompileOptions.additionalParameters = args.split(" ").toList()
-	}
+    }
 
     jar {
         manifest {
@@ -139,7 +140,7 @@ subprojects {
 }
 
 wrapper {
-    gradleVersion = '6.4.1'
+    gradleVersion = '6.5'
 }
 
 project(':delta-cassandra') {
