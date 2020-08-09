@@ -6,7 +6,7 @@ import delta.read._
 
 /**
  * Read model that relies on some externally built store
- * that is continuously updated by _another thread or process_.
+ * that is continuously updated by ''another thread or process''.
  * The subscription implementation is left out, but can be
  * easily augmented by adding [[delta.read.MessageTransportSupport]]
  * to an instance of this class.

@@ -4,8 +4,9 @@ import scala.reflect.ClassTag
 import scala.concurrent.ExecutionContext
 
 /**
- * Extension of [[delta.process.PersistentMonotonicConsumer]] with support
+ * Extension of [[delta.process.PersistentMonotonicProcessing]] with support
  * for join state (cross stream state).
+  * @see [[delta.process.PersistentMonotonicProcessing]] for details.
  */
 abstract class PersistentMonotonicJoinProcessing[SID, EVT: ClassTag, S >: Null, U](
   implicit ec: ExecutionContext)
@@ -39,3 +40,13 @@ with JoinState[SID, EVT, S] {
   }
 
 }
+
+/**
+  * Recommended super class for implementing [[delta.EventSource]]
+  * consumption with cross referenced streams in different channels.
+  * @see [[delta.process.PersistentMonotonicJoinProcessing]] for details.
+  */
+abstract class PersistentMonotonicJoinConsumer[SID, EVT: ClassTag, Work >: Null, U](
+  implicit ec: ExecutionContext)
+extends PersistentMonotonicJoinProcessing[SID, EVT, Work, U]
+with EventSourceConsumer[SID, EVT]

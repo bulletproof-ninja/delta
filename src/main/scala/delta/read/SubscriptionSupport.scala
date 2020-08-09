@@ -233,7 +233,7 @@ extends StreamId {
         if (timeout.length == 0) {
           Future failed Timeout(id, maybeSnapshot, minRevision, minTick, timeout)
         } else {
-          val promise = Promise[Snapshot]
+          val promise = Promise[Snapshot]()
           val subscription = this.subscribe(id) { update =>
             if (expected(update.revision, update.tick)) {
               val snapshotRev = maybeSnapshot.map(_.revision) getOrElse -1
@@ -256,7 +256,7 @@ extends StreamId {
               }
             }
           }
-          promise.future.onComplete(_ => subscription.cancel)
+          promise.future onComplete { _ => subscription.cancel() }
           scheduler.schedule(timeout) {
             if (!promise.isCompleted) {
               promise tryFailure Timeout(id, maybeSnapshot, minRevision, minTick, timeout)
@@ -282,7 +282,7 @@ extends StreamId {
       filter: PartialFunction[Either[Snapshot, Update], V])
       (implicit callbackCtx: ExecutionContext): Future[V] = {
 
-    val p = Promise[V]
+    val p = Promise[V]()
 
     val subscription =
       readContinuously(id, callbackCtx) { either =>
@@ -298,7 +298,7 @@ extends StreamId {
     p.future.andThen {
       case _ =>
         timeoutTask cancel false
-        subscription.foreach(_.cancel)
+        subscription foreach { _.cancel() }
     }
 
   }

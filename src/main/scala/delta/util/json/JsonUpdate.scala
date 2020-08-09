@@ -2,7 +2,6 @@ package delta.util.json
 
 import scuff.Codec
 import delta.process.Update
-import scuff._
 import scuff.json._, JsVal._
 
 object JsonUpdate {
@@ -10,13 +9,13 @@ object JsonUpdate {
   private final val DefaultContentFieldName = "update"
 
   def apply[U](
-      contentJsonCodec: Codec[U, String],
-      contentFieldName: String = DefaultContentFieldName): Codec[Update[U], String] =
+      contentJsonCodec: Codec[U, JSON],
+      contentFieldName: String = DefaultContentFieldName): Codec[Update[U], JSON] =
     new JsonUpdate(contentJsonCodec, contentFieldName)
 
   def fromBinary[U](
       contentJsonCodec: Codec[U, Array[Byte]],
-      contentFieldName: String = DefaultContentFieldName): Codec[Update[U], String] =
+      contentFieldName: String = DefaultContentFieldName): Codec[Update[U], JSON] =
     apply(Codec.pipe(contentJsonCodec, Codec.UTF8.reverse), contentFieldName)
 
 }
@@ -24,15 +23,15 @@ object JsonUpdate {
 /**
  * @tparam U Update type
  */
-class JsonUpdate[U](contentJsonCodec: Codec[U, String], contentFieldName: String)
-  extends Codec[Update[U], String] {
+class JsonUpdate[U](contentJsonCodec: Codec[U, JSON], contentFieldName: String)
+  extends Codec[Update[U], JSON] {
 
   require(contentFieldName != "tick" && contentFieldName != "revision", s"Invalid content field name: $contentFieldName")
 
-  def this(contentJsonCodec: Codec[U, String]) =
+  def this(contentJsonCodec: Codec[U, JSON]) =
     this(contentJsonCodec, JsonUpdate.DefaultContentFieldName)
 
-  def encode(update: Update[U]): String = {
+  def encode(update: Update[U]): JSON = {
     val contentField: String = update.changed match {
       case Some(content) => s""","$contentFieldName":${contentJsonCodec encode content}"""
       case _ => ""
@@ -41,7 +40,7 @@ class JsonUpdate[U](contentJsonCodec: Codec[U, String], contentFieldName: String
     s"""{"tick":${update.tick}$revisionField$contentField}"""
   }
 
-  def decode(json: String): Update[U] = this decode (JsVal parse json).asObj
+  def decode(json: JSON): Update[U] = this decode (JsVal parse json).asObj
 
   private[json] def decode(ast: JsObj): Update[U] = {
     val tick = ast.tick.asNum

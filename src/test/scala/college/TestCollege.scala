@@ -102,13 +102,13 @@ class TestCollege {
     eventStore.ticker.close()
   }
 
-  private def randomName(): String = (
+  private def randomName: String = (
     rand.nextBetween('A', 'Z' + 1) +: (1 to rand.nextBetween(2, 13)).map(_ => rand.nextBetween('a', 'z' + 1))).mkString
 
   private def addStudents(count: Int): Seq[Student.Id] = {
     val ids =
       for (_ <- 1 to count) yield {
-        val name = randomName()
+        val name = randomName
         val student = Student(RegisterStudent(name, EmailAddress(s"$name@school.edu")))
         student(AddStudentEmail(EmailAddress(s"$name@gmail.com")))
         StudentRepository.insert(new Student.Id, student)
@@ -119,7 +119,7 @@ class TestCollege {
   private def addSemesters(count: Int): Seq[Semester.Id] = {
     val ids =
       for (_ <- 1 to count) yield {
-        val name = randomName() + " " + (100 + rand.nextBetween(1, 10))
+        val name = randomName + " " + (100 + rand.nextBetween(1, 10))
         val cls = Semester(CreateClass(name))
         SemesterRepository.insert(new Semester.Id, cls)
       }
@@ -144,9 +144,9 @@ class TestCollege {
     }
     (Future sequence futureEnrollments).await
 
-    val futureUpdates = studentIds.filter(_ => rand.nextFloat >= 0.5f).flatMap { studentId =>
+    val futureUpdates = studentIds.filter(_ => rand.nextFloat() >= 0.5f).flatMap { studentId =>
       val futureEnrollment1 =
-        if (rand.nextBoolean) {
+        if (rand.nextBoolean()) {
           SemesterRepository.update(randomSemester) {
             _._1 apply EnrollStudent(studentId)
           }
@@ -154,7 +154,7 @@ class TestCollege {
       val futureNameChange = StudentRepository.update(studentId) {
         _._1 apply ChangeStudentName(randomName)
       }
-      val futureEnrollment2 = if (rand.nextBoolean) {
+      val futureEnrollment2 = if (rand.nextBoolean()) {
         SemesterRepository.update(randomSemester) {
           _._1 apply EnrollStudent(studentId)
         }
@@ -173,12 +173,12 @@ class TestCollege {
       protected def emailRefName: String = "emailAddress" // Ref name is irrelevant here
       protected def emailRefType: Ref[EmailAddress] =  (name: String, state: State) => {
         assert(name == emailRefName)
-        state.asData.emails
+        state.asData.allEmails
       }
 
       protected def queryMatch(name: String, queryValue: Any, state: State) =
         queryValue match {
-          case addr: EmailAddress => state.asData.emails contains addr
+          case addr: EmailAddress => state.asData.allEmails contains addr
           case _ => false
         }
 
@@ -381,9 +381,7 @@ class TestCollege {
     type Snapshot = delta.Snapshot[Unit]
     type Update = delta.process.Update[Unit]
 
-      def minRevision(
-          revision: Int)
-          : PartialFunction[Either[Snapshot, Update], Unit] = {
+      def minRevision(revision: Int): PartialFunction[Either[Snapshot, Update], Unit] = {
         case either
           if either.map(_.revision).left.map(_.revision).merge >= revision =>
             ()
@@ -414,7 +412,8 @@ class TestCollege {
     val studentB = Student(RegisterStudent("B", emailB))
     val idB = StudentRepository.insert(new Student.Id, studentB).await
 
-    assertTrue(EmailIndexStore.findDuplicates.await.isEmpty)
+    val dupes = EmailIndexStore.findDuplicates().await
+    assertTrue(s"Duplicates found: $dupes", dupes.isEmpty)
 
     emailIndexModel.readCustom(idA)(minRevision(0)).await
     assertEquals(idA, EmailIndexStore.lookup(emailA).await.get)

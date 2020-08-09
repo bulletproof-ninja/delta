@@ -3,7 +3,7 @@ package delta
 /**
   * Tools for consuming and processing events.
   * @note This package assumes immutable state and
-  * _will not_ work correctly if mutable objects are
+  * ''will not'' work correctly if mutable state is
   * used.
   */
 package object process {

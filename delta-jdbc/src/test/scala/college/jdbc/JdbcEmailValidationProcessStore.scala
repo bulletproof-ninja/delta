@@ -34,7 +34,7 @@ with IndexTables[Int, State, Unit]
 with EmailValidationProcessStore {
 
   protected val indexTables =
-    Table[String](EmailColumn)(_.asData.emails.map(_.toLowerCase)) ::
+    Table[String](EmailColumn)(_.asData.allEmails.map(_.toLowerCase)) ::
     Nil
 
   override def toQueryValue(addr: EmailAddress) = addr.toLowerCase

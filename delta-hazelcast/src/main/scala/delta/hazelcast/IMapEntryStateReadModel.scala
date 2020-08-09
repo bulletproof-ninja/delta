@@ -108,7 +108,7 @@ with SubscriptionSupport[ID, S, U] {
   protected def readSnapshot(id: ID)(
     implicit ec: ExecutionContext): Future[Option[Snapshot]] = {
 
-    val promise = Promise[Option[Snapshot]]
+    val promise = Promise[Option[Snapshot]]()
     val callback = new ExecutionCallback[Snapshot] {
       def onResponse(snapshot: Snapshot): Unit = promise success Option(snapshot)
       def onFailure(t: Throwable): Unit = promise failure t

@@ -7,6 +7,9 @@ import scala.concurrent.ExecutionContext
 import scuff.Subscription
 
 /**
+  * General trait for consuming an [[delta.EventSource]].
+  * @see [[delta.process.PersistentMonotonicConsumer]] as the recommended
+  * default implementation.
   * @tparam SID The stream id type
   * @tparam EVT The processing event type. Can be a sub-type of the evemt source event type
   */
@@ -26,10 +29,10 @@ extends EventSourceProcessing[SID, EVT] {
       ec: ExecutionContext): Future[Subscription] = {
 
     val selector = this.selector(eventSource)
-    val maxTickSkew = this.maxTickSkew
-    require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
+    val tickWindow = this.tickWindow
+    require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
 
-    eventSource.maxTick().flatMap { tickAtStart =>
+    eventSource.maxTick.flatMap { tickAtStart =>
       this.catchUp(eventSource).flatMap { _ =>
         val liveProcessor = this.liveProcessor(eventSource)
         val liveSubscription = eventSource.subscribe(selector.toStreamsSelector)(liveProcessor)
@@ -41,7 +44,7 @@ extends EventSourceProcessing[SID, EVT] {
             val query = eventSource.query(selector) _
             StreamPromise.foreach(query)(liveProcessor)
           case Some(tickAtStart) =>
-            val windowQuery = eventSource.querySince(tickAtStart - maxTickSkew, selector) _
+            val windowQuery = eventSource.querySince(tickAtStart - tickWindow, selector) _
             StreamPromise.foreach(windowQuery)(liveProcessor)
         }
         windowClosed.map(_ => liveSubscription)

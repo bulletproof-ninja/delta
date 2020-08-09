@@ -25,7 +25,7 @@ with ImmutableEntity {
     }
   }
 
-  protected type Loaded = impl.Loaded
+  type Loaded = impl.Loaded
   def revision(loaded: Loaded): Int = loaded._2
 
   def exists(id: ID): Future[Option[Revision]] = impl.exists(id)

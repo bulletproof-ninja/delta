@@ -146,7 +146,7 @@ trait MessageTransport {
       subscribeToKey(key)(internalCallback)
     }
     new Subscription {
-      def cancel(): Unit = subscriptions.foreach(s => Try(s.cancel))
+      def cancel(): Unit = subscriptions.foreach { s => Try { s.cancel() } }
     }
 
   }
@@ -219,7 +219,7 @@ trait BufferedRetryPublish {
     private def publishMessages() = {
       val ft = new FailureTracker(circuitBreakerThreshold, publishCtx.reportFailure, publishFailureBackoff)
       while (!Thread.currentThread.isInterrupted) {
-        val timeout = ft.timeout()
+        val timeout = ft.timeout
         if (timeout.length > 0) {
           publishCtx reportFailure new PublishDelay(timeout)
           timeout.unit.sleep(timeout.length)
@@ -303,7 +303,9 @@ trait SubscriptionPooling {
           if (subscribers.isEmpty) {
             scheduledCancellation = cancellationDelay map {
               case (scheduler, delay) =>
-                scheduler.schedule(delay)(cancelSubscription)
+                scheduler.schedule(delay) {
+                  cancelSubscription()
+                }
             }
             if (scheduledCancellation.isEmpty) {
               cancelSubscription()
@@ -334,7 +336,7 @@ trait SubscriptionPooling {
       }
     }
     new Subscription {
-      def cancel() = subscriptions.foreach(s => Try(s.cancel))
+      def cancel() = subscriptions.foreach { s => Try { s.cancel() } }
     }
   }
 

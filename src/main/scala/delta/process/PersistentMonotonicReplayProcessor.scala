@@ -12,7 +12,7 @@ import scala.collection.concurrent.{ Map => CMap, _ }
   * to hold temporary replay state, eventually persisting
   * to the [[delta.process.StreamProcessStore]].
   * Processing is done on threads partitioned by `ID`,
-  * to ensure monotonic ordering and _potentially_ better
+  * to ensure monotonic ordering and ''potentially'' better
   * L2+ cache utilization.
   *
   * @param persistentStore The persistent store

@@ -8,7 +8,7 @@ class RandomDelayExecutionContext(exeCtx: ExecutionContext, maxDelayMs: Int) ext
 
   def execute(runnable: Runnable) = exeCtx execute new Runnable {
     def run() = {
-      if (Random.nextBoolean) {
+      if (Random.nextBoolean()) {
         val delay = Random.nextInt(maxDelayMs)
         Thread sleep delay
       }

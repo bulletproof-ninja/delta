@@ -9,7 +9,7 @@ import scala.util.Random
 import scala.concurrent._, duration._
 
 package sampler {
-  case class Id[T](int: Int = Random.nextInt)
+  case class Id[T](int: Int = Random.nextInt())
 
   trait AbstractEventFormat[SF]
     extends EventFormat[DomainEvent, SF] {

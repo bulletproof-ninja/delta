@@ -83,7 +83,7 @@ abstract class AbstractEventStoreRepositoryTest {
   @volatile var repo: Repository[String, Aggr] with MutableEntity = _
 
   private def doAsync(f: Promise[Any] => Unit): Unit = {
-    val something = Promise[Any]
+    val something = Promise[Any]()
     f(something)
     Await.result(something.future, 222.seconds) match {
       case th: Throwable => throw th
@@ -94,7 +94,7 @@ abstract class AbstractEventStoreRepositoryTest {
 
   implicit def metadata: Metadata = Metadata(
     "timestamp" -> new Timestamp().toString,
-    "random" -> math.random.toString)
+    "random" -> math.random().toString)
 
   @Test
   def loadUnknownId() = doAsync { done =>

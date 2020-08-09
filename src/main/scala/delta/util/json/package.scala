@@ -3,6 +3,7 @@ package delta.util
 import scuff.Codec
 import java.util.UUID
 
+/** Some ad hoc JSON support. */
 package object json {
   type JSON = String
 

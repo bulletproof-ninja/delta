@@ -19,11 +19,12 @@ import scala.collection.concurrent.{ Map => CMap, TrieMap }
  * [[delta.process.StreamProcessStore]] until replay
  * processing has completed.
  * Any tick received in live processing can be considered a
- * high-water mark (subject to tick skew). (It's also much slower)
+ * high-water mark (subject to the tick window).
  * @tparam SID The stream id type
  * @tparam EVT The process specific event type
- * @tparam Work The processing state type
+ * @tparam Work The processing (work) state representation
  * @tparam U The update type (often the same as `Work`)
+ * @param ec General execution context for light work
  */
 abstract class PersistentMonotonicProcessing[SID, EVT: ClassTag, Work >: Null, U](
   implicit ec: ExecutionContext)
@@ -44,8 +45,8 @@ with TransactionProcessor[SID, EVT, Work] {
     * Time delay before replaying missing revisions.
     * This allows some margin for delayed out-of-order transactions,
     * either due to choice of messaging infrastructure, or consistency
-    * validation, where transaction propagation is reversed during a
-    * consistency violation.
+    * validation, where transaction propagation is delayed and
+    * intentionally out-of-order during a consistency violation.
     */
   protected def replayMissingDelay: FiniteDuration
   protected def replayMissingScheduler: ScheduledExecutorService
@@ -134,6 +135,11 @@ with TransactionProcessor[SID, EVT, Work] {
 
 }
 
+/**
+  * Recommended super class for implementing [[delta.EventSource]]
+  * consumption.
+  * @see [[delta.process.PersistentMonotonicProcessing]] for details.
+  */
 abstract class PersistentMonotonicConsumer[SID, EVT: ClassTag, Work >: Null, U](
   implicit ec: ExecutionContext)
 extends PersistentMonotonicProcessing[SID, EVT, Work, U]

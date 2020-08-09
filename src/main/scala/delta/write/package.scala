@@ -1,6 +1,7 @@
 package delta
 
 /**
- * Classes around DDD (Domain Driven Design) concepts.
- */
+  * Support for the write model.
+  * @note Uses DDD concepts.
+  */
 package object write

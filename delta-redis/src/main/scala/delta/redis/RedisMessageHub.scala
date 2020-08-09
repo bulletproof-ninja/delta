@@ -117,7 +117,7 @@ with BufferedRetryPublish {
       private def consumeMessages() = {
         val ft = new FailureTracker(2, publishCtx.reportFailure, failureBackoff)
         while (!Thread.currentThread.isInterrupted) {
-          val timeout = ft.timeout()
+          val timeout = ft.timeout
           if (timeout.length > 0) {
             publishCtx reportFailure new ConnectionException(timeout)
             timeout.unit.sleep(timeout.length)

@@ -48,7 +48,7 @@ extends EventStore[ID, EVT] {
 
   def ticker = evtStore.ticker
   def currRevision(stream: ID) = evtStore.currRevision(stream)
-  def maxTick() = evtStore.maxTick()
+  def maxTick = evtStore.maxTick
   def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
     evtStore.query(selector)(callback)
   def querySince[U](sinceTick: Tick, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =

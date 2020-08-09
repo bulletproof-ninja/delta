@@ -89,18 +89,18 @@ class TestStreamProcessStore {
     type JSON = String
 
     val store = newStore
-    val ids: Map[ID, (Revision, Tick)] = (0L until 10L).map(tick => util.Random.nextLong -> (0 -> tick)).toMap
+    val ids: Map[ID, (Revision, Tick)] = (0L until 10L).map(tick => util.Random.nextLong() -> (0 -> tick)).toMap
     store.refreshBatch(ids).await // Empty store, nothing to refresh, but shouldn't fail
-    val moreIds: Map[ID, (Revision, Tick)] = (20L until 30L).map(tick => util.Random.nextLong -> (0 -> tick)).toMap
+    val moreIds: Map[ID, (Revision, Tick)] = (20L until 30L).map(tick => util.Random.nextLong() -> (0 -> tick)).toMap
     store.refreshBatch(moreIds ++ ids).await // Empty store, nothing to refresh, but shouldn't fail
-    val evenMoreIds: Map[ID, (Revision, Tick)] = (40L until 50L).map(tick => util.Random.nextLong -> (0 -> tick)).toMap
+    val evenMoreIds: Map[ID, (Revision, Tick)] = (40L until 50L).map(tick => util.Random.nextLong() -> (0 -> tick)).toMap
     store.refreshBatch(ids ++ evenMoreIds).await // Empty store, nothing to refresh, but shouldn't fail
-    val newIdSnapshots: Map[ID, Snapshot[JSON]] = (60L until 70L).map(tick => util.Random.nextLong -> Snapshot("{}", 0, tick)).toMap
+    val newIdSnapshots: Map[ID, Snapshot[JSON]] = (60L until 70L).map(tick => util.Random.nextLong() -> Snapshot("{}", 0, tick)).toMap
     val oldIdSnapshots: Map[ID, Snapshot[JSON]] = ids.view.mapValues {
       case (rev, tick) => Snapshot("{}", rev + 1, tick + 10)
     }.toMap
     store.writeBatch(oldIdSnapshots ++ newIdSnapshots).await
-    val moreNewIdSnapshots: Map[ID, Snapshot[JSON]] = (80L to 90L).map(tick => util.Random.nextLong -> Snapshot("{}", 0, tick)).toMap
+    val moreNewIdSnapshots: Map[ID, Snapshot[JSON]] = (80L to 90L).map(tick => util.Random.nextLong() -> Snapshot("{}", 0, tick)).toMap
     store.writeBatch(moreNewIdSnapshots ++ oldIdSnapshots).await
     val allIds = (ids ++ moreIds ++ evenMoreIds) // Only `ids` have been inserted, through oldIdSnapshots
     val all: Map[ID, Snapshot[JSON]] = store.readBatch(allIds.keys).await.toMap

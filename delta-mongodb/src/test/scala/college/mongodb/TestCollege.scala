@@ -38,7 +38,7 @@ object TestCollege {
 
   val emailsBsonCodec = new scuff.Codec[State, BsonValue] {
     def encode(state: State): BsonValue = {
-      val lowerCased = state.asData.emails.toSeq.map(_.toLowerCase)
+      val lowerCased = state.asData.allEmails.toSeq.map(_.toLowerCase)
       new BsonArray(lowerCased.map(toBson).asJava)
     }
     def decode(b: BsonValue) = State(bson2emails(b))

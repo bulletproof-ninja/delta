@@ -48,8 +48,8 @@ extends SnapshotStore[SID, S] {
   /**
    *  Tick watermark. This is a best-effort
    *  watermark, usually either the highest
-   *  or last processed. Combined with a
-   *  potential tick skew, this is used to
+   *  or last processed. Combined with the
+   *  tick window, this is used to
    *  determine where to resume any interrupted
    *  stream processing.
    */

@@ -6,7 +6,6 @@ import scuff.json._
 import delta.util.json._
 import delta.Snapshot
 import delta.process.Update
-import scuff.json._
 
 case class Baz(number: Int, string: String, bool: Boolean, obj: String = null)(val list: Array[String]) {
   override def equals(any: Any): Boolean = any match {

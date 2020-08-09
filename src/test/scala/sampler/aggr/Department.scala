@@ -1,7 +1,6 @@
 package sampler.aggr
 
 import delta.write._
-import delta.write._
 
 import sampler._
 import sampler.aggr.dept._

@@ -101,7 +101,7 @@ package object mongo {
 
   def withFutureCallback[R](
       thunk: (=> SingleResultCallback[R]) => Unit): Future[Option[R]] = {
-    val promise = Promise[Option[R]]
+    val promise = Promise[Option[R]]()
     var used = false
       def callback = if (!used) new SingleResultCallback[R] {
         used = true

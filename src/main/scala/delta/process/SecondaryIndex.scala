@@ -2,6 +2,10 @@ package delta.process
 
 import scala.concurrent.Future
 
+/**
+  * Optional trait for [[delta.process.StreamProcessStore]]
+  * implementations that support secondary indexes.
+  */
 trait SecondaryIndex {
   store: StreamProcessStore[_, _, _] =>
 
@@ -9,7 +13,7 @@ trait SecondaryIndex {
   protected type QueryValue
 
   /**
-    * Query for snapshots matching column values.
+    * Query for snapshots matching column value(s).
     * Uses `AND` semantics, so multiple column
     * queries should not use mutually exclusive
     * values.
@@ -22,7 +26,8 @@ trait SecondaryIndex {
       : Future[Map[StreamId, Snapshot]]
 
   /**
-    * Lighter version of `querySnapshot` if only existence needed.
+    * Lighter version of `querySnapshot` if only existence and/or tick
+    * is needed.
     * Uses `AND` semantics, so multiple column
     * queries should not use mutually exclusive
     * values.

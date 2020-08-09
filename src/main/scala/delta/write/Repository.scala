@@ -28,9 +28,10 @@ extends Updates[ID, E] {
    * Insert new entity. Will, by definition, always be given revision `0`.
    * @param newId The new instance id function
    * @param entity The instance to insert
+   * @param causalTick Optional causal tick (when using a Lamport clock, or mitigating clock skew).
    * @param metadata Optional metadata.
-   * @return The id and tick if successful,
-   * or [[delta.write.DuplicateIdException]] if id already exists and id is constant
+   * @return The new id if successful,
+   * or [[delta.write.DuplicateIdException]] if id already exists (and id function is constant)
    */
   def insert(
       newId: => ID,
@@ -40,10 +41,11 @@ extends Updates[ID, E] {
       metadata: Metadata): Future[ID]
 }
 
+/** Repository update methods. */
 sealed trait Updates[ID, E] {
   repo: Repository[ID, E] =>
 
-  protected type Loaded
+  type Loaded
   type Entity = E
 
   type UT[_]
@@ -64,8 +66,8 @@ sealed trait Updates[ID, E] {
    * may be invoked multiple times, if there are concurrent
    * updates.
    * @param id The entity id
-   * @param expectedRevision The revision that is expected to be updated.
-   * @param metadata Optional metadata.
+   * @param expectedRevision Optional revision that is expected to be updated.
+   * @param causalTick Optional causal tick (when using a Lamport clock, or mitigating clock skew).
    * @param updateThunk The code block responsible for updating.
    * Will receive the instance and revision.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
@@ -97,9 +99,7 @@ sealed trait Updates[ID, E] {
    * may be invoked multiple times, if there are concurrent
    * updates.
    * @param id The entity id
-   * @param metadata Metadata.
    * @param updateThunk The code block responsible for updating.
-   * Will receive the instance and current revision.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID)(
@@ -114,10 +114,8 @@ sealed trait Updates[ID, E] {
    * may be invoked multiple times, if there are concurrent
    * updates.
    * @param id The entity id
-   * @param expectedRevision The expected revision
+   * @param expectedRevision The revision that is expected to be updated.
    * @param updateThunk The code block responsible for updating.
-   * Will receive the instance and current revision.
-   * @param metadata Metadata.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID, expectedRevision: Revision)(
@@ -133,10 +131,8 @@ sealed trait Updates[ID, E] {
    * updates.
    * @param id The entity id
    * @param expectedRevision The expected revision
-   * @param causalTick The tick of the entity causing this update
+   * @param causalTick Causal tick (when using a Lamport clock, or mitigating clock skew, or mitigating clock skew).
    * @param updateThunk The code block responsible for updating.
-   * Will receive the instance and current revision.
-   * @param metadata Metadata.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID, expectedRevision: Revision, causalTick: Tick)(
@@ -151,10 +147,8 @@ sealed trait Updates[ID, E] {
    * may be invoked multiple times, if there are concurrent
    * updates.
    * @param id The entity id
-   * @param causalTick The tick of the entity causing this update
+   * @param causalTick Causal tick (when using a Lamport clock, or mitigating clock skew).
    * @param updateThunk The code block responsible for updating.
-   * Will receive the instance and current revision.
-   * @param metadata Metadata.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID, causalTick: Tick)(
@@ -165,16 +159,18 @@ sealed trait Updates[ID, E] {
 
 }
 
+/** Repository trait for mutable entities. */
 trait MutableEntity {
   repo: Repository[_, _] =>
 
-  protected type Loaded = (Entity, Revision)
+  type Loaded = (Entity, Revision)
 
   type UT[R] = R
   type UM[R] = (R, Revision)
 
 }
 
+/** Repository trait for immutable entities. */
 trait ImmutableEntity {
   repo: Repository[_, _] =>
 

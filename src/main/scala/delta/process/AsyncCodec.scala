@@ -3,6 +3,11 @@ package delta.process
 import scala.concurrent._
 import scuff.concurrent._
 
+/**
+  * Codec with asynchrounous `encode` method.
+  * Some derived state might rely on external processes,
+  * or can simply be expensive to generate.
+  */
 abstract class AsyncCodec[W, S] extends Serializable {
   def encode(ws: W)(implicit ec: ExecutionContext): Future[S]
   def decode(ss: S): W

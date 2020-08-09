@@ -6,6 +6,10 @@ import scuff.concurrent.StreamPromise
 import scala.concurrent._
 
 /**
+  * General [[delta.EventSource]] processing trait.
+  *
+  * @see delta.process.PersistentMonotonicProcessing
+  *
   * @tparam SID The stream id type
   * @tparam EVT The processing event type. Can be a sub-type of the evemt source event type
   */
@@ -22,12 +26,20 @@ trait EventSourceProcessing[SID, EVT] {
   protected type LiveProcessor = Transaction => Future[LiveResult]
 
   /**
-   * The maximum tick skew, i.e. the largest reasonably
-   * possible wall-clock skew combined with network
-   * propagation delay, and in other factors that might
-   * affect tick differences.
+   * The largest possible tick skew combined with network
+   * propagation delay, and in other factors that might affect
+   * tick differences.
+   * @note A tick window that's _too large_ can lead to unnecessary
+   * processing of already processed transactions. But it won't
+   * affect correctness. A tick window that's too small could
+   * possibly miss processing of transactions, thus the known state
+   * will be outdated. Any subsequent updates to stale state will
+   * correct this, so it's an intermittent problem, but only if state
+   * is updated again, which might not happen. In other words, unless
+   * other reasons exist, it's safer to make the window larger than
+   * smaller.
    */
-  protected def maxTickSkew: Int
+  protected def tickWindow: Int
 
   /** Transaction selector. */
   protected def selector(es: EventSource): es.Selector
@@ -86,11 +98,11 @@ trait EventSourceProcessing[SID, EVT] {
    */
   protected def catchUp(
       eventSource: EventSource): Future[Unit] = {
-    val maxTickSkew = this.maxTickSkew
-    require(maxTickSkew >= 0, s"Cannot have negative tick skew: $maxTickSkew")
+    val tickWindow = this.tickWindow
+    require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
     tickWatermark match {
       case Some(tickWatermark) =>
-        resume(eventSource)(selector(eventSource), tickWatermark, maxTickSkew)
+        resume(eventSource)(selector(eventSource), tickWatermark, tickWindow)
       case None =>
         begin(eventSource)(selector(eventSource))
     }
@@ -103,9 +115,9 @@ trait EventSourceProcessing[SID, EVT] {
     replayProc.future
   }
   private def resume(es: EventSource)(
-      selector: es.Selector, tickWatermark: Tick, maxTickSkew: Int): Future[Unit] = {
+      selector: es.Selector, tickWatermark: Tick, tickWindow: Int): Future[Unit] = {
     val replayProc = StreamPromise(replayProcessor(es))
-    es.querySince(tickWatermark - maxTickSkew, selector)(replayProc)
+    es.querySince(tickWatermark - tickWindow, selector)(replayProc)
     replayProc.future
   }
 

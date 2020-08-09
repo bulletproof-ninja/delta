@@ -18,6 +18,11 @@ private object MonotonicProcessor {
     @inline def add(tx: TX): TreeMap[Int, TX] = map.updated(tx.revision, tx)
   }
 
+  private[process] val tickComparator = new ju.Comparator[(Any, Snapshot[Any])] {
+    def compare(o1: (Any, Snapshot[Any]), o2: (Any, Snapshot[Any])): Int =
+      (o1._2.tick - o2._2.tick).toInt
+  }
+
 }
 
 /**
@@ -57,7 +62,7 @@ with TransactionProcessor[ID, EVT, S] {
   private def setActive(tx: Transaction): (Unapplied, Future[S]) = {
     streamStatus.get(tx.stream) match {
       case None =>
-        val promise = Promise[S]
+        val promise = Promise[S]()
         val active = new Active(Empty, promise)
         if (streamStatus.putIfAbsent(tx.stream, active).isEmpty) {
           Empty.add(tx) -> promise.future
@@ -275,9 +280,8 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U, BR](
 extends MonotonicProcessor[ID, EVT, S, U]
 with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
-  // Enable JMX
-  override protected def mxBean = new AsyncStreamConsumerBean
-  override def toString() = s"${getClass.getSimpleName}(${processStore.name})"
+  private val instanceName = s"${getClass.getSimpleName}(${processStore.name})"
+  override def toString() = s"$instanceName@${hashCode}"
 
   protected final def completionTimeout = postReplayTimeout
 
@@ -288,43 +292,49 @@ with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
         val incompletes = incompleteStreams
         val activeCount = incompletes.count(_.stillActive)
         if (activeCount > 0) { // This is inherently racy, but if we catch an active stream, we can provide a more definite error message.
-          throw new IllegalStateException(s"${processStore} has $activeCount unfinished transactions. Timeout of $completionTimeout is too short! Increase timeout and try again", timeout)
+          throw new IllegalStateException(s"$instanceName has $activeCount unfinished transactions. Timeout of $completionTimeout is too short! Increase timeout and try again", timeout)
         } else {
           val cause = incompletes
             .map(_.status.failed)
             .find(_.isCompleted)
             .map(_.value.get.get)
             .getOrElse(timeout)
-          val firstIncomplete = incompletes.headOption.map { incomplete =>
-            val unapplied = incomplete.unappliedRevisions
-            val unappliedStart = unapplied.map(_.start)
-            val missing = incomplete.expectedRevision until unappliedStart.getOrElse(incomplete.expectedRevision)
-            val textMissing = if (incomplete.status.failed.isCompleted) {
-              s"nothing, but failed processing. See stack trace below."
-            } else if (missing.isEmpty) {
-              val unappliedMsg = unapplied match {
-                case Some(unapplied) => s"revisions ${unapplied.start}-${unapplied.last} unapplied"
-                case None => s"all revisions applied"
+          val firstIncomplete =
+            incompletes.headOption.map { incomplete =>
+              val unapplied = incomplete.unappliedRevisions
+              val unappliedStart = unapplied.map(_.start)
+              val missing = incomplete.expectedRevision until unappliedStart.getOrElse(incomplete.expectedRevision)
+              val textMissing = if (incomplete.status.failed.isCompleted) {
+                s"nothing, but failed processing. See stack trace below."
+              } else if (missing.isEmpty) {
+                val unappliedMsg = unapplied match {
+                  case Some(unapplied) => s"revisions ${unapplied.start}-${unapplied.last} unapplied"
+                  case None => s"all revisions applied"
+                }
+                s"... nothing? Expecting revision ${incomplete.expectedRevision}, but have $unappliedMsg, yet inactive."
+              } else if (missing.start == missing.last) {
+                s"revision ${missing.start}"
+              } else {
+                s"revisions ${missing.start}-${missing.last}"
               }
-              s"... nothing? Expecting revision ${incomplete.expectedRevision}, but have $unappliedMsg, yet inactive."
-            } else if (missing.start == missing.last) {
-              s"revision ${missing.start}"
-            } else {
-              s"revisions ${missing.start}-${missing.last}"
-            }
-            s"First one, stream ${incomplete.id}, is missing $textMissing"
-          } getOrElse "(unable to elaborate)"
+              s"E.g. first one, stream ${incomplete.id}, is missing $textMissing"
+            } getOrElse "(unable to elaborate)"
           val incompleteIds = incompletes.map(_.id).mkString(", ")
-          val errMsg = s"""Replay processing timed out after $completionTimeout, due to incomplete stream processing of ids: $incompleteIds
+          val errMsg = s"""$instanceName replay processing timed out after $completionTimeout, due to incomplete stream processing of ids: $incompleteIds
 $firstIncomplete
 Possible causes:
-    - Insufficient tick window. Resolve by increasing max tick skew.
+    - Insufficient tick window. Resolve by increasing tick window.
     - Incomplete process store content; possible causes:
-        - An earlier attempt at replay persistence was interrupted or killed
-        - Replay persistence actively running on the same data set
+        - An earlier replay attempt was interrupted or killed during persistence phase.
+        - Another replay persistence process actively running on the same data set.
         - Partial/incomplete deletion of entries.
-      For side-effecting processes, resolve by restoring from backup.
-      For pure processes, either resolve by restoring from backup, or restart processing from scratch.
+Possible solutions:
+    - When process is pure (no side effects), or has idempotent side effects:
+        - Delete dataset and restart this process, or
+        - Restore from backup.
+    - When process has non-idempotent side effects (impure):
+        - Restore from backup, or
+        - Delete dataset and restart this process AND DEAL WITH THE REPEATED SIDE EFFECTS
 """
           throw new IllegalStateException(errMsg, cause)
         }
@@ -375,22 +385,44 @@ trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U, BR] {
     */
   protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[BR]
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]]
+
+  /**
+    * When replay processing is done, should persistence
+    * happen in ascending tick order?
+    *
+    * If `true`, then a copy of the data set is made and then
+    * sorted. This prevents certain edge cases when processes are
+    * killed during persistence, at the cost of transient increased
+    * memory usage.
+    *
+    * If `false`, then the data set is persisted in arbitrary order.
+    * This means that if the persistence phase is interrupted, the
+    * process store is in an invalid state and should be cleared
+    * before restarting.
+    *
+    * @note Defaults to `true`
+    */
   protected def persistInTickOrder: Boolean = true
-  private[this] val tickComparator = new ju.Comparator[(ID, Snapshot)] {
-    def compare(o1: (ID, Snapshot), o2: (ID, Snapshot)): Int =
-      (o1._2.tick - o2._2.tick).toInt
-  }
+
   protected def whenDone(): Future[BR] = {
     onReplayCompletion()
       .flatMap { cmap =>
-        require(incompleteStreams.isEmpty, s"Incomplete streams are present. This code should not execute. This is a bug.")
+
+        require(
+          incompleteStreams.isEmpty,
+          s"Incomplete streams are present. This code should not execute. This is a bug.")
+
         val snapshots = cmap.iterator.collect {
           case (id, value) if value.modified => id -> value.snapshot
         }
         if (persistInTickOrder) {
-          val array = snapshots.toArray
+          val array = try snapshots.toArray catch {
+            case _: OutOfMemoryError =>
+              throw new OutOfMemoryError(
+                  s"Increase available memory, or override `persistInTickOrder` to `false`")
+          }
           cmap.clear()
-          ju.Arrays.sort(array, tickComparator)
+          ju.Arrays.sort(array, MonotonicProcessor.tickComparator)
           persistReplayState(array.iterator)
         } else persistReplayState(snapshots).andThen {
           case _ => cmap.clear()

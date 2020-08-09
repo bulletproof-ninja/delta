@@ -5,13 +5,24 @@ import delta._
 /**
   * Type-class for Entity definition.
   * Only for top-level (aggregate root) entities.
+  * @tparam S Entity state representation. Must be an immutable type (typically as case class)
+  * @tparam EVT Entity event type
+  * @param name Entity name. This is used as `channel` in the event store
+  * @param projector Entity state projector
   */
 abstract class Entity[S >: Null, EVT](name: String, projector: Projector[S, EVT]) {
 
+  /** Stream channel. Matches entity name. */
   val channel: Channel = Channel(name)
 
-  type Id
+  /**
+    * Entity type.
+    * This represents the type upon which to act on
+    * (as opposed to the state representation, which is just data).
+    */
   type Type
+  /** Entity id type. */
+  type Id
 
   type State = delta.write.State[S, EVT]
 
@@ -46,10 +57,9 @@ abstract class Entity[S >: Null, EVT](name: String, projector: Projector[S, EVT]
 
   /**
     * Validate invariants. Convenience method
-    * for unifying invariant validation to
-    * a single place. Ideally, checks should happen
-    * at every state transition, but this is not
-    * always convenient.
+    * for unifying invariant validation to a single place.
+    * Ideally, checks should happen at every state transition,
+    * but this is not always convenient.
     */
   protected def validate(state: S): Unit
 

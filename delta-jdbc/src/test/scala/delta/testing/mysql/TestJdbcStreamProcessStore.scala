@@ -90,7 +90,7 @@ extends TestStreamProcessStore {
     def asSnapshot(state: Option[Foo], update: String): Option[Foo] = Some { Foo decode update }
   }
 
-  private val fooTable = s"foo_${Random.nextInt.toHexString}"
+  private val fooTable = s"foo_${Random.nextInt().toHexString}"
 
   def fooVersion: Short = 1
 

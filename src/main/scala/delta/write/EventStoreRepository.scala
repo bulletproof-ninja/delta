@@ -48,7 +48,7 @@ with ImmutableEntity {
 
   private type Snapshot = delta.Snapshot[S]
   private type Transaction = eventStore.Transaction
-  protected type Loaded = EventStoreRepository.Loaded[S, EVT]
+  type Loaded = EventStoreRepository.Loaded[S, EVT]
 
   protected def revision(loaded: Loaded): Revision = loaded.revision
 

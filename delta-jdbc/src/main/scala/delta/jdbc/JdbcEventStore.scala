@@ -93,7 +93,7 @@ abstract class JdbcEventStore[ID, EVT, SF](
       dialect.selectMaxRevision(stream)
     }
 
-  def maxTick(): Future[Option[Long]] =
+  def maxTick: Future[Option[Long]] =
     cs.asyncQuery(dialect.selectMaxTick(_))
 
   private def nextTransactionKey(rs: ResultSet, col: dialect.Columns): Option[(ID, Int)] = {

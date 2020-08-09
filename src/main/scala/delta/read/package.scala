@@ -38,7 +38,7 @@ package read {
 }
 
 /**
-  * Support for read-only models.
+  * Support for read models.
   */
 package object read {
 

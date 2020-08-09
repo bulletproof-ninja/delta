@@ -19,7 +19,7 @@ class ConcurrentMapRepository[K, E <: AnyRef](
 extends Repository[K, E]
 with ImmutableEntity {
 
-  protected type Loaded = (E, Revision)
+  type Loaded = (E, Revision)
   protected def revision(loaded: Loaded) = loaded._2
 
   def insert(id: => K, entity: E, causalTick: Tick)(

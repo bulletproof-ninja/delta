@@ -9,7 +9,7 @@ import delta._
   * [[delta.write.Entity]]-based [[delta.write.Repository]] implementation.
   * @tparam SID Stream id type
   * @tparam EVT Repository event type
-  * @tparam S Internal repository state type. Must be an immutable type
+  * @tparam S Entity state representation. Must be an immutable type
   * @tparam ID Entity id type. Must be the same as, or translatable to, the event store id type
   * @tparam E The entity type
   * @param entity Entity type class
@@ -21,7 +21,7 @@ import delta._
   * be assumed to be current? I.e. are the snapshots available to all
   * running processes, or isolated to this process, and if the latter,
   * is this process exclusively snapshotting the available ids?
-  * @note This is a performance switch. Regardless of setting, it will
+  * NOTE: This is a performance switch. Regardless of setting, it will
   * not affect correctness.
   */
 class EntityRepository[SID, EVT, S >: Null, ID, E](

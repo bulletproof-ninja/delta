@@ -17,7 +17,7 @@ trait EventSource[ID, EVT] {
   type Transaction = delta.Transaction[ID, EVT]
 
   def currRevision(stream: ID): Future[Option[Revision]]
-  def maxTick(): Future[Option[Tick]]
+  def maxTick: Future[Option[Tick]]
   def ticker: Ticker
 
   /** Replay complete stream. */

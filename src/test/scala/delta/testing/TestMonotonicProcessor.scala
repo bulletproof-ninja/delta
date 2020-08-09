@@ -135,10 +135,10 @@ class TestMonotonicProcessor {
             sb.result()
           }
         }
-        val id = rand.nextInt
+        val id = rand.nextInt()
         val txCount = 5000
         val txs = (0 until txCount).map { rev =>
-          val events = (0 to rand.nextInt(5)).map(_ => rand.nextPrintableChar).toList
+          val events = (0 to rand.nextInt(5)).map(_ => rand.nextPrintableChar()).toList
           new Transaction(
             tick = rev,
             channel = Channel("Chars"),

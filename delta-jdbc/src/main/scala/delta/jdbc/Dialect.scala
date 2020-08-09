@@ -312,9 +312,9 @@ ORDER BY e.stream_id, e.revision, e.event_idx
     val query = makeTxQuery(WHERE)
     conn.prepare(query) { ps =>
       val colIdx = Iterator.from(1)
-      if (tickBound) ps.setLong(colIdx.next, sinceTick)
+      if (tickBound) ps.setLong(colIdx.next(), sinceTick)
       channels foreach { channel =>
-        ps.setChannel(colIdx.next, channel)
+        ps.setChannel(colIdx.next(), channel)
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxColumnsIdx)
@@ -334,12 +334,12 @@ ORDER BY e.stream_id, e.revision, e.event_idx
     val query = makeTxQuery(WHERE)
     conn.prepare(query) { ps =>
       val colIdx = Iterator.from(1)
-      if (tickBound) ps.setLong(colIdx.next, sinceTick)
+      if (tickBound) ps.setLong(colIdx.next(), sinceTick)
       channels foreach { channel =>
-        ps.setChannel(colIdx.next, channel)
+        ps.setChannel(colIdx.next(), channel)
       }
       events foreach { evt =>
-        ps.setString(colIdx.next, evtFmt.signature(evt).name)
+        ps.setString(colIdx.next(), evtFmt.signature(evt).name)
       }
       executeQuery(ps) { rs =>
         thunk(rs, TxColumnsIdx)

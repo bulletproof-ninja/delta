@@ -10,7 +10,7 @@ import scala.util.Random
 
 package college {
 
-  case class IntId[T](int: Int = Random.nextInt) {
+  case class IntId[T](int: Int = Random.nextInt()) {
     override val toString = s"$int"
   }
 

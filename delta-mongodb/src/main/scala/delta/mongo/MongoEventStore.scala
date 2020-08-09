@@ -195,7 +195,7 @@ extends delta.EventStore[ID, EVT] {
     txCollection.find(filter).sort(ordering).forEach(onTx, onFinish)
   }
 
-  def maxTick(): Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
+  def maxTick: Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
 
   private def getFirst[T](name: String, reverse: Boolean): Future[Option[T]] = {
     withFutureCallback[Document] { callback =>

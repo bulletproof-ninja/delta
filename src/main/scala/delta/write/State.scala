@@ -3,8 +3,8 @@ package delta.write
 import delta.Projector
 
 /**
-  * Encapsulates and transforms
-  * immutable domain state by applying events.
+  * State wrapper. Encapsulates and transforms
+  * immutable state by applying events.
   */
 final class State[S >: Null, EVT] private[write] (
     projector: Projector[S, EVT],

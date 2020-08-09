@@ -2,6 +2,7 @@ package delta.read
 
 import delta.SnapshotReader
 import scala.concurrent._
+import com.github.ghik.silencer.silent
 
 /**
   * Support use of [[delta.SnapshotReader]] as
@@ -18,6 +19,7 @@ extends StreamId {
 
   protected def snapshotReader: SnapshotReader[StreamId, _ >: S]
 
+  @silent("never used")
   protected def readSnapshot(id: ID)(
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]] = {

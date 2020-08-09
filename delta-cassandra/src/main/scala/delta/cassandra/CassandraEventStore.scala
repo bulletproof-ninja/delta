@@ -129,7 +129,7 @@ extends EventStore[ID, EVT] {
 
   private def execute[T](stm: BoundStatement)(handler: ResultSet => T): Future[T] = {
     val result = session.executeAsync(stm)
-    val promise = Promise[T]
+    val promise = Promise[T]()
     val listener = new Runnable {
       def run: Unit = promise complete Try(handler(result.get))
     }
@@ -165,10 +165,10 @@ extends EventStore[ID, EVT] {
     execute(stm) { rs =>
       Try {
         val iter = rs.iterator().asScala.map(row => toTransaction(stream, row, StreamColumnsIdx))
-        while (iter.hasNext) callback.onNext(iter.next)
+        while (iter.hasNext) callback onNext iter.next()
       } match {
         case Success(_) => callback.onDone()
-        case Failure(NonFatal(e)) => callback.onError(e)
+        case Failure(NonFatal(cause)) => callback onError cause
       }
     }
   }
@@ -215,7 +215,7 @@ extends EventStore[ID, EVT] {
     val ps = session.prepare(s"SELECT MAX(tick) FROM $TableName")
     () => ps.bind()
   }
-  def maxTick(): Future[Option[Long]] =
+  def maxTick: Future[Option[Long]] =
     execute(GetLastTick()) { rs =>
       Option(rs.one).map(_.getLong(0))
     }
@@ -274,7 +274,7 @@ extends EventStore[ID, EVT] {
     })
     (channels: Set[Channel], sinceTick: Tick) => {
       val ps = getStatement(channels.size)
-      val args = channels.toSeq :+ Long.box(sinceTick)
+      val args: List[Object] = channels.toList :+ Long.box(sinceTick)
       ps.bind(args: _*)
     }
   }

@@ -5,8 +5,8 @@ import scuff.concurrent.Threads.PiggyBack
 
 import scala.concurrent.Future
 
-import delta.validation.BySeniority
 import delta.process.StreamProcessStore
+import delta.validation._
 import college.validation.EmailValidationProcess.State
 
 trait EmailIndex {
@@ -14,6 +14,6 @@ trait EmailIndex {
 
   def lookupAll(email: EmailAddress): Future[Map[Student.Id, Tick]]
   def lookup(email: EmailAddress): Future[Option[Student.Id]] =
-    lookupAll(email).map(BySeniority.oldest)(PiggyBack)
+    lookupAll(email).map(pickOldest)(PiggyBack)
 
 }
