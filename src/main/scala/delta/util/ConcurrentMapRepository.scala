@@ -22,12 +22,13 @@ with ImmutableEntity {
   type Loaded = (E, Revision)
   protected def revision(loaded: Loaded) = loaded._2
 
-  def insert(id: => K, entity: E, causalTick: Tick)(
+  def insert(id: => K, entity: E)(
       implicit
       metadata: Metadata): Future[K] = Future {
     insertImpl(id, id, entity, metadata.toMap)
   }
 
+  @annotation.tailrec
   private def insertImpl(
       id: K, generateId: => K, entity: E,
       metadata: Map[String, String]): K = {
@@ -50,8 +51,9 @@ with ImmutableEntity {
   }
 
   private def tryUpdate[R](
-      id: K, expectedRevision: Option[Revision], metadata: Map[String, String],
-      updateThunk: Loaded => Future[E]): Future[Revision] = {
+      id: K, expectedRevision: Option[Revision],
+      metadata: Map[String, String],
+      updateThunk: Loaded => Future[E]): Future[Revision] =
     map.get(id) match {
       case None => Future failed new UnknownIdException(id)
       case Some(oldE) =>
@@ -64,12 +66,10 @@ with ImmutableEntity {
           }
         }
     }
-  }
 
   protected def update[R](
       updateThunk: Loaded => Future[UT[R]],
-      id: K, causalTick: Tick,
-      expectedRevision: Option[Revision])(
+      id: K, expectedRevision: Option[Revision])(
       implicit
       metadata: Metadata): Future[UM[R]] =
     Future(tryUpdate(id, expectedRevision, metadata.toMap, updateThunk)).flatMap(identity)

@@ -54,12 +54,12 @@ with MutableEntity {
 
   protected def update[R](
       updateThunk: Loaded => Future[UT[R]],
-      id: ID, causalTick: Tick, expectedRevision: Option[Revision])(
+      id: ID, expectedRevision: Option[Revision])(
       implicit
       metadata: Metadata): Future[UM[R]] = {
 
     @volatile var returnValue = null.asInstanceOf[R]
-    val revision = repo.update(id, expectedRevision, causalTick) {
+    val revision = repo.update(id, expectedRevision) {
       case Loaded(state, revision, _, concurrentUpdates) =>
         val instance = entity.initEntity(state, concurrentUpdates)
         updateThunk(instance -> revision)
@@ -74,12 +74,12 @@ with MutableEntity {
 
   }
 
-  def insert(newId: => ID, instance: E, causalTick: Tick)(
+  def insert(newId: => ID, instance: E)(
       implicit
       metadata: Metadata): Future[ID] = {
     try {
       val state = entity.validatedState(instance)
-      repo.insert(newId, Save(state.get, state.appliedEvents), causalTick)
+      repo.insert(newId, Save(state.get, state.appliedEvents))
     } catch {
       case NonFatal(e) => Future failed e
     }

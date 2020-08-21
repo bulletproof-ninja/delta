@@ -117,11 +117,11 @@ with ImmutableEntity {
   final def load(id: ID): Future[Loaded] =
     loadLatest(id, snapshots.read(id), false, None)
 
-  def insert(newId: => ID, entity: Entity, causalTick: Tick)(
+  def insert(newId: => ID, entity: Entity)(
       implicit
       metadata: Metadata): Future[ID] =
     if (entity.events.nonEmpty) {
-      insertImpl(newId, newId, eventStore.ticker.nextTick(causalTick), entity.state, entity.events, metadata.toMap)
+      insertImpl(newId, newId, eventStore.ticker.nextTick(), entity.state, entity.events, metadata.toMap)
     } else Future failed {
       new IllegalStateException(s"Nothing to insert, $channel has no events.")
     }
@@ -184,7 +184,7 @@ with ImmutableEntity {
   protected def onUpdateCollision(id: ID, revision: Revision, channel: Channel): Unit = ()
 
   private def loadAndUpdate(
-      id: ID, causalTick: Tick, expectedRevision: Option[Revision], metadata: Map[String, String],
+      id: ID, expectedRevision: Option[Revision], metadata: Map[String, String],
       maybeSnapshot: Future[Option[Snapshot]], assumeSnapshotCurrent: Boolean,
       updateThunk: Loaded => Future[Entity]): Future[Revision] = {
 
@@ -195,7 +195,7 @@ with ImmutableEntity {
             if (newEvents.isEmpty || loaded.concurrentUpdates.flatMap(_.events) == newEvents) {
               Future successful loaded.revision
             } else {
-              val tick = eventStore.ticker.nextTick(loaded.tick max causalTick)
+              val tick = eventStore.ticker.nextTick(loaded.tick)
               recordUpdate(id, newState, loaded.revision + 1, newEvents, metadata, tick).recoverWith {
                 case dupe: eventStore.DuplicateRevisionException =>
                   val state = wrapState(loaded.state)
@@ -204,7 +204,7 @@ with ImmutableEntity {
                     new Snapshot(state.get, dupe.conflict.revision, dupe.conflict.tick)
                   }
                   onUpdateCollision(id, dupe.conflict.revision, dupe.conflict.channel)
-                  loadAndUpdate(id, dupe.conflict.tick max tick, expectedRevision, metadata, latestSnapshot, true, updateThunk)
+                  loadAndUpdate(id, expectedRevision, metadata, latestSnapshot, true, updateThunk)
               }
             }
         }
@@ -213,11 +213,11 @@ with ImmutableEntity {
 
   protected def update[R](
       updateThunk: Loaded => Future[UT[R]],
-      id: ID, causalTick: Tick, expectedRevision: Option[Revision])(
+      id: ID, expectedRevision: Option[Revision])(
       implicit
       metadata: Metadata): Future[UM[R]] =
     try {
-      loadAndUpdate(id, causalTick, expectedRevision, metadata.toMap, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
+      loadAndUpdate(id, expectedRevision, metadata.toMap, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
     } catch {
       case NonFatal(th) => Future failed th
     }

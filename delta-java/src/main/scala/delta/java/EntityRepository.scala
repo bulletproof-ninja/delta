@@ -12,10 +12,10 @@ import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
 
 class EntityRepository[ESID, EVT, S >: Null, ID, ET](
-    entity: Entity[ID, ET, S, EVT] { type Type = ET },
-    eventStore: EventStore[ESID, _ >: EVT],
-    exeCtx: ExecutionContext,
-    idConv: Function1[ID, ESID]) {
+  entity: Entity[ID, ET, S, EVT] { type Type = ET },
+  eventStore: EventStore[ESID, _ >: EVT],
+  exeCtx: ExecutionContext,
+  idConv: Function1[ID, ESID]) {
 
   private[this] val repo = new delta.write.EntityRepository[ESID, EVT, S, ID, ET](entity)(eventStore)(exeCtx, idConv)
 
@@ -34,12 +34,6 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
   def insert(id: => ID, entity: ET, metadata: Metadata): Future[ID] =
     repo.insert(id, entity)(metadata)
 
-  def insert(id: => ID, entity: ET, causalTick: Long): Future[ID] =
-    repo.insert(id, entity, causalTick)(Metadata.empty)
-
-  def insert(id: => ID, entity: ET, causalTick: Long, metadata: Metadata): Future[ID] =
-    repo.insert(id, entity, causalTick)(metadata)
-
   def update(
       id: ID, expectedRevision: Option[Revision],
       metadata: Metadata, consumer: BiConsumer[ET, Integer])
@@ -51,17 +45,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }(metadata).map(toJInt)(PiggyBack)
   }
-  def update(
-      id: ID, expectedRevision: Option[Revision], causalTick: Long,
-      metadata: Metadata, consumer: BiConsumer[ET, Integer])
-      : Future[Integer] = {
-    repo.update(id, expectedRevision, causalTick) {
-      case (entity, revision) =>
-        try Future successful consumer.accept(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(metadata).map(toJInt)(PiggyBack)
-  }
+
   def update(id: ID, expectedRevision: Option[Revision], consumer: BiConsumer[ET, Integer]): Future[Integer] = {
     repo.update(id, expectedRevision) {
       case (entity, revision) =>
@@ -70,24 +54,9 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }(Metadata.empty).map(toJInt)(PiggyBack)
   }
-  def update(id: ID, expectedRevision: Option[Revision], causalTick: Long, consumer: BiConsumer[ET, Integer]): Future[Integer] = {
-    repo.update(id, expectedRevision, causalTick) {
-      case (entity, revision) =>
-        try Future successful consumer.accept(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(Metadata.empty).map(toJInt)(PiggyBack)
-  }
+
   def update(id: ID, metadata: Metadata, consumer: BiConsumer[ET, Integer]): Future[Integer] = {
     repo.update(id) {
-      case (entity, revision) =>
-        try Future successful consumer.accept(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(metadata).map(toJInt)(PiggyBack)
-  }
-  def update(id: ID, causalTick: Long, metadata: Metadata, consumer: BiConsumer[ET, Integer]): Future[Integer] = {
-    repo.update(id, causalTick) {
       case (entity, revision) =>
         try Future successful consumer.accept(entity, revision) catch {
           case NonFatal(th) => Future failed th
@@ -103,14 +72,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }(metadata).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
-  def update[R](id: ID, expectedRevision: Option[Revision], causalTick: Long, metadata: Metadata, withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
-    repo.update(id, expectedRevision, causalTick) {
-      case (entity, revision) =>
-        try Future successful withReturn(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(metadata).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
-  }
+
   def update[R](id: ID, expectedRevision: Option[Revision], withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
     repo.update(id, expectedRevision) {
       case (entity, revision) =>
@@ -119,24 +81,9 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }(Metadata.empty).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
-  def update[R](id: ID, expectedRevision: Option[Revision], causalTick: Long, withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
-    repo.update(id, expectedRevision, causalTick) {
-      case (entity, revision) =>
-        try Future successful withReturn(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(Metadata.empty).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
-  }
+
   def update[R](id: ID, metadata: Metadata, withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
     repo.update(id) {
-      case (entity, revision) =>
-        try Future successful withReturn(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(metadata).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
-  }
-  def update[R](id: ID, causalTick: Long, metadata: Metadata, withReturn: BiFunction[ET, Integer, R]): Future[RepoUpdate[R]] = {
-    repo.update(id, causalTick) {
       case (entity, revision) =>
         try Future successful withReturn(entity, revision) catch {
           case NonFatal(th) => Future failed th
@@ -152,14 +99,7 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }(metadata).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
-  def updateAsync[R](id: ID, expectedRevision: Option[Revision], causalTick: Long, metadata: Metadata, withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
-    repo.update(id, expectedRevision, causalTick) {
-      case (entity, revision) =>
-        try withReturn(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(metadata).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
-  }
+
   def updateAsync[R](id: ID, expectedRevision: Option[Revision], withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
     repo.update(id, expectedRevision) {
       case (entity, revision) =>
@@ -168,24 +108,9 @@ class EntityRepository[ESID, EVT, S >: Null, ID, ET](
         }
     }(Metadata.empty).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
   }
-  def updateAsync[R](id: ID, expectedRevision: Option[Revision], causalTick: Long, withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
-    repo.update(id, expectedRevision, causalTick) {
-      case (entity, revision) =>
-        try withReturn(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(Metadata.empty).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
-  }
+
   def updateAsync[R](id: ID, metadata: Metadata, withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
     repo.update(id) {
-      case (entity, revision) =>
-        try withReturn(entity, revision) catch {
-          case NonFatal(th) => Future failed th
-        }
-    }(metadata).map(t => RepoUpdate(t._1, t._2))(PiggyBack)
-  }
-  def updateAsync[R](id: ID, causalTick: Long, metadata: Metadata, withReturn: BiFunction[ET, Integer, Future[R]]): Future[RepoUpdate[R]] = {
-    repo.update(id, causalTick) {
       case (entity, revision) =>
         try withReturn(entity, revision) catch {
           case NonFatal(th) => Future failed th

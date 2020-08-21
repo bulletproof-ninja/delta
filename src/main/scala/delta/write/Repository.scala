@@ -28,15 +28,13 @@ extends Updates[ID, E] {
    * Insert new entity. Will, by definition, always be given revision `0`.
    * @param newId The new instance id function
    * @param entity The instance to insert
-   * @param causalTick Optional causal tick (when using a Lamport clock, or mitigating clock skew).
-   * @param metadata Optional metadata.
+   * @param metadata Implicit metadata.
    * @return The new id if successful,
    * or [[delta.write.DuplicateIdException]] if id already exists (and id function is constant)
    */
   def insert(
       newId: => ID,
-      entity: Entity,
-      causalTick: Tick = Long.MinValue)(
+      entity: Entity)(
       implicit
       metadata: Metadata): Future[ID]
 }
@@ -55,8 +53,7 @@ sealed trait Updates[ID, E] {
 
   protected def update[R](
       updateThunk: Loaded => Future[UT[R]],
-      id: ID, causalTick: Long,
-      expectedRevision: Option[Revision])(
+      id: ID, expectedRevision: Option[Revision])(
       implicit
       metadata: Metadata): Future[UM[R]]
 
@@ -67,15 +64,14 @@ sealed trait Updates[ID, E] {
    * updates.
    * @param id The entity id
    * @param expectedRevision Optional revision that is expected to be updated.
-   * @param causalTick Optional causal tick (when using a Lamport clock, or mitigating clock skew).
    * @param updateThunk The code block responsible for updating.
    * Will receive the instance and revision.
+   * @param metadata Implicit metadata.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](
       id: ID,
-      expectedRevision: Option[Revision] = None,
-      causalTick: Tick = Long.MinValue)(
+      expectedRevision: Option[Revision])(
       updateThunk: Loaded => Future[UT[R]])(
       implicit
       metadata: Metadata): Future[UM[R]] = {
@@ -89,7 +85,7 @@ sealed trait Updates[ID, E] {
     }
 
     // Delegate:
-    update(checkedUpdate, id, causalTick, expectedRevision)
+    update(checkedUpdate, id, expectedRevision)
 
   }
 
@@ -100,6 +96,7 @@ sealed trait Updates[ID, E] {
    * updates.
    * @param id The entity id
    * @param updateThunk The code block responsible for updating.
+   * @param metadata Implicit metadata.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID)(
@@ -116,6 +113,7 @@ sealed trait Updates[ID, E] {
    * @param id The entity id
    * @param expectedRevision The revision that is expected to be updated.
    * @param updateThunk The code block responsible for updating.
+   * @param metadata Implicit metadata.
    * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
    */
   final def update[R](id: ID, expectedRevision: Revision)(
@@ -123,39 +121,6 @@ sealed trait Updates[ID, E] {
       implicit
       metadata: Metadata): Future[UM[R]] =
     update(id, Some(expectedRevision))(updateThunk)
-
-  /**
-   * Update entity.
-   * @note The `updateThunk` should be side-effect free, as it
-   * may be invoked multiple times, if there are concurrent
-   * updates.
-   * @param id The entity id
-   * @param expectedRevision The expected revision
-   * @param causalTick Causal tick (when using a Lamport clock, or mitigating clock skew, or mitigating clock skew).
-   * @param updateThunk The code block responsible for updating.
-   * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
-   */
-  final def update[R](id: ID, expectedRevision: Revision, causalTick: Tick)(
-      updateThunk: Loaded => Future[UT[R]])(
-      implicit
-      metadata: Metadata): Future[UM[R]] =
-    update(id, Some(expectedRevision), causalTick)(updateThunk)
-
-  /**
-   * Update entity.
-   * @note The `updateThunk` should be side-effect free, as it
-   * may be invoked multiple times, if there are concurrent
-   * updates.
-   * @param id The entity id
-   * @param causalTick Causal tick (when using a Lamport clock, or mitigating clock skew).
-   * @param updateThunk The code block responsible for updating.
-   * @return New revision, or [[delta.write.UnknownIdException]] if unknown id.
-   */
-  final def update[R](id: ID, causalTick: Tick)(
-      updateThunk: Loaded => Future[UT[R]])(
-      implicit
-      metadata: Metadata): Future[UM[R]] =
-    update(id, None, causalTick)(updateThunk)
 
 }
 

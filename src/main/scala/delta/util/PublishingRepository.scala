@@ -33,11 +33,11 @@ with ImmutableEntity {
 
   protected def update[R](
       updateThunk: Loaded => Future[UT[R]],
-      id: ID, causalTick: Tick, expectedRevision: Option[Revision])(
+      id: ID, expectedRevision: Option[Revision])(
       implicit
       metadata: Metadata): Future[UM[R]] = {
     @volatile var toPublish: List[EVT] = Nil
-    val updated = impl.update(id, expectedRevision, causalTick) { loaded =>
+    val updated = impl.update(id, expectedRevision) { loaded =>
       updateThunk(loaded).map {
         case (result, events) =>
           toPublish = events
@@ -48,11 +48,11 @@ with ImmutableEntity {
     updated
   }
 
-  def insert(id: => ID, entity: Entity, causalTick: Tick)(
+  def insert(id: => ID, entity: Entity)(
       implicit
       metadata: Metadata): Future[ID] = {
     val (state, events) = entity
-    val inserted = impl.insert(id, state, causalTick)
+    val inserted = impl.insert(id, state)
     inserted.foreach(publishEvents(_, 0, events, metadata))(publishCtx)
     inserted
   }
