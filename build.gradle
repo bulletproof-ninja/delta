@@ -1,6 +1,6 @@
 plugins {
-    id 'com.jfrog.bintray' version "1.8.5"
-    id 'com.adarshr.test-logger' version '2.0.0'
+    id "com.jfrog.bintray" version '1.8.5'
+    id 'com.adarshr.test-logger' version '2.1.0'
 }
 
 ext {
@@ -12,9 +12,9 @@ ext {
 
     vScala = System.properties.scalaVersion ?: '2.13'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '6.12.0'
+    vScuff = '6.13.0'
     vScalaTest = '3.0.6'
-    vSilencer = vScala == '2.11' ? '1.4.4' : '1.6.0'
+    vSilencer = '1.7.1'
 }
 
 if (version == '') {
@@ -160,7 +160,9 @@ project(':delta-jdbc') {
 
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.12.6"
+        compile "com.hazelcast:hazelcast:3.12.8"
+        testCompile "com.hazelcast:hazelcast-client:3.12.8"
+        testCompile "com.hazelcast:hazelcast-scala_$vScala:3.12.1"
     }
 }
 
