@@ -88,6 +88,16 @@ trait EventSourceProcessing[SID, EVT] {
   /** The currently processed tick watermark. */
   protected def tickWatermark: Option[Tick]
 
+  private def adjust(tickWatermark: Tick): Tick = {
+    val tickWindow = this.tickWindow
+    require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
+    if (tickWindow == Int.MaxValue) Long.MinValue
+    else ((tickWatermark - tickWindow) min tickWatermark) match {
+      case `tickWatermark` => Long.MinValue
+      case adjusted => adjusted
+    }
+  }
+
   /**
    * Catch up on missed historic transactions, if any,
    * either from beginning of time, or from the tick watermark.
@@ -98,14 +108,14 @@ trait EventSourceProcessing[SID, EVT] {
    */
   protected def catchUp(
       eventSource: EventSource): Future[Unit] = {
-    val tickWindow = this.tickWindow
-    require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
-    tickWatermark match {
-      case Some(tickWatermark) =>
-        resume(eventSource)(selector(eventSource), tickWatermark, tickWindow)
-      case None =>
+
+    adjust(tickWatermark getOrElse Long.MinValue) match {
+      case Long.MinValue =>
         begin(eventSource)(selector(eventSource))
+      case resumeFromTick =>
+        resume(eventSource)(selector(eventSource), resumeFromTick)
     }
+
   }
 
   private def begin(es: EventSource)(
@@ -115,9 +125,9 @@ trait EventSourceProcessing[SID, EVT] {
     replayProc.future
   }
   private def resume(es: EventSource)(
-      selector: es.Selector, tickWatermark: Tick, tickWindow: Int): Future[Unit] = {
+      selector: es.Selector, resumeFrom: Tick): Future[Unit] = {
     val replayProc = StreamPromise(replayProcessor(es))
-    es.querySince(tickWatermark - tickWindow, selector)(replayProc)
+    es.querySince(resumeFrom, selector)(replayProc)
     replayProc.future
   }
 
