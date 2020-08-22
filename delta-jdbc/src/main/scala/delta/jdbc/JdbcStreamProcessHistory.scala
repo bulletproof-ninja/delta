@@ -24,7 +24,7 @@ class JdbcStreamProcessHistory[ID: ColumnType, S: ColumnType, U](
     schema: Option[String] = None)(
     implicit
     protected val updateCodec: UpdateCodec[S, U])
-  extends AbstractStore(Some(version), table, schema)
+  extends AbstractJdbcStore(Some(version), table, schema)
   with StreamProcessStore[ID, S, U]
   with BlockingCASWrites[ID, S, U, Connection] {
 

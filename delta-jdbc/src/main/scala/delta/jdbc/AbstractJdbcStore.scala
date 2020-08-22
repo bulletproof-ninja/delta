@@ -11,11 +11,14 @@ import scala.concurrent._, duration._
 import scuff.concurrent._
 import scuff.jdbc.AsyncConnectionSource
 
-abstract class AbstractStore(
+abstract class AbstractJdbcStore(
     protected val version: Option[Short],
     table: String, schema: Option[String]) {
 
   protected def cs: AsyncConnectionSource
+
+  protected def schemaDDL(schemaName: String): String = Dialect schemaDDL schemaName
+
   protected def createTable(conn: Connection): Unit
   protected def createTickIndex(conn: Connection): Unit
 
@@ -30,12 +33,17 @@ abstract class AbstractStore(
   }
 
   protected def ensureTable(conn: Connection): Unit = {
+    schema.foreach { schema =>
+      val ddl = schemaDDL(schema)
+      createSchema(conn, ddl)
+    }
     createTable(conn)
     createTickIndex(conn)
   }
 
-  private[this] val schemaRef = schema.map(_ + ".") getOrElse ""
+  private[this] val schemaRef = schema.map(_ concat ".") getOrElse ""
   protected val tableRef: String = schemaRef concat table
+
   def name = tableRef
 
   def tickWatermark: Option[Tick] =
@@ -100,11 +108,10 @@ FROM $tableRef$WHERE
 
   protected def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
-  import Dialect.executeDDL
-
-  protected def createTable(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)
-  protected def createIndex(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)
-  protected def dropTable(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)
-  protected def dropIndex(conn: Connection, ddl: String): Unit = executeDDL(conn, ddl)
+  protected def createSchema(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
+  protected def createTable(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
+  protected def createIndex(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
+  protected def dropTable(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
+  protected def dropIndex(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
 
 }

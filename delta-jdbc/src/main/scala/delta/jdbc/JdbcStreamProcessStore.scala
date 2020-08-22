@@ -60,7 +60,7 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType, U](
   indexes: List[Index[S]] = Nil)(
   implicit
   protected val updateCodec: UpdateCodec[S, U])
-extends AbstractStore(config.version, config.table, config.schema)
+extends AbstractJdbcStore(config.version, config.table, config.schema)
 with StreamProcessStore[PK, S, U]
 with BlockingCASWrites[PK, S, U, Connection]
 with SecondaryIndexing

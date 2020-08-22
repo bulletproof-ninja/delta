@@ -23,6 +23,8 @@ private[jdbc] object Dialect {
     } finally stm.close()
   }
 
+  def schemaDDL(name: String): String = s"CREATE SCHEMA IF NOT EXISTS $name"
+
 }
 
 protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
@@ -56,7 +58,7 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
 
   protected def byteDataType = "TINYINT"
 
-  protected def schemaDDL(name: String): String = s"CREATE SCHEMA IF NOT EXISTS $name"
+  protected def schemaDDL(name: String): String = Dialect.schemaDDL(name)
   def createSchema(conn: Connection): Unit = schema.foreach(schema => executeDDL(conn, schemaDDL(schema)))
 
   protected def streamTableDDL: String = s"""
