@@ -108,6 +108,7 @@ with TransactionProcessor[SID, EVT, Work] {
       replayPersistenceBatchSize,
       newPartitionedExecutionContext(replay = true), newReplayMap) {
 
+    def tickWindow = Some(PersistentMonotonicProcessing.this.tickWindow)
     override protected def process(tx: Transaction, state: Option[Work]): Future[Work] =
       PersistentMonotonicProcessing.this.process(tx, state)
 

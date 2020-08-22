@@ -33,10 +33,11 @@ class TestMonotonicProcessor {
       @volatile var latch: CountDownLatch = _
     }
     class Mono(implicit ec: ExecutionContext)
-      extends MonotonicReplayProcessor[Int, Char, String, String, Unit](
+    extends MonotonicReplayProcessor[Int, Char, String, String, Unit](
         20.seconds,
         ConcurrentMapStore(Tracker.snapshotMap, "", None)(NoFallback)) {
       def whenDone() = Future.unit
+      def tickWindow = None
       override def onUpdate(id: Int, update: Update) = {
         // println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
         // assertEquals(42, update.id)
@@ -126,6 +127,7 @@ class TestMonotonicProcessor {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
           }
+          protected def tickWindow = None
           protected def whenDone() = Future.unit
           protected def process(tx: Transaction, currState: Option[String]) = {
             val sb = new StringBuilder(currState getOrElse "")

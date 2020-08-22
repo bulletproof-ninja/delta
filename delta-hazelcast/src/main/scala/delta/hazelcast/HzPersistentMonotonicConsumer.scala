@@ -96,6 +96,7 @@ extends EventSourceConsumer[ID, EVT] {
         newPartitionedExecutionContext,
         newReplayMap) {
       def process(tx: Transaction, currState: Option[S]) = projector(tx, currState)
+      def tickWindow = Some(HzPersistentMonotonicConsumer.this.tickWindow)
     }
 
   }

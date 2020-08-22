@@ -280,7 +280,7 @@ class TestCollege {
         10.seconds,
         ConcurrentMapStore(memMap, "semester", None)(_ => Future.none))
       with MonotonicJoinState[Int, SemesterEvent, Model, Model] {
-
+      protected def tickWindow = None
       protected def prepareJoin(
           semesterId: Int, semesterRev: Revision, tick: Tick, md: Map[String, String])(
           evt: SemesterEvent): Map[Int, Processor] = {

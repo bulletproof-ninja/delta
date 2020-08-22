@@ -285,6 +285,8 @@ with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
   protected final def completionTimeout = postReplayTimeout
 
+  protected def tickWindow: Option[Int]
+
   override def onDone(): Future[BR] =
     // Reminder: Once `super.onDone()` future completes, `whenDone()` has already run.
     super.onDone().recover {
@@ -294,20 +296,13 @@ with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
         if (activeCount > 0) { // This is inherently racy, but if we catch an active stream, we can provide a more definite error message.
           throw new IllegalStateException(s"$instanceName has $activeCount unfinished transactions. Timeout of $completionTimeout is too short! Increase timeout and try again", timeout)
         } else {
-          val cause = incompletes
-            .map(_.status.failed)
-            .find(_.isCompleted)
-            .map(_.value.get.get)
-            .getOrElse(timeout)
           val firstIncomplete =
             incompletes.headOption.map { incomplete =>
-              val unapplied = incomplete.unappliedRevisions
-              val unappliedStart = unapplied.map(_.start)
-              val missing = incomplete.expectedRevision until unappliedStart.getOrElse(incomplete.expectedRevision)
+              val missing = incomplete.missingRevisions
               val textMissing = if (incomplete.status.failed.isCompleted) {
                 s"nothing, but failed processing. See stack trace below."
               } else if (missing.isEmpty) {
-                val unappliedMsg = unapplied match {
+                val unappliedMsg = incomplete.unappliedRevisions match {
                   case Some(unapplied) => s"revisions ${unapplied.start}-${unapplied.last} unapplied"
                   case None => s"all revisions applied"
                 }
@@ -317,13 +312,16 @@ with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
               } else {
                 s"revisions ${missing.start}-${missing.last}"
               }
-              s"E.g. first one, stream ${incomplete.id}, is missing $textMissing"
+              s"E.g. stream ${incomplete.id} is missing $textMissing"
             } getOrElse "(unable to elaborate)"
+          val tickWindowCause = "\n" concat
+            tickWindow.filter(_ != Int.MaxValue).map { tickWindow =>
+              s"""    - Insufficient tick window of $tickWindow. Resolve by increasing tick window."""
+            }.getOrElse("")
           val incompleteIds = incompletes.map(_.id).mkString(", ")
-          val errMsg = s"""$instanceName replay processing timed out after $completionTimeout, due to incomplete stream processing of ids: $incompleteIds
+          val errMsg = s"""$instanceName replay processing timed out after $completionTimeout, due to incomplete processing of stream(s): $incompleteIds
 $firstIncomplete
-Possible causes:
-    - Insufficient tick window. Resolve by increasing tick window.
+Possible causes:$tickWindowCause
     - Incomplete process store content; possible causes:
         - An earlier replay attempt was interrupted or killed during persistence phase.
         - Another replay persistence process actively running on the same data set.
@@ -336,7 +334,12 @@ Possible solutions:
         - Restore from backup, or
         - Delete dataset and restart this process AND DEAL WITH THE REPEATED SIDE EFFECTS
 """
-          throw new IllegalStateException(errMsg, cause)
+          val aCause = incompletes
+            .map(_.status.failed)
+            .find(_.isCompleted)
+            .map(_.value.get.get)
+            .getOrElse(timeout)
+          throw new IllegalStateException(errMsg, aCause)
         }
     }
 
