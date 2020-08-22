@@ -17,20 +17,20 @@ object ReflectiveDecoder {
 }
 
 /**
- * Will look for event decoder methods, which must match
- * the supplied decoder signature, i.e. a single argument method
- * taking [[delta.EventFormat.Encoded]] instance and returning
- * an event.
+ * Partial [[delta.EventFormat]] implementation that will look for
+ * event decoding methods, which must match the supplied decoder signature,
+ * i.e. a single argument method taking [[delta.EventFormat.Encoded]] instance
+ * and returning an event.
  *
- * This is a convenience trait to allow encoding and decoding of events
- * to be in the same file, without the having to rely on symmetric traits.
+ * This is a convenience class to allow encoding and decoding of events
+ * to be colocated, without the having to rely on symmetric traits.
  * Encoder methods and decoder methods are matched upon instantiation, thus
- * fail-fast runtime failure at startup.
+ * will fail-fast at startup.
  */
 abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (
-    decoderMatch: ReflectiveDecoder.DecoderMethodMatch,
-    exclusiveChannel: Option[Channel])
-  extends EventFormat[EVT, SF] {
+  decoderMatch: ReflectiveDecoder.DecoderMethodMatch,
+  exclusiveChannel: Option[Channel])
+extends EventFormat[EVT, SF] {
 
   import ReflectiveDecoder._
 
@@ -53,12 +53,8 @@ abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private 
   private final class Decoder(method: Method) {
     def apply(encoded: Encoded): EVT = {
       try method.invoke(ReflectiveDecoder.this, encoded).asInstanceOf[EVT] catch {
-        case ite: InvocationTargetException => ite.getCause match {
-          case th: Throwable => throw th
-          case _ => throw ite
-        }
-        case t: Throwable => throw t
-
+        case ite: InvocationTargetException =>
+          throw ite.getCause
       }
     }
     override def toString() = method.toString()
