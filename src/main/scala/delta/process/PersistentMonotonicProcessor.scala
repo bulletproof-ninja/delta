@@ -26,8 +26,11 @@ with MissingRevisionsReplay[ID, EVT] {
   protected def processContext(id: ID) = partitionThreads.singleThread(id.hashCode)
 
   private[this] val replay =
-    replayMissingRevisions(es, replayMissingDelay, replayMissingScheduler, partitionThreads.reportFailure) _
+    replayMissingRevisions(es, Some(replayMissingDelay -> replayMissingScheduler)) _
 
-  protected def onMissingRevisions(id: ID, missing: Range): Unit = replay(id, missing)(this)
+  protected def onMissingRevisions(id: ID, missing: Range): Unit =
+    replay(id, missing)(this)
+      .failed
+      .foreach(partitionThreads.reportFailure)(processContext(id))
 
 }

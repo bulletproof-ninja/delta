@@ -70,8 +70,10 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null, U](
       id: ID, missing: Range,
       replayProcess: Consumer[delta.Transaction[ID, _ >: EVT]]): Unit =
     this.replayMissingRevisions(
-      es, FiniteDuration(replayDelayLength, replayDelayUnit), scheduler, reportFailure.accept)(
+      es, Some(FiniteDuration(replayDelayLength, replayDelayUnit) -> scheduler))(
       id, missing)(
       replayProcess.accept)
+    .failed
+    .foreach(reportFailure.accept)
 
 }

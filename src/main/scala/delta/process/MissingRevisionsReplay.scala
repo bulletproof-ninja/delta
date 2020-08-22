@@ -1,11 +1,14 @@
 package delta.process
 
-import scuff.concurrent._
-import scala.collection.concurrent.TrieMap
-import java.util.concurrent.ScheduledFuture
-import scuff.StreamConsumer
-import scala.concurrent.duration.FiniteDuration
 import delta.EventSource
+
+import scuff.StreamConsumer
+import scuff.concurrent._
+
+import scala.collection.concurrent.TrieMap
+import scala.concurrent._, duration.FiniteDuration
+
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledExecutorService
 
 /**
@@ -20,43 +23,50 @@ trait MissingRevisionsReplay[ID, EVT] {
 
   protected def replayMissingRevisions(
       es: EventSource[ID, _ >: EVT],
-      replayDelay: FiniteDuration,
-      scheduler: ScheduledExecutorService,
-      reportFailure: Throwable => Unit)(
-      id: ID, missing: Range)(replayProcess: Transaction => _): Unit =
+      delayReplay: Option[(FiniteDuration, ScheduledExecutorService)])(
+      id: ID, missing: Range)(replayProcess: Transaction => _): Future[Unit] =
     if (!(outstandingReplays contains id)) {
-      scheduleRevisionsReplay(id, missing, es, scheduler, replayDelay, reportFailure, replayProcess)
+      scheduleRevisionsReplay(id, missing, es, delayReplay, replayProcess)
+    } else Future.unit
+
+  private def scheduleRevisionsReplay(
+      id: ID, missing: Range, es: EventSource[ID, _ >: EVT],
+      delayReplay: Option[(FiniteDuration, ScheduledExecutorService)],
+      replayProcess: Transaction => _): Future[Unit] = {
+
+    val promise = Promise[Unit]()
+
+    delayReplay match {
+      case None =>
+        replayNow(id, missing, es, replayProcess, promise)
+      case Some((delay, _)) if delay.length == 0 =>
+        replayNow(id, missing, es, replayProcess, promise)
+      case Some((delay, scheduler)) =>
+        val replaySchedule = scheduler.schedule(delay) {
+          replayNow(id, missing, es, replayProcess, promise)
+          promise.future.andThen { _ =>
+            outstandingReplays.getOrElse(id, null) match {
+              case value @ (range, _) if range == missing =>
+                outstandingReplays.remove(id, value)
+              case _ => // Already removed
+            }
+          }(Threads.PiggyBack)
+        }
+        if (outstandingReplays.putIfAbsent(id, missing -> replaySchedule).isDefined) { // Race condition:
+          replaySchedule.cancel(false)
+        }
     }
 
-  private def scheduleRevisionsReplay(id: ID, missing: Range, es: EventSource[ID, _ >: EVT], scheduler: ScheduledExecutorService, replayDelay: FiniteDuration, reportFailure: Throwable => Unit, replayProcess: Transaction => _): Unit =
-    if (replayDelay.length == 0) {
-      replayNow(id, missing, es, reportFailure, replayProcess)(())
-    } else {
-      val replaySchedule = scheduler.schedule(replayDelay) {
-        replayNow(id, missing, es, reportFailure, replayProcess) {
-          // onDone:
-          outstandingReplays.getOrElse(id, null) match {
-            case value @ (range, _) if range == missing =>
-              outstandingReplays.remove(id, value)
-            case _ => // Already removed
-          }
-        }
-      }
-      if (outstandingReplays.putIfAbsent(id, missing -> replaySchedule).isDefined) { // Race condition:
-        replaySchedule.cancel(false)
-      }
-    }
+    promise.future
+  }
 
   private def replayNow(
       id: ID, missing: Range, es: EventSource[ID, _ >: EVT],
-      reportFailure: Throwable => Unit, replayProcess: Transaction => _)(whenDone: => Unit): Unit = {
+      replayProcess: Transaction => _, whenDone: Promise[Unit]): Unit = {
     val replayConsumer = new StreamConsumer[Transaction, Unit] {
       def onNext(tx: Transaction) = replayProcess(tx)
-      def onError(th: Throwable) = {
-        reportFailure(th)
-        onDone()
-      }
-      def onDone() = whenDone
+      def onError(th: Throwable) = whenDone failure th
+      def onDone() = whenDone success ()
     }
     es.replayStreamRange(id, missing)(replayConsumer)
   }
@@ -65,15 +75,13 @@ trait MissingRevisionsReplay[ID, EVT] {
 
 class MissingRevisionsReplayer[ID, EVT](
   es: EventSource[ID, _ >: EVT],
-  replayDelay: FiniteDuration,
-  scheduler: ScheduledExecutorService,
-  reportFailure: Throwable => Unit)
+  replayDelaySchedule: Option[(FiniteDuration, ScheduledExecutorService)] = None)
 extends MissingRevisionsReplay[ID, EVT] {
 
-  private[this] val scheduleReplay = replayMissingRevisions(es, replayDelay, scheduler, reportFailure) _
+  private[this] val requestMissingReplay = replayMissingRevisions(es, replayDelaySchedule) _
 
-  def scheduleMissingRevisionsReplay(
-      id: ID, missing: Range)(replayProcess: delta.Transaction[ID, _ >: EVT] => _): Unit =
-    scheduleReplay(id, missing)(replayProcess)
+  def requestReplay(
+      id: ID, missing: Range)(replayProcess: delta.Transaction[ID, _ >: EVT] => _): Future[Unit] =
+    requestMissingReplay(id, missing)(replayProcess)
 
 }

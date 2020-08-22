@@ -75,7 +75,7 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 
       protected def onMissingRevisions(id: ESID, missing: Range): Unit =
         replayMissingRevisions(
-          eventSource, replayDelayOnMissing, scheduler, processContext(id).reportFailure)(
+          eventSource, Some(replayDelayOnMissing -> scheduler))(
           id, missing)(this.apply)
 
       protected def onUpdate(id: ESID, update: Update): Unit =

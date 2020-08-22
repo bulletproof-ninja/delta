@@ -24,7 +24,7 @@ extends (delta.Transaction[ID, _ >: EVT] => Future[EntryUpdateResult])
 with MissingRevisionsReplay[ID, EVT] {
 
   private[this] val replay =
-    replayMissingRevisions(es, missingRevisionsReplayDelay, scheduler, reportFailure) _
+    replayMissingRevisions(es, Some(missingRevisionsReplayDelay -> scheduler)) _
 
   type Transaction = delta.Transaction[ID, _ >: EVT]
   def apply(tx: Transaction) = {
@@ -33,6 +33,8 @@ with MissingRevisionsReplay[ID, EVT] {
       .andThen {
         case Success(MissingRevisions(range)) =>
           replay(tx.stream, range)(apply)
+            .failed
+            .foreach(reportFailure)
         case Failure(th) =>
           reportFailure(th)
       }
