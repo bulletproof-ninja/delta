@@ -1,13 +1,16 @@
 package delta.hazelcast.serializers
 
 import java.io.{ ObjectInputStream, ObjectOutputStream }
+
 import com.hazelcast.nio.{ ObjectDataInput, ObjectDataOutput }
 import com.hazelcast.nio.serialization.StreamSerializer
+import com.hazelcast.projection.Projection
+
 import delta.{ Snapshot, Transaction, Projector }
+import delta.process.{ Update, AsyncCodec }
 import delta.hazelcast._
+
 import scala.collection.immutable.TreeMap
-import delta.process.Update
-import delta.process.AsyncCodec
 
 trait TransactionSerializer
 extends StreamSerializer[delta.Transaction[Any, Any]] {
@@ -196,4 +199,27 @@ extends StreamSerializer[delta.process.ConcurrentMapStore.State[Any]] {
     new State(snapshot, modified)
   }
 
+}
+
+trait KeySnapshotProjectionSerializer
+extends StreamSerializer[KeySnapshotProjection.type] {
+  def write(out: ObjectDataOutput, value: KeySnapshotProjection.type): Unit = ()
+  def read(inp: ObjectDataInput): KeySnapshotProjection.type = KeySnapshotProjection
+}
+
+trait KeyTickProjectionSerializer
+extends StreamSerializer[KeyTickProjection.type] {
+  def write(out: ObjectDataOutput, value: KeyTickProjection.type): Unit = ()
+  def read(inp: ObjectDataInput): KeyTickProjection.type = KeyTickProjection
+}
+
+trait IMapDuplicateAggregatorSerializer
+extends StreamSerializer[IMapDuplicateAggregator[Any, Any, Any]] {
+  def write(out: ObjectDataOutput, value: IMapDuplicateAggregator[Any,Any,Any]): Unit = {
+    out writeObject value.projection
+  }
+  def read(inp: ObjectDataInput): IMapDuplicateAggregator[Any,Any,Any] = {
+    val projection = inp.readObject[Projection[Any, Any]]
+    new IMapDuplicateAggregator(projection)
+  }
 }

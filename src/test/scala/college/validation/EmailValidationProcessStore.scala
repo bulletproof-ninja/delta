@@ -5,7 +5,6 @@ import scala.collection.compat._
 import college.student._
 
 import delta.process._
-import delta.validation.IndexedStore
 
 import scuff.EmailAddress
 
@@ -15,17 +14,17 @@ import scuff.concurrent.Threads.PiggyBack
 
 trait EmailValidationProcessStore
 extends StreamProcessStore[Int, State, Unit]
-with SecondaryIndex
-with IndexedStore
+with SecondaryIndexing
+with AggregationSupport
 with EmailIndex {
 
   protected def emailRefName: String
-  protected def emailRefType: Ref[EmailAddress]
+  implicit protected def getEmail: MetaType[EmailAddress]
 
   private implicit def ec = PiggyBack
 
   def findDuplicates(): Future[Map[EmailAddress, Map[Student.Id, Tick]]] =
-    findDuplicates(emailRefName)(emailRefType)
+    findDuplicates(emailRefName)
       .map {
         _.view.mapValues {
           _.map {
@@ -34,9 +33,9 @@ with EmailIndex {
         }.toMap
       }
 
-  protected def toQueryValue(addr: EmailAddress): QueryValue
+  protected def toQueryValue(addr: EmailAddress): QueryType
   def lookupAll(email: EmailAddress): Future[Map[Student.Id, Tick]] =
-    queryTick(emailRefName -> toQueryValue(email))
+    queryForTick(emailRefName -> toQueryValue(email))
       .map {
         _.map {
           case (id, tick) => new Student.Id(id) -> tick

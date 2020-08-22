@@ -19,14 +19,25 @@ import com.mongodb.client.result.UpdateResult
 import delta.process._
 import scuff.Codec
 import scuff.concurrent._
-import delta.validation.IndexedStore
 import com.mongodb.client.model.IndexOptions
 import java.{util => ju}
 import com.mongodb.client.model.IndexModel
 
+object MongoStreamProcessStore {
+
+  private def indexOptions = new IndexOptions().background(false).sparse(false).unique(false)
+
+  private def toIndexModels(indexFields: Seq[String]): List[IndexModel] =
+    indexFields.iterator.map { path =>
+      val key = new BsonDocument(path, 1)
+      new IndexModel(key, indexOptions)
+    }.toList
+
+}
+
 class MongoStreamProcessStore[K: ClassTag, S, U](
   coll: MongoCollection[BsonDocument],
-  secondaryIndexFields: String*)(
+  secondaryIndexes: List[IndexModel])(
   implicit
   keyCodec: Codec[K, BsonValue],
   snapshotCodec: SnapshotCodec[S],
@@ -34,8 +45,18 @@ class MongoStreamProcessStore[K: ClassTag, S, U](
   protected val updateCodec: UpdateCodec[S, U])
 extends MongoSnapshotStore(coll)(classTag[K], snapshotCodec, ec, keyCodec.encode)
 with StreamProcessStore[K, S, U] with NonBlockingCASWrites[K, S, U]
-with IndexedStore
-with SecondaryIndex {
+with SecondaryIndexing
+with AggregationSupport {
+
+  def this(
+      coll: MongoCollection[BsonDocument],
+      secondaryIndexFields: String*)(
+      implicit
+      keyCodec: Codec[K, BsonValue],
+      snapshotCodec: SnapshotCodec[S],
+      ec: ExecutionContext,
+      updateCodec: UpdateCodec[S, U]) =
+    this(coll, MongoStreamProcessStore.toIndexModels(secondaryIndexFields))
 
   protected implicit def fromBson(bson: BsonValue): K = keyCodec decode bson
 
@@ -47,19 +68,14 @@ with SecondaryIndex {
 
     if (ensureIndexes) {
       // Don't use sparse indexes, as they won't work for arrays, leading to collection scan
-      val indexOptions = new IndexOptions().background(false).sparse(false).unique(false)
       val start = System.currentTimeMillis
       withBlockingCallback[String](timeout) { cb =>
-        coll.createIndex(doc("tick", -1), indexOptions, cb)
+        coll.createIndex(doc("tick", -1), MongoStreamProcessStore.indexOptions, cb)
       }
-      if (secondaryIndexFields.nonEmpty) {
+      if (secondaryIndexes.nonEmpty) {
         val tickIdxDur = System.currentTimeMillis - start
         withBlockingCallback[ju.List[String]](timeout - tickIdxDur.millis) { cb =>
-          val keys = secondaryIndexFields.foldLeft(new BsonDocument) {
-            case (doc, key) => doc.append(key, 1)
-          }
-          val models = singletonList(new IndexModel(keys, indexOptions))
-          coll.createIndexes(models, cb)
+          coll.createIndexes(secondaryIndexes.asJava, cb)
         }
       }
     }
@@ -158,15 +174,16 @@ with SecondaryIndex {
     }
   }
 
-  protected type Ref[V] = BsonValue => V
+  protected type MetaType[T] = BsonValue => T
 
   /**
     * Find duplicates in index.
     * @return `Map` of duplicates
     */
-  protected def findDuplicates[V](
+  protected def findDuplicates[D](
       refName: String)(
-      implicit conv: BsonValue => V): Future[Map[V, Map[K, Tick]]] = {
+      implicit
+      extractor: BsonValue => D): Future[Map[D, Map[K, Tick]]] = {
 
     val $refName = s"$$$refName"
 
@@ -185,18 +202,18 @@ with SecondaryIndex {
       aggregation.into(target, callback)
     } map {
       case Some(docs) =>
-        docs.asScala.foldLeft(Map.empty[V, Map[K, Tick]]) {
+        docs.asScala.foldLeft(Map.empty[D, Map[K, Tick]]) {
           case (map, doc: BsonDocument) =>
-            val ref: V = doc.get("_id")
+            val dupe: D = doc get "_id"
             val matches = doc.getArray("matches").asScala
               .foldLeft(Map.empty[K, Tick]) {
                 case (map, dup: BsonDocument) =>
-                  val key: K = dup.get("_id")
+                  val key: K = dup get "_id"
                   val tick = dup.getInt64("tick").longValue
                   map.updated(key, tick)
                 case (_, bson) => sys.error(s"Unexpected BSON type: $bson")
               }
-            map.updated(ref, matches)
+            map.updated(dupe, matches)
           case (_, bson) => sys.error(s"Unexpected BSON type: $bson")
         }
       case _ => Map.empty
@@ -204,7 +221,7 @@ with SecondaryIndex {
 
   }
 
-  protected type QueryValue = BsonValue
+  protected type QueryType = BsonValue
 
   private def queryDocs[V](
       fields: Seq[(String, BsonValue)], projection: BsonDocument = null)(
@@ -248,13 +265,13 @@ with SecondaryIndex {
     * @param more Addtional `nameValue`s, applied with `AND` semantics
     * @return `Map` of stream ids and snapshot
     */
-  protected def querySnapshot(
+  protected def queryForSnapshot(
       nameValue: (String, BsonValue), more: (String, BsonValue)*)
       : Future[Map[K, Snapshot]] =
     queryDocs(nameValue +: more)(snapshotCodec.decode)
 
   /**
-    * Lighter version of `querySnapshot` if only reference is needed.
+    * Lighter version of `queryForSnapshot` if only reference is needed.
     * Uses `AND` semantics, so multiple column
     * queries should not use mutually exclusive
     * values.
@@ -262,7 +279,7 @@ with SecondaryIndex {
     * @param more Addtional `nameValue`s, applied with `AND` semantics
     * @return `Map` of stream ids and tick (in case of duplicates, for chronology)
     */
-  protected def queryTick(
+  protected def queryForTick(
       nameValue: (String, BsonValue), more: (String, BsonValue)*)
       : Future[Map[K, Tick]] =
     queryDocs(nameValue +: more, doc("tick", 1))(_.getInt64("tick").longValue)

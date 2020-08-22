@@ -25,8 +25,8 @@ class StreamProcessMapStore[K, T, U](
   processStore: StreamProcessStore[K, T, U],
   preloadKeys: Iterable[K] = Set.empty[K],
   awaitTimeout: FiniteDuration = 11.seconds)
-    extends MapStore[K, EntryState[T, Any]]
-    with MapLoaderLifecycleSupport {
+extends MapStore[K, EntryState[T, Any]]
+with MapLoaderLifecycleSupport {
 
   if (processStore.isInstanceOf[IMapStreamProcessStore[_, _, _]])
     throw new IllegalArgumentException(

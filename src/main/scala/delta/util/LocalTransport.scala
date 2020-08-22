@@ -7,6 +7,7 @@ import scuff.Subscription
 
 /**
   * Local (JVM scope) transaction hub.
+  * Mostly useful for testing.
   */
 final class LocalTransport[M](getTopic: M => MessageTransport.Topic,
     protected val publishCtx: ExecutionContext)

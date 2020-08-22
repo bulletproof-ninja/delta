@@ -20,7 +20,7 @@ import delta.process.UpdateHub
 import scuff.EmailAddress
 
 class EmailValidationProcess(
-  protected val maxTickSkew: Int,
+  protected val tickWindow: Int,
   protected val processStore: StreamProcessStore[Int, State, Unit],
   protected val replayMissingScheduler: ScheduledExecutorService)(
   studentRepo: StudentRepo,
@@ -32,15 +32,12 @@ class EmailValidationProcess(
 extends PersistentMonotonicProcessing[Int, StudentEvent, State, Unit]
 with EventStoreValidationProcess[Int, StudentEvent, State] {
 
-  private[this] val StudentCompensation = Some {
-    new EntityCompensation(
-      studentRepo,
-      new UniqueStudentEmailValidation(emailIndex))
-  }
-
-  def compensation(ch: Channel) = ch match {
-    case Student.channel => StudentCompensation
-    case _ => None
+  val compensation = {
+    case Student.channel =>
+        new EntityCompensation(
+          StudentIdCodec,
+          studentRepo,
+          new UniqueStudentEmailValidation(emailIndex))
   }
 
   protected def replayPersistenceBatchSize: Int = 100
@@ -70,15 +67,15 @@ object EmailValidationProcess {
     def asJson: Json
     def asData: Data
   }
-  case class Data(emails: Set[EmailAddress] = Set.empty) extends State {
-    def asJson: Json = Json(JsArr(emails.toSeq.map(_.toLowerCase).map(JsStr(_)): _*).toJson)
+  case class Data(allEmails: Set[EmailAddress] = Set.empty, newEmails: Set[EmailAddress] = Set.empty) extends State {
+    def asJson: Json = Json(JsArr(allEmails.toSeq.map(_.toLowerCase).map(JsStr(_)): _*).toJson)
     def asData: Data = this
   }
   case class Json(value: JSON) extends State {
     def asJson: Json = this
     def asData: Data = {
       val emails = JsVal.parse(value).asArr.values.map(_.asStr).map(EmailAddress(_))
-      Data(emails.toSet)
+      Data(allEmails = emails.toSet)
     }
   }
 
@@ -87,11 +84,17 @@ object EmailValidationProcess {
 
     def next(state: State, evt: StudentEvent): State = evt match {
       case StudentEmailAdded(newEmailAddr) =>
+        val newEmail = EmailAddress(newEmailAddr)
         val data = state.asData
-        data.copy(emails = data.emails + EmailAddress(newEmailAddr))
+        data.copy(
+          allEmails = data.allEmails + newEmail,
+          newEmails = data.newEmails + newEmail)
       case StudentEmailRemoved(removeEmailAddr) =>
+        val removedEmail = EmailAddress(removeEmailAddr)
         val data = state.asData
-        data.copy(emails = data.emails - EmailAddress(removeEmailAddr))
+        data.copy(
+          allEmails = data.allEmails - removedEmail,
+          newEmails = data.newEmails - removedEmail)
       case _ => // Ignore all other events
         state
     }

@@ -3,6 +3,14 @@ package delta.validation
 import delta.process.EventSourceProcessing
 import scala.concurrent.Future
 
+/**
+  * Process for validation of [[delta.EventStore]].
+  * @note Before activating the validating event store
+  * (through `eventStore.activate(thisProcess)`), the
+  * event store should be validated first, to ensure no
+  * invalid state exists, which might happen during a
+  * unplanned shutdown.
+  */
 trait EventStoreValidationProcess[SID, EVT, S]
 extends EventSourceProcessing[SID, EVT] {
 
@@ -11,7 +19,7 @@ extends EventSourceProcessing[SID, EVT] {
   protected override type LiveResult <: S
 
   /** Lookup compensation function for channel. */
-  def compensation(ch: Channel): Option[Compensation[SID, S]]
+  val compensation: PartialFunction[Channel, Compensation[SID, S]]
 
   type ConsistentEventStore = EventSource with ConsistencyValidation[SID, _ >: EVT]
 
@@ -26,6 +34,6 @@ extends EventSourceProcessing[SID, EVT] {
   def validate(
       eventStore: ConsistentEventStore)
       : Future[Unit] =
-    super.catchUp(eventStore: EventSource)
+    this.catchUp(eventStore: EventSource)
 
 }

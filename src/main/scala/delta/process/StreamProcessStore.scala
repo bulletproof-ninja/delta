@@ -2,7 +2,6 @@ package delta.process
 
 import delta.SnapshotStore
 
-import collection.Map
 import concurrent._
 import concurrent.duration._
 import scala.annotation.tailrec
@@ -17,7 +16,7 @@ import scuff.concurrent._
  *
  * @note For state type `S`, consider using a type that is
  * optimized for reading (e.g. a plain JSON `String`) as this makes
- * it easily available as a [[delta.read.ReadModel]] with mostly just
+ * it easily available as a [[delta.read.ReadModel]] thus just
  * pushing bytes. In such cases, the `adapt` methods can be used to
  * accomodate the actual processing setup.
  *
@@ -40,10 +39,10 @@ extends SnapshotStore[SID, S] {
 
   type Update = delta.process.Update[U]
 
-  def readBatch(keys: Iterable[SID]): Future[Map[SID, Snapshot]]
-  def writeBatch(batch: Map[SID, Snapshot]): Future[Unit]
+  def readBatch(keys: Iterable[SID]): Future[collection.Map[SID, Snapshot]]
+  def writeBatch(batch: collection.Map[SID, Snapshot]): Future[Unit]
   def refresh(key: SID, revision: Revision, tick: Tick): Future[Unit]
-  def refreshBatch(revisions: Map[SID, (Int, Long)]): Future[Unit]
+  def refreshBatch(revisions: collection.Map[SID, (Int, Long)]): Future[Unit]
 
   /**
    *  Tick watermark. This is a best-effort
@@ -128,7 +127,8 @@ extends StreamProcessStore[SID, S, U] {
     }(Threads.PiggyBack)
   }
 
-  final abstract override def writeBatch(batch: Map[SID, Snapshot]): Future[Unit] = {
+  final abstract override def writeBatch(
+      batch: collection.Map[SID, Snapshot]): Future[Unit] = {
     val futureWrites = batch.map {
       case (key, snapshot) => write(key, snapshot)
     }
@@ -382,7 +382,7 @@ extends StreamProcessStore[WKey, Work, U] {
       underlying.write(w2s(key), snapshot)
     }(PiggyBack)
 
-  def readBatch(keys: Iterable[WKey]): Future[Map[WKey, Snapshot]] =
+  def readBatch(keys: Iterable[WKey]): Future[collection.Map[WKey, Snapshot]] =
     underlying.readBatch(keys.map(w2s)).map {
       _.map {
         case (key, snapshot) =>
@@ -393,12 +393,12 @@ extends StreamProcessStore[WKey, Work, U] {
   def refresh(key: WKey, revision: Revision, tick: Tick): Future[Unit] =
     underlying.refresh(this w2s key, revision, tick)
 
-  def refreshBatch(revisions: Map[WKey, (Int, Long)]): Future[Unit] =
+  def refreshBatch(revisions: collection.Map[WKey, (Int, Long)]): Future[Unit] =
     underlying refreshBatch revisions.map {
       case (key, revTick) => (this w2s key) -> revTick
     }
 
-  def writeBatch(batch: Map[WKey, Snapshot]): Future[Unit] = {
+  def writeBatch(batch: collection.Map[WKey, Snapshot]): Future[Unit] = {
       implicit def ec = PiggyBack
     val batchS = batch.iterator.map {
       case (key, snapshotW) =>

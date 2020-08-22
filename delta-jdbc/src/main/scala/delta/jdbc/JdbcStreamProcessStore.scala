@@ -11,8 +11,6 @@ import delta.process._
 
 import scuff.jdbc.AsyncConnectionSource
 
-import delta.validation.IndexedStore
-
 object JdbcStreamProcessStore {
   private[jdbc] final case class PkColumn[T](name: String, colType: ColumnType[T])
 
@@ -65,8 +63,8 @@ class JdbcStreamProcessStore[PK: ColumnType, S: ColumnType, U](
 extends AbstractStore(config.version, config.table, config.schema)
 with StreamProcessStore[PK, S, U]
 with BlockingCASWrites[PK, S, U, Connection]
-with SecondaryIndex
-with IndexedStore {
+with SecondaryIndexing
+with AggregationSupport {
 
   protected final def dataColumnType = implicitly[ColumnType[S]]
 
@@ -459,10 +457,10 @@ CREATE INDEX IF NOT EXISTS $indexName
       else getOne(conn, key)
     }
 
-  protected type QueryValue = Any
+  protected type QueryType = Any
 
-  protected def querySnapshot(
-      indexColumnMatch: (String, QueryValue), more: (String, QueryValue)*)
+  protected def queryForSnapshot(
+      indexColumnMatch: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[PK, Snapshot]] = {
 
     val queryValues: List[(IndexColumn[S], Any)] = (indexColumnMatch :: more.toList).map {
@@ -499,8 +497,8 @@ $WHERE $where
 
   }
 
-  protected def queryTick(
-      indexColumnMatch: (String, QueryValue), more: (String, QueryValue)*)
+  protected def queryForTick(
+      indexColumnMatch: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[PK, Tick]] = {
 
     val queryValues: List[(IndexColumn[S], Any)] = (indexColumnMatch :: more.toList).map {
@@ -552,7 +550,7 @@ $WHERE_for_o o.$indexColumn IN (
 )
 """
 
-  protected type Ref[V] = ReadColumn[V]
+  protected type MetaType[V] = ReadColumn[V]
 
   /**
     * Find duplicates in index.

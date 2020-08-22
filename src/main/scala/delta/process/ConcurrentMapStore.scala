@@ -80,13 +80,13 @@ object ConcurrentMapStore {
  * @note This implementation IS NOT a two-way cache. There's no mechanism
  * to write through.
  * @param cmap The concurrent map implementation
- * @param lookupFallback Persistent store fallback
+ * @param readThrough Persistent store fallback
  */
 final class ConcurrentMapStore[K, W, U] private (
   cmap: CMap[K, ConcurrentMapStore.State[W]],
   val name: String,
   val tickWatermark: Option[Tick],
-  readFallback: K => Future[Option[delta.Snapshot[W]]])(
+  readThrough: K => Future[Option[delta.Snapshot[W]]])(
   implicit protected val updateCodec: UpdateCodec[W, U])
 extends StreamProcessStore[K, W, U]
 with NonBlockingCASWrites[K, W, U] {
@@ -137,7 +137,7 @@ with NonBlockingCASWrites[K, W, U] {
     case found @ Some(_) => Future successful found.map(_.snapshot)
     case None =>
       if (unknownKeys contains key) Future.none
-      else readFallback(key).map {
+      else readThrough(key).map {
 
         case fallbackSnapshot @ Some(snapshot) =>
           cmap.putIfAbsent(key, State(snapshot, modified = false))

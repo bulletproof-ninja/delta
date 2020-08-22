@@ -87,7 +87,7 @@ class TestCollege extends college.TestCollege {
       emailColl, EmailsField)
     with EmailValidationProcessStore {
       def emailRefName: String = EmailsField
-      val emailRefType = (bson: BsonValue) => EmailAddress(bson.asString.getValue)
+      val getEmail = bson => EmailAddress(bson.asString.getValue)
       def toQueryValue(addr: EmailAddress): BsonValue = new BsonString(addr.toLowerCase)
     }
   }.ensureIndexes()

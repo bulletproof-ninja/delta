@@ -8,7 +8,7 @@ import scala.collection.compat._
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 
-object IndexTables {
+object IndexTableSupport {
   final case class Table[S, C: ColumnType](indexColumn: String)(getIndexValues: S => Set[C]) {
     def getIndexValues(state: S): Set[Any] = this.getIndexValues.apply(state).asInstanceOf[Set[Any]]
     def colType = implicitly[ColumnType[C]].asInstanceOf[ColumnType[Any]]
@@ -21,12 +21,12 @@ object IndexTables {
  * @note For simple one-to-one associations,
  * use [[delta.jdbc.JdbcStreamProcessStore.Index]]
  */
-trait IndexTables[PK, S, U]
+trait IndexTableSupport[PK, S, U]
 extends JdbcStreamProcessStore[PK, S, U] {
 
-  protected type Table = IndexTables.Table[S, _]
+  protected type Table = IndexTableSupport.Table[S, _]
   protected def Table[C: ColumnType](indexColumn: String)(getIndexValues: S => Set[C]): Table =
-    IndexTables.Table[S, C](indexColumn)(getIndexValues)
+    IndexTableSupport.Table[S, C](indexColumn)(getIndexValues)
 
   protected def indexTables: List[Table]
   private lazy val indexTablesByColumn = {
@@ -221,14 +221,14 @@ $WHERE_i i.${table.indexColumn} = ?
 
   }
 
-  override protected def querySnapshot(
+  override protected def queryForSnapshot(
       indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Snapshot]] = {
     import cs.queryContext
 
     query(
       indexColumnMatch :: more.toList,
-      () => super.querySnapshot(indexColumnMatch, more: _*),
-      kv => this.queryTick(kv.head, kv.tail: _*).map(_.keySet),
+      () => super.queryForSnapshot(indexColumnMatch, more: _*),
+      kv => this.queryForTick(kv.head, kv.tail: _*).map(_.keySet),
       selectSnapshotSQL) { rs =>
         val snapshot = this.getSnapshot(rs)(dataColumnType)
         val stream = pkColumn.colType.readFrom(rs, 4)
@@ -236,13 +236,13 @@ $WHERE_i i.${table.indexColumn} = ?
       }
   }
 
-  override protected def queryTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
+  override protected def queryForTick(indexColumnMatch: (String, Any), more: (String, Any)*): Future[Map[PK, Long]] = {
     import cs.queryContext
 
     query(
       indexColumnMatch :: more.toList,
-      () => super.queryTick(indexColumnMatch, more: _*),
-      kv => super.queryTick(kv.head, kv.tail: _*).map(_.keySet),
+      () => super.queryForTick(indexColumnMatch, more: _*),
+      kv => super.queryForTick(kv.head, kv.tail: _*).map(_.keySet),
       selectStreamTickSQL) { rs =>
         val tick = rs.getLong(1)
         val stream = pkColumn.colType.readFrom(rs, 2)

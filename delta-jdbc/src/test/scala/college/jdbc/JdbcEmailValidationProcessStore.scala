@@ -30,7 +30,7 @@ class JdbcEmailValidationProcessStore(
 extends JdbcStreamProcessStore[Int, State, Unit](
   Config("student_id", table = "student_email_lookup", schema = schema) withVersion version withTimestamp timestamp,
   cs)
-with IndexTables[Int, State, Unit]
+with IndexTableSupport[Int, State, Unit]
 with EmailValidationProcessStore {
 
   protected val indexTables =
@@ -39,7 +39,7 @@ with EmailValidationProcessStore {
 
   override def toQueryValue(addr: EmailAddress) = addr.toLowerCase
   override def emailRefName: String = EmailColumn
-  override val emailRefType = new ReadColumn[EmailAddress] {
+  override val getEmail = new ReadColumn[EmailAddress] {
     def readFrom(rs: ResultSet, col: Int): EmailAddress = EmailAddress(rs.getString(col))
   }
 

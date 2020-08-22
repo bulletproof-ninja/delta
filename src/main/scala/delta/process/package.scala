@@ -10,7 +10,7 @@ package object process {
 
   type UpdateHub[ID, U] = MessageHub[ID, Update[U]]
 
-  implicit def asyncCodec[A, B](codec: scuff.Codec[A, B]): AsyncCodec[A, B] = AsyncCodec(codec)
+  implicit def asAsyncCodec[A, B](codec: scuff.Codec[A, B]): AsyncCodec[A, B] = AsyncCodec(codec)
 
   private[process] val RightFalse = Right(false)
 
@@ -23,7 +23,7 @@ package object process {
     def asSnapshot(prevState: Option[Any], update: Any): Option[Any] = Some(update)
   }
 
-  implicit def Unit[S] = unit.asInstanceOf[UpdateCodec[S, Unit]]
-  implicit def Default[S] = noop.asInstanceOf[UpdateCodec[S, S]]
+  implicit def updateIsUnit[S] = unit.asInstanceOf[UpdateCodec[S, Unit]]
+  implicit def updateIsState[S] = noop.asInstanceOf[UpdateCodec[S, S]]
 
 }

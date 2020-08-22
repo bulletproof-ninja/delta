@@ -13,14 +13,15 @@ class UniqueStudentEmailValidation(
   index: EmailIndex)
 extends SetValidationBySeniority[Student.Id, State, Student] {
 
-  type UniqueType = EmailAddress
+  type Qualifier = EmailAddress
 
-  protected def compensate(duplicate: EmailAddress, student: Student): Unit =
-    student apply RemoveStudentEmail(duplicate)
+  protected def needValidation(state: State): Set[EmailAddress] =
+    state.asData.newEmails
 
-  protected def valuesFrom(state: State): List[EmailAddress] = state.asData.emails.toList
-
-  protected def query(emailAddr: EmailAddress): Future[Map[Student.Id, Tick]] =
+  protected def findMatches(emailAddr: EmailAddress): Future[Map[Student.Id, Tick]] =
     index.lookupAll(emailAddr)
+
+  protected def compensate(duplicate: EmailAddress, validatedState: State, student: Student): Unit =
+    student apply RemoveStudentEmail(duplicate)
 
 }

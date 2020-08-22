@@ -102,9 +102,6 @@ class TestCollege {
     eventStore.ticker.close()
   }
 
-  private def randomName: String = (
-    rand.nextBetween('A', 'Z' + 1) +: (1 to rand.nextBetween(2, 13)).map(_ => rand.nextBetween('a', 'z' + 1))).mkString
-
   private def addStudents(count: Int): Seq[Student.Id] = {
     val ids =
       for (_ <- 1 to count) yield {
@@ -166,20 +163,20 @@ class TestCollege {
   }
 
   def newEmailValidationProcessStore(): EmailValidationProcessStore =
-    new InMemoryProcStore[Int, State, Unit](new TrieMap, "student-emails")
+    new InMemoryProcStore[Int, State, Unit]("student-emails")
     with EmailValidationProcessStore {
 
       protected def toQueryValue(addr: EmailAddress) = addr
       protected def emailRefName: String = "emailAddress" // Ref name is irrelevant here
-      protected def emailRefType: Ref[EmailAddress] =  (name: String, state: State) => {
+      protected def getEmail: MetaType[EmailAddress] =  (name: String, state: State) => {
         assert(name == emailRefName)
         state.asData.allEmails
       }
 
-      protected def queryMatch(name: String, queryValue: Any, state: State) =
+      override protected def isQueryMatch(name: String, queryValue: Any, state: State) =
         queryValue match {
           case addr: EmailAddress => state.asData.allEmails contains addr
-          case _ => false
+          case _ => super.isQueryMatch(name, queryValue, state)
         }
 
     }

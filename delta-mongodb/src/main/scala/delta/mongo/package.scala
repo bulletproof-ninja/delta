@@ -63,6 +63,8 @@ package object mongo {
     }
   }
 
+  implicit def toBson(oid: ObjectId): BsonValue = if (oid == null) BsonNull.VALUE else new BsonObjectId(oid)
+  implicit def toBson(uuid: UUID): BsonValue = if (uuid == null) BsonNull.VALUE else new BsonBinary(uuid)
   implicit def toBson(bytes: Array[Byte]): BsonValue = if (bytes == null) BsonNull.VALUE else new BsonBinary(bytes)
   implicit def toBson(int: Int): BsonInt32 = new BsonInt32(int)
   implicit def toBson(long: Long): BsonInt64 = new BsonInt64(long)

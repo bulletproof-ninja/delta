@@ -1,7 +1,7 @@
 import delta.EventFormat
 import scuff.JavaSerializer
 
-package object foo {
+package object hz_testing {
   implicit object BinaryEventFormat
     extends EventFormat[MyEvent, Array[Byte]] {
 

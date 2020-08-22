@@ -34,7 +34,7 @@ package jdbc {
   class VarBinaryColumn(len: String = "") extends ColumnType[Array[Byte]] {
     def this(maxLen: Int) = this(maxLen.toString)
     val typeName = len match {
-      case "" => "VARBINARY"
+      case "" | null => "VARBINARY"
       case _ => s"VARBINARY($len)"
     }
     def readFrom(row: ResultSet, col: Int) = row.getBytes(col)
@@ -46,7 +46,7 @@ package jdbc {
   class VarCharColumn(len: String = "") extends ColumnType[String] {
     def this(maxLen: Int) = this(maxLen.toString)
     val typeName = len match {
-      case "" => "VARCHAR"
+      case "" | null => "VARCHAR"
       case _ => s"VARCHAR($len)"
     }
 

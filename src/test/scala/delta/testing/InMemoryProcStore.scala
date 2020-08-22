@@ -7,26 +7,31 @@ import delta._
 import delta.process._
 
 import scuff.concurrent._
-import delta.validation.IndexedStore
+import scala.collection.concurrent.{ Map => CMap, TrieMap }
+import scuff.reflect.Surgeon
 
-abstract class InMemoryProcStore[K, S, U](
-  protected val snapshots: collection.concurrent.Map[K, delta.Snapshot[S]],
-  val name: String)(
+abstract class InMemoryProcStore[K, S <: AnyRef, U](
+  val name: String,
+  protected val snapshots: CMap[K, delta.Snapshot[S]] = TrieMap.empty[K, delta.Snapshot[S]])(
   implicit
   protected val updateCodec: UpdateCodec[S, U])
 extends StreamProcessStore[K, S, U]
 with BlockingCASWrites[K, S, U, Unit]
-with IndexedStore
-with SecondaryIndex {
+with SecondaryIndexing
+with AggregationSupport {
 
   implicit def ec = RandomDelayExecutionContext
 
-  protected type Ref[V] = (String, S) => Set[V]
+  protected type MetaType[V] = (String, S) => Set[V]
 
-  protected def findDuplicates[V](refName: String)(implicit extract: Ref[V]): Future[Map[V,Map[K,delta.Tick]]] = Future {
+  protected def findDuplicates[V](
+      refName: String)(
+      implicit
+      getValue: MetaType[V])
+      : Future[Map[V,Map[K,delta.Tick]]] = Future {
     snapshots
       .flatMap {
-        case (key, snapshot) => extract(refName, snapshot.state).map(v => (v, key, snapshot.tick))
+        case (key, snapshot) => getValue(refName, snapshot.state).map(v => (v, key, snapshot.tick))
       }
       .groupBy(_._1)
       .view
@@ -35,28 +40,31 @@ with SecondaryIndex {
       .toMap
   }
 
-  type QueryValue = Any
-  protected def queryMatch(name: String, matchValue: QueryValue, state: S): Boolean
-  protected def querySnapshot(
-      nameValue: (String, QueryValue), more: (String, QueryValue)*)
+  type QueryType = Any
+  protected def isQueryMatch(name: String, value: QueryType, state: S): Boolean = {
+    val surgeon = new Surgeon(state)
+    surgeon.selectDynamic(name) == value
+  }
+  protected def queryForSnapshot(
+      nameValue: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[K, Snapshot]] = Future {
 
-    val filter = nameValue :: more.toList
+    val filters = nameValue :: more.toList
 
     snapshots
       .filter {
         case (_, Snapshot(state, _, _)) =>
-          filter.forall {
-            case (name, expected) => queryMatch(name, expected, state)
+          filters.forall {
+            case (name, expected) => isQueryMatch(name, expected, state)
           }
       }.toMap
 
     }
 
-  protected def queryTick(
-      nameValue: (String, QueryValue), more: (String, QueryValue)*)
+  protected def queryForTick(
+      nameValue: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[K, Long]] =
-    querySnapshot(nameValue, more: _*)
+    queryForSnapshot(nameValue, more: _*)
       .map(_.view.mapValues(_.tick).toMap)
 
   def read(key: K): scala.concurrent.Future[Option[Snapshot]] = Future {

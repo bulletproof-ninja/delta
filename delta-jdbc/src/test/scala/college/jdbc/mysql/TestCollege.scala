@@ -56,7 +56,8 @@ class TestCollege extends college.jdbc.TestCollege {
   }
 
   override def newEmailValidationProcessStore() = {
-    new JdbcEmailValidationProcessStore(connSource, 1, None, TimestampColumn("last_updated")) with MySQLSyntax
+    new JdbcEmailValidationProcessStore(connSource, 1, None, TimestampColumn("last_updated"))
+    with MySQLSyntax
   }.ensureTable()
 
   override def newEventStore(): CollegeEventStore = {

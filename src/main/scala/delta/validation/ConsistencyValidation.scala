@@ -3,17 +3,18 @@ package delta.validation
 import delta._
 import scala.concurrent._
 import scala.collection.concurrent.TrieMap
-import scala.collection.immutable.IntMap
+import scala.util.{ Success, Failure }
 
 /**
- * Consistency validation that delays publishing of
- * transactions until compensating transactions have
- * been broadcast.
- * This prevents downstream consumers from exposing
+ * Apply this trait to the [[delta.EventStore]] `with` [[delta.TransactionPublishing]]
+ * for global consistency validation.
+ *
+ * This will delay publishing of a given transaction that has lead to
+ * inconsistent state until that transaction has been compensated by
+ * another transaction. This can prevent downstream consumers from exposing
  * inconsistent state, even briefly.
- * @note The event store this trait is applied to _must_
- * have validation activated by calling the `activate`
- * method.
+ * @note The [[delta.EventStore]] that this trait is applied to ''must''
+ * have validation process activated by calling the `activate` method.
  */
 trait ConsistencyValidation[SID, EVT]
 extends TransactionPublishing[SID, EVT] {
@@ -21,10 +22,10 @@ extends TransactionPublishing[SID, EVT] {
   private abstract class Activation {
     type State
     def txProcessor: Transaction => Future[State]
-    def compensation(ch: Channel): Option[Compensation[SID, State]]
+    def compensation: PartialFunction[Channel, Compensation[SID, State]]
   }
 
-  private[this] val activation = Promise[Activation]
+  private[this] val activation = Promise[Activation]()
 
   def activate[S](
       validation: EventStoreValidationProcess[SID, _ <: EVT, S])
@@ -33,7 +34,7 @@ extends TransactionPublishing[SID, EVT] {
       activation success new Activation {
         type State = S
         val txProcessor = validation.txProcessor(ConsistencyValidation.this)
-        def compensation(ch: Channel) = validation.compensation(ch)
+        def compensation = validation.compensation
       }
     catch {
       case _: IllegalStateException =>
@@ -47,8 +48,8 @@ extends TransactionPublishing[SID, EVT] {
       active: Set[Revision],
       alreadyPublished: Set[Revision],
       // NOTE: Keyed by compensating revision (NOT own revision):
-      delayedPublishing: IntMap[Transaction]) {
-    def this(curr: Revision) = this(Set(curr), Set.empty, IntMap.empty)
+      delayedPublishing: Map[Revision, Transaction]) {
+    def this(curr: Revision) = this(Set(curr), Set.empty, Map.empty)
   }
 
   private[this] object StreamStatus {
@@ -139,14 +140,11 @@ extends TransactionPublishing[SID, EVT] {
   abstract final override protected def publishTransaction(
       stream: SID, ch: Channel, txFuture: Future[Transaction]): Unit = {
     implicit val ec = validationContext(stream)
-    for (activation <- this.activation.future) {
-      activation.compensation(ch) match {
-        case None =>
-          super.publishTransaction(stream, ch, txFuture)
-        case Some(compensation) =>
-          txFuture.foreach {
-            publishOrDelay(_, activation.txProcessor, compensation)
-          }
+    for (a <- this.activation.future) {
+      if (a.compensation isDefinedAt ch) txFuture.foreach {
+        publishOrDelay(_, a.txProcessor, a.compensation(ch))
+      } else {
+        super.publishTransaction(stream, ch, txFuture)
       }
     }
 
@@ -175,23 +173,33 @@ extends TransactionPublishing[SID, EVT] {
 
     for {
       state <- txProcessor(tx)
-      outcome <- compensate.ifNeeded(tx.stream, tx.tick, state)
-    } yield outcome match {
-      case NotNeeded =>
+      compensatingTransactions <- compensate.ifNeeded(tx.stream, Snapshot(state, tx.revision, tx.tick))
+    } yield {
+      var isCurrTxCompensated = false
+      compensatingTransactions.foreach {
+        case (tx.stream, Success(revision)) =>
+          isCurrTxCompensated = true
+          StreamStatus.delay(tx, revision, status) match {
+            case None => // Delay successful
+            case Some(status) => // Compensating tx already published, so don't delay
+              assert(status.alreadyPublished contains revision)
+              publishAndDeactivate(tx, status)
+          }
+        case (_, Success(_)) => // Other stream had compensating action taken
+          // TODO: Delay in this case as well? Probably not, but hard to say in general.
+        case (_, Failure(cause)) => // Compensating action failed.
+          // TODO: Can we do more?
+          ec reportFailure cause
+      }
+      if (!isCurrTxCompensated) {
         publishAndDeactivate(tx, status)
-      case Compensated(revision) =>
-        StreamStatus.delay(tx, revision, status) match {
-          case None => // 👍
-          case Some(status) =>
-            assert(status.alreadyPublished contains revision)
-            publishAndDeactivate(tx, status)
-        }
+      }
     }
 
   private def publishAndDeactivate(tx: Transaction, status: StreamStatus): Unit = {
     try super.publishTransaction(tx.stream, tx.channel, Future successful tx) finally {
       StreamStatus.deactivate(tx, status).foreach {
-        case (tx, status) => publishAndDeactivate(tx, status)
+        case (anotherTx, updStatus) => publishAndDeactivate(anotherTx, updStatus)
       }
     }
   }

@@ -8,7 +8,9 @@ import org.bson._
 import org.bson.codecs._
 
 object TestMongoStreamProcessStore {
+
   import com.mongodb.async.client._
+  import TestStreamProcessStore._
 
   implicit val TestKeyCodec = new Codec[TestKey] {
     def getEncoderClass = classOf[TestKey].asInstanceOf[Class[TestKey]]

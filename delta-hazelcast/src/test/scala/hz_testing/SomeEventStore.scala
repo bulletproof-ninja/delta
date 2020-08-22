@@ -1,4 +1,4 @@
-package foo
+package hz_testing
 
 import delta.util.TransientEventStore
 import scala.concurrent.ExecutionContext

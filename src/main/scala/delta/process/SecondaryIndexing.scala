@@ -6,11 +6,11 @@ import scala.concurrent.Future
   * Optional trait for [[delta.process.StreamProcessStore]]
   * implementations that support secondary indexes.
   */
-trait SecondaryIndex {
+trait SecondaryIndexing {
   store: StreamProcessStore[_, _, _] =>
 
-  /** Generalized value type. */
-  protected type QueryValue
+  /** Generalized query value type. */
+  protected type QueryType
 
   /**
     * Query for snapshots matching column value(s).
@@ -21,12 +21,12 @@ trait SecondaryIndex {
     * @param more Addtional `nameValue`s, applied with `AND` semantics
     * @return `Map` of stream ids and snapshot
     */
-  protected def querySnapshot(
-      nameValue: (String, QueryValue), more: (String, QueryValue)*)
+  protected def queryForSnapshot(
+      nameValue: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[StreamId, Snapshot]]
 
   /**
-    * Lighter version of `querySnapshot` if only existence and/or tick
+    * Lighter version of `queryForSnapshot` if only existence and/or tick
     * is needed.
     * Uses `AND` semantics, so multiple column
     * queries should not use mutually exclusive
@@ -35,8 +35,8 @@ trait SecondaryIndex {
     * @param more Addtional `nameValue`s, applied with `AND` semantics
     * @return `Map` of stream ids and tick (in case of duplicates, for chronology)
     */
-  protected def queryTick(
-      nameValue: (String, QueryValue), more: (String, QueryValue)*)
+  protected def queryForTick(
+      nameValue: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[StreamId, Long]]
 
 }

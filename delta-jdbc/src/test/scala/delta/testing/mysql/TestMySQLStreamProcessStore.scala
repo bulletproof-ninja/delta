@@ -24,7 +24,7 @@ import scuff.jdbc._
 import java.sql.Connection
 
 
-object TestJdbcStreamProcessStore {
+object TestMySQLStreamProcessStore {
 
   implicit def ec = RandomDelayExecutionContext
 
@@ -61,9 +61,11 @@ object TestJdbcStreamProcessStore {
   implicit object StringColumn extends VarCharColumn(255)
 }
 
-class TestJdbcStreamProcessStore
+class TestMySQLStreamProcessStore
 extends TestStreamProcessStore {
-  import TestJdbcStreamProcessStore._
+
+  import TestStreamProcessStore._
+  import TestMySQLStreamProcessStore._
 
   private val cs = new AsyncConnectionSource with DataSourceConnection {
 
@@ -106,7 +108,7 @@ extends TestStreamProcessStore {
       Config("id", fooTable) withVersion version withTimestamp TimestampColumn(),
       cs, FooProcessStore.indexColumns) {
     def queryText(text: String): Future[Map[Long, Snapshot]] = {
-      this.querySnapshot("foo_text" -> text)
+      this.queryForSnapshot("foo_text" -> text)
     }
   }
   override def newFooStore = {
@@ -131,8 +133,9 @@ extends TestStreamProcessStore {
 }
 
 class TestJdbcStreamProcessHistory
-  extends TestJdbcStreamProcessStore {
-  import TestJdbcStreamProcessStore._
+extends TestMySQLStreamProcessStore {
+
+  import TestMySQLStreamProcessStore._
 
   override def newStore(): StreamProcessStore[Long, String, String] = newStore(1)
   private def newStore(version: Int) = {

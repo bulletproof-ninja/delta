@@ -11,17 +11,21 @@ import delta.process.Update
 import delta.process.ConcurrentMapStore
 import scuff._, concurrent.ScuffFutureObject
 
-case class TestKey(long: Long, int: Int)
-case class Foo(text: String, num: Int)
-object Foo extends Codec[Foo, String] {
-  def encode(foo: Foo) = s"${foo.text}:${foo.num}"
-  def decode(str: String): Foo = {
-    val Array(text, num) = str.split(":")
-    Foo(text, num.toInt)
+object TestStreamProcessStore {
+  case class TestKey(long: Long, int: Int)
+  case class Foo(text: String, num: Int)
+  object Foo extends Codec[Foo, String] {
+    def encode(foo: Foo) = s"${foo.text}:${foo.num}"
+    def decode(str: String): Foo = {
+      val Array(text, num) = str.split(":")
+      Foo(text, num.toInt)
+    }
   }
 }
 
 class TestStreamProcessStore {
+
+  import TestStreamProcessStore._
 
   implicit val ec = RandomDelayExecutionContext
 
