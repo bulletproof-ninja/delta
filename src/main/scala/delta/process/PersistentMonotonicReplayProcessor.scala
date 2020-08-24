@@ -56,8 +56,28 @@ with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]] =
     partitionThreads.shutdown().map(_ => cmap)(executionContext)
 
-  protected final def persistReplayState(snapshots: Iterator[(ID, Snapshot)]) = {
+  protected final def persistReplayState(snapshots: Iterator[(ID, Snapshot)]) =
+    if (persistInTickOrder) persistOrdered(snapshots)
+    else persistParallel(snapshots)
 
+  private def persistOrdered(snapshots: Iterator[(ID, Snapshot)]): Future[Unit] =
+    if (writeBatchSize > 1) {
+      snapshots.grouped(writeBatchSize).foldLeft(Future.unit) {
+        case (prevWrite, batch) =>
+          prevWrite.flatMap { _ =>
+            persistentStore writeBatch batch.toMap
+          }
+      }
+    } else {
+      snapshots.foldLeft(Future.unit) {
+        case (prevWrite, snapshot) =>
+          prevWrite.flatMap { _ =>
+            persistentStore write snapshot
+          }
+      }
+    }
+
+  private def persistParallel(snapshots: Iterator[(ID, Snapshot)]): Future[Unit] = {
     val writes: Iterator[Future[Unit]] =
       if (writeBatchSize > 1) {
         snapshots.grouped(writeBatchSize).map { batch =>
