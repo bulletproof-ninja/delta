@@ -215,7 +215,7 @@ extends EventStore[ID, EVT] {
     val ps = session.prepare(s"SELECT MAX(tick) FROM $TableName")
     () => ps.bind()
   }
-  def maxTick: Future[Option[Long]] =
+  def maxTick: Future[Option[Tick]] =
     execute(GetLastTick()) { rs =>
       Option(rs.one).map(_.getLong(0))
     }
