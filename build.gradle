@@ -160,8 +160,8 @@ project(':delta-jdbc') {
 
 project(':delta-hazelcast') {
     dependencies {
-        compile "com.hazelcast:hazelcast:3.12.8"
-        testCompile "com.hazelcast:hazelcast-client:3.12.8"
+        compile "com.hazelcast:hazelcast:3.12.9"
+        testCompile "com.hazelcast:hazelcast-client:3.12.9"
         testCompile "com.hazelcast:hazelcast-scala_$vScala:3.12.1"
     }
 }
