@@ -29,10 +29,10 @@ abstract class PersistentMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, 
   cmap: CMap[ID, ConcurrentMapStore.State[S]])(
   implicit
   ec: ExecutionContext)
-extends MonotonicReplayProcessor[ID, EVT, S, U, Unit](
+extends MonotonicReplayProcessor[ID, EVT, S, U](
   postReplayTimeout,
   ConcurrentMapStore.asReplayStore(cmap, persistentStore))
-with ConcurrentMapReplayPersistence[ID, EVT, S, U, Unit] {
+with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
 
   def this(
       persistentStore: StreamProcessStore[ID, S, U],

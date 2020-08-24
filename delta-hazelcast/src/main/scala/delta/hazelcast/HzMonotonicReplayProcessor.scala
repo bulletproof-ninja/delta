@@ -41,9 +41,9 @@ abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, U](
   cmap: collection.concurrent.Map[ID, ConcurrentMapStore.State[S]])(
   implicit
   ec: ExecutionContext)
-extends MonotonicReplayProcessor[ID, EVT, S, U, Unit](
+extends MonotonicReplayProcessor[ID, EVT, S, U](
   finalizeProcessingTimeout, HzMonotonicReplayProcessor.localReplayStore(cmap, tickWatermark, persistentState))
-with ConcurrentMapReplayPersistence[ID, EVT, S, U, Unit] {
+with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
 
   def this(
       tickWatermark: Option[Tick],

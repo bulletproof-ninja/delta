@@ -273,7 +273,7 @@ class TestCollege {
     type State = ConcurrentMapStore.State[Model]
 
     class ModelBuilder(memMap: TrieMap[Int, State])
-      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model, Unit](
+      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model](
         10.seconds,
         ConcurrentMapStore(memMap, "semester", None)(_ => Future.none))
       with MonotonicJoinState[Int, SemesterEvent, Model, Model] {

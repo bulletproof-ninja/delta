@@ -273,14 +273,14 @@ with TransactionProcessor[ID, EVT, S] {
  * @tparam ID Stream identifier
  * @tparam EVT Event type
  * @tparam S State type
- * @tparam BR Batch result. Often just `Unit`
+ * @tparam U State update type
  */
-abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U, BR](
+abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
   postReplayTimeout: FiniteDuration,
   protected val processStore: StreamProcessStore[ID, S, U])(
   implicit protected val executionContext: ExecutionContext)
 extends MonotonicProcessor[ID, EVT, S, U]
-with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
+with AsyncStreamConsumer[Transaction[ID, _ >: EVT], Unit] {
 
   private val instanceName = s"${getClass.getSimpleName}(${processStore.name})"
   override def toString() = s"$instanceName@${hashCode}"
@@ -289,7 +289,7 @@ with AsyncStreamConsumer[Transaction[ID, _ >: EVT], BR] {
 
   protected def tickWindow: Option[Int]
 
-  override def onDone(): Future[BR] =
+  override def onDone(): Future[Unit] =
     // Reminder: Once `super.onDone()` future completes, `whenDone()` has already run.
     super.onDone().recover {
       case timeout: TimeoutException =>
@@ -363,15 +363,15 @@ Possible solutions:
    * will be handed over to the live
    * processor.
    */
-  protected def whenDone(): Future[BR]
+  protected def whenDone(): Future[Unit]
 }
 
 /**
   * Replay persistence coordination, expecting a
   * `concurrent.Map` to hold replay state.
   */
-trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U, BR] {
-  proc: MonotonicReplayProcessor[ID, EVT, S, U, BR] =>
+trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U] {
+  proc: MonotonicReplayProcessor[ID, EVT, S, U] =>
 
   type Snapshot = delta.Snapshot[S]
   protected type State = ConcurrentMapStore.State[S]
@@ -384,11 +384,11 @@ trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U, BR] {
     * To prevent this, clear the store before restart
     * *OR* persist in ascending tick order (default).
     *
-    * @see persistInTickOrder To persist in tick order. Defaults to `true`
+    * @see `persistInTickOrder: Boolean` To persist in tick order. Defaults to `true`
     *
     * @param snapshots
     */
-  protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[BR]
+  protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[Unit]
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]]
 
   /**
@@ -411,7 +411,7 @@ trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U, BR] {
 
   private def TickComparator = MonotonicProcessor.TickComparator[ID, S]
 
-  protected def whenDone(): Future[BR] = {
+  protected def whenDone(): Future[Unit] = {
     onReplayCompletion()
       .flatMap { cmap =>
 

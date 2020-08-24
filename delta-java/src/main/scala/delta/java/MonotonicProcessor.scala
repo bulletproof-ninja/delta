@@ -20,7 +20,7 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
   processStore: StreamProcessStore[ID, S, U],
   ec: ExecutionContext,
   completionTimeout: Int, completionUnit: TimeUnit)
-extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U, Object](
+extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U](
   new FiniteDuration(completionTimeout, completionUnit),
   processStore)(ec)
 with ReplayProcessor[ID, EVT]
