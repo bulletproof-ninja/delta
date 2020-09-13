@@ -39,6 +39,7 @@ with TransactionProcessor[SID, EVT, Work] {
   protected def replayPersistenceBatchSize: Int
 
   protected def processStore: StreamProcessStore[SID, Work, U]
+  def name = processStore.name
 
   protected def reportFailure(th: Throwable): Unit
   /**

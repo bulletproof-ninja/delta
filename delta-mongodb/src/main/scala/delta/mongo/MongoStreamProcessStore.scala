@@ -1,7 +1,6 @@
 package delta.mongo
 
 import java.util.ArrayList
-import java.util.Collections.singletonList
 
 import scala.collection.compat._
 import scala.jdk.CollectionConverters._

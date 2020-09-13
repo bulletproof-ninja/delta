@@ -40,6 +40,7 @@ with TransactionProcessor[ID, EVT, S] {
   type Snapshot = delta.Snapshot[S]
   type Update = delta.process.Update[U]
 
+  def name = processStore.name
   protected def processStore: StreamProcessStore[ID, S, U]
   protected def processContext(id: ID): ExecutionContext
 
@@ -280,7 +281,13 @@ abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
   protected val processStore: StreamProcessStore[ID, S, U])(
   implicit protected val executionContext: ExecutionContext)
 extends MonotonicProcessor[ID, EVT, S, U]
-with AsyncStreamConsumer[Transaction[ID, _ >: EVT], Unit] {
+with AsyncStreamConsumer[Transaction[ID, _ >: EVT], Unit]
+with ReplayStatus {
+
+  /** @return Number of active transactions. */
+  def activeTransactions: Int = this.activeCount
+  /** @return Number of total transactions. */
+  def totalTransactions: Long = this.totalCount
 
   private val instanceName = s"${getClass.getSimpleName}(${processStore.name})"
   override def toString() = s"$instanceName@${hashCode}"

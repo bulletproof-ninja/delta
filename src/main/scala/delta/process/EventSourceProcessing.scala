@@ -22,7 +22,7 @@ trait EventSourceProcessing[SID, EVT] {
   type EventSource = delta.EventSource[SID, _ >: EVT]
   protected type Transaction = delta.Transaction[SID, _ >: EVT]
 
-  protected type ReplayProcessor = StreamConsumer[Transaction, Future[Unit]]
+  protected type ReplayProcessor = StreamConsumer[Transaction, Future[Unit]] with ReplayStatus
   protected type LiveProcessor = Transaction => Future[LiveResult]
 
   /**
@@ -88,7 +88,9 @@ trait EventSourceProcessing[SID, EVT] {
   /** The currently processed tick watermark. */
   protected def tickWatermark: Option[Tick]
 
-  private def adjust(tickWatermark: Tick): Tick = {
+  /** @return Tick to start from or `Long.MinValue` from beginning of time. */
+  protected def fromTick(watermark: Option[Tick]): Tick = {
+    val tickWatermark = watermark getOrElse Long.MinValue
     val tickWindow = this.tickWindow
     require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
     if (tickWindow == Int.MaxValue) Long.MinValue
@@ -107,28 +109,16 @@ trait EventSourceProcessing[SID, EVT] {
    * thus state is considered current.
    */
   protected def catchUp(
-      eventSource: EventSource): Future[Unit] = {
-
-    adjust(tickWatermark getOrElse Long.MinValue) match {
+      eventSource: EventSource): (ReplayStatus, Future[Unit]) = {
+    val replayProc = replayProcessor(eventSource)
+    val replayPromise = StreamPromise(replayProc)
+    fromTick(tickWatermark) match {
       case Long.MinValue =>
-        begin(eventSource)(selector(eventSource))
-      case resumeFromTick =>
-        resume(eventSource)(selector(eventSource), resumeFromTick)
+        eventSource.query(selector(eventSource))(replayPromise)
+      case fromTick =>
+        eventSource.querySince(fromTick, selector(eventSource))(replayPromise)
     }
-
-  }
-
-  private def begin(es: EventSource)(
-      selector: es.Selector): Future[Unit] = {
-    val replayProc = StreamPromise(replayProcessor(es))
-    es.query(selector)(replayProc)
-    replayProc.future
-  }
-  private def resume(es: EventSource)(
-      selector: es.Selector, resumeFrom: Tick): Future[Unit] = {
-    val replayProc = StreamPromise(replayProcessor(es))
-    es.querySince(resumeFrom, selector)(replayProc)
-    replayProc.future
+    replayProc -> replayPromise.future
   }
 
 }

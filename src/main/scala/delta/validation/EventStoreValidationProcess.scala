@@ -1,7 +1,6 @@
 package delta.validation
 
-import delta.process.EventSourceProcessing
-import scala.concurrent.Future
+import delta.process.{ EventSourceProcessing, ReplayProcess }
 
 /**
   * Process for validation of [[delta.EventStore]].
@@ -33,7 +32,10 @@ extends EventSourceProcessing[SID, EVT] {
     */
   def validate(
       eventStore: ConsistentEventStore)
-      : Future[Unit] =
-    this.catchUp(eventStore: EventSource)
+      : ReplayProcess[Unit] = {
+
+    val (status, replayFinished) = this.catchUp(eventStore: EventSource)
+    ReplayProcess(status, replayFinished)
+  }
 
 }

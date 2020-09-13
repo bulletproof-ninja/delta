@@ -10,6 +10,8 @@ import scala.util.control.NonFatal
  */
 trait TransactionProcessor[SID, EVT, S >: Null] {
 
+  def name: String
+
   protected type Transaction = delta.Transaction[SID, _ >: EVT]
 
   /**

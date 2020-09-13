@@ -45,14 +45,14 @@ with delta.process.EventSourceConsumer[ID, EVT] {
 }
 
 abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null, U](
-    processStore: StreamProcessStore[ID, S, U],
-    scheduler: ScheduledExecutorService)(
-    implicit
-    ec: ExecutionContext,
-    evtTag: ClassTag[EVT])
-  extends PersistentMonotonicConsumer[ID, EVT, S, U](processStore, scheduler)
-  with MonotonicJoinState[ID, EVT, S, U]
-  with MissingRevisionsReplay[ID, EVT] {
+  processStore: StreamProcessStore[ID, S, U],
+  scheduler: ScheduledExecutorService)(
+  implicit
+  ec: ExecutionContext,
+  evtTag: ClassTag[EVT])
+extends PersistentMonotonicConsumer[ID, EVT, S, U](processStore, scheduler)
+with MonotonicJoinState[ID, EVT, S, U]
+with MissingRevisionsReplay[ID, EVT] {
 
   def this(
       processStore: StreamProcessStore[ID, S, U],
@@ -63,6 +63,7 @@ abstract class PersistentMonotonicJoinConsumer[ID, EVT, S >: Null, U](
 
   override type Snapshot = delta.Snapshot[S]
   override type Update = delta.process.Update[U]
+  override def name = super.name
 
   protected def replayMissingRevisions(
       es: delta.EventSource[ID, _ >: EVT], replayDelayLength: Long, replayDelayUnit: TimeUnit,

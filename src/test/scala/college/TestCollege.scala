@@ -92,7 +92,10 @@ class TestCollege {
       10, EmailIndexStore, Scheduler)(
       StudentRepository, EmailIndexStore, EmailIndexUpdates)
 
-    (emailValidation validate eventStore).await
+    val replayProcess = emailValidation validate eventStore
+    replayProcess.finished.await
+    assertEquals(0, replayProcess.activeTransactions)
+    println(s"Total transactions: ${replayProcess.totalTransactions}")
     eventStore activate emailValidation
 
   }
