@@ -71,7 +71,7 @@ with AggregationSupport {
   protected def pkColumnName = config.pkColumn
 
   private[this] val setTS: String =
-    config.timestamp.map(col => s", ${col.columnName} = ${col.sqlFunction}") getOrElse ""
+    config.timestamp.map(col => s"${col.columnName} = ${col.sqlFunction}, ") getOrElse ""
 
   final protected val WHERE: String = version.map(version => s"WHERE version = $version\nAND") getOrElse "WHERE"
   final protected val pkColumn = PkColumn(pkColumnName, implicitly[ColumnType[PK]])
@@ -195,24 +195,23 @@ $WHERE $pkColumnName = ?
   protected def insertSnapshotSQL = _insertSnapshotSQL
   private[this] val _insertSnapshotSQL = {
     val (qryNames, qryQs) = if (indexColumns.isEmpty) "" -> "" else {
-      indexColumns.values.map(_.name).mkString("", ", ", ", ") ->
+      indexColumns.values.map(_.name).mkString("", ",", ",") ->
         indexColumns.map(_ => "?").mkString("", ",", ",")
     }
-    val (vCol, vQ) = version.map(version => "version, " -> s"$version, ") getOrElse "" -> ""
+    val (vCol, vQ) = version.map(version => "version," -> s"$version,") getOrElse "" -> ""
     val (tCol, tQ) =
       config.timestamp
-        .map(col => s"${col.columnName}, " -> s"${col.sqlFunction}, ") getOrElse "" -> ""
+        .map(col => s"${col.columnName}," -> s"${col.sqlFunction},") getOrElse "" -> ""
 
     s"""
 INSERT INTO $tableRef
-(${tCol}${vCol}data, revision, tick, $qryNames$pkColumnName)
-VALUES ($tQ$vQ?,?,?,$qryQs?)
+($pkColumnName,$vCol$tCol${qryNames}revision,tick,data)
+VALUES (?,$vQ$tQ$qryQs?,?,?)
 """
   }
   protected def setParmsOnInsert(ps: PreparedStatement, key: PK, snapshot: Snapshot): Int = {
-    val offset = setSnapshot(ps, snapshot)
-    ps.setValue(1 + offset, key)
-    offset + 1
+    ps.setValue(1, key)
+    setSnapshot(ps, snapshot, 1)
   }
 
   protected def replaceSnapshotSQL = _replaceSnapshotSQL
@@ -222,12 +221,12 @@ VALUES ($tQ$vQ?,?,?,$qryQs?)
   private[this] val _updateSnapshotDefensiveSQL = updateSnapshotSQL(exact = false)
 
   protected def updateSnapshotSQL(exact: Boolean): String = {
-    val qryColumns = (if (indexColumns.isEmpty) "" else ", ") concat
-      indexColumns.values.map(col => s"${col.name} = ?").mkString(", ")
+    val qryColumns = if (indexColumns.isEmpty) "" else
+      indexColumns.values.map(col => s"${col.name} = ?").mkString("", ", ", ", ")
     val matches = if (exact) "=" else "<="
     s"""
 UPDATE $tableRef
-SET data = ?, revision = ?, tick = ?$setTS$qryColumns
+SET $setTS${qryColumns}revision = ?, tick = ?, data = ?
 $WHERE $pkColumnName = ?
 AND revision $matches ? AND tick $matches ?
 """
@@ -237,7 +236,7 @@ AND revision $matches ? AND tick $matches ?
   private[this] val _refreshRevTickDefensiveSQL =
     s"""
 UPDATE $tableRef
-SET revision = ?, tick = ?$setTS
+SET ${setTS}revision = ?, tick = ?
 $WHERE $pkColumnName = ?
 AND revision <= ? AND tick <= ?
 """
@@ -272,19 +271,20 @@ CREATE INDEX IF NOT EXISTS $indexName
     new delta.Snapshot(data, revision, tick)
   }
 
-  protected def setSnapshot(ps: PreparedStatement, s: Snapshot, offset: Int = 0): Int = {
-    ps.setValue(1 + offset, s.state)
-    ps.setInt(2 + offset, s.revision)
-    ps.setLong(3 + offset, s.tick)
-    indexColumns.values.foldLeft(3 + offset) {
+  protected def setSnapshot(ps: PreparedStatement, s: Snapshot, currOffset: Int = 0): Int = {
+    val offset = indexColumns.values.foldLeft(currOffset) {
       case (offset, qryCol) =>
         val value = qryCol match {
           case qryCol @ NotNull(_) => qryCol.getColumnValue(s.state)
           case qryCol @ Nullable(_) => qryCol.getColumnValue(s.state).orNull
         }
-        ps.setValue(1 + offset, value)(qryCol.colType)
+        ps.setValue(offset + 1, value)(qryCol.colType)
         offset + 1
     }
+    ps.setInt(1 + offset, s.revision)
+    ps.setLong(2 + offset, s.tick)
+    ps.setValue(3 + offset, s.state)
+    offset + 3
   }
   protected def setRevTick(ps: PreparedStatement, rev: Revision, tick: Tick, offset: Int): Unit = {
     ps.setInt(1 + offset, rev)
