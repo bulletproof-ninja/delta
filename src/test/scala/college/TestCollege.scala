@@ -42,6 +42,9 @@ class TestCollege {
 
   val Scheduler = Threads.newScheduledThreadPool(8, Threads.factory(Threads.SystemThreadGroup), _.printStackTrace)
 
+  val replayConfig = ReplayProcessConfig(2.minutes, 100)
+  val liveConfig = LiveProcessConfig(2.seconds, Scheduler)
+
   protected def initTicker(es: EventSource[Int, CollegeEvent]) = LamportTicker(es)
 
   private class TransientCollegeEventStore
@@ -92,11 +95,12 @@ class TestCollege {
       10, EmailIndexStore, Scheduler)(
       StudentRepository, EmailIndexStore, EmailIndexUpdates)
 
-    val replayProcess = emailValidation validate eventStore
-    replayProcess.finished.await
+    val replayProcess = emailValidation.validate(eventStore, replayConfig)
+    val completion = replayProcess.finished.await
+    assertTrue(completion.incompleteStreams.isEmpty)
     assertEquals(0, replayProcess.activeTransactions)
     println(s"Total transactions: ${replayProcess.totalTransactions}")
-    eventStore activate emailValidation
+    eventStore.activate(emailValidation, liveConfig)
 
   }
 
@@ -276,12 +280,14 @@ class TestCollege {
     type State = ConcurrentMapStore.State[Model]
 
     class ModelBuilder(memMap: TrieMap[Int, State])
-      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model](
-        10.seconds,
-        ConcurrentMapStore(memMap, "semester", None)(_ => Future.none))
+      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model]
       with MonotonicJoinState[Int, SemesterEvent, Model, Model] {
-      protected def tickWindow = None
-      protected def prepareJoin(
+        protected def executionContext = ec
+        protected val processStore: StreamProcessStore[Int,Model,Model] =
+          ConcurrentMapStore(memMap, "semester", None)(_ => Future.none)
+        protected val replayConfig = ReplayProcessConfig(10.seconds, 100)
+
+        protected def prepareJoin(
           semesterId: Int, semesterRev: Revision, tick: Tick, md: Map[String, String])(
           evt: SemesterEvent): Map[Int, Processor] = {
 
@@ -299,12 +305,14 @@ class TestCollege {
       }
 
       val streamPartitions = scuff.concurrent.PartitionedExecutionContext(1, _.printStackTrace(System.err))
-      def whenDone(): Future[Unit] = {
+      def whenDone(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] = {
         println("Shutting down stream partitions...")
-        streamPartitions.shutdown().andThen {
-          case Success(_) => println("Stream partitions shut down successfully.")
-          case Failure(th) => th.printStackTrace(System.err)
-        }
+        streamPartitions.shutdown()
+          .map(_ => status)
+          .andThen {
+            case Success(_) => println("Stream partitions shut down successfully.")
+            case Failure(th) => th.printStackTrace(System.err)
+          }
       }
       protected def processContext(id: Int) = streamPartitions.singleThread(id)
       override protected def onUpdate(id: Int, update: Update) = update match {

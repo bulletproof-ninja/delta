@@ -1,8 +1,12 @@
 package delta.process
 
+import scala.collection.compat._
+import scala.concurrent._, duration._
+import scala.util.{ Success, Failure }
+
 import scuff.concurrent._
 
-import scala.concurrent._, duration._
+import delta.process.ReplayCompletion.IncompleteStream
 
 /**
   * General trait for consuming an [[delta.EventSource]].
@@ -21,44 +25,52 @@ extends EventSourceProcessing[SID, EVT] {
    * @return The replay process, which contains ongoing replay numbers and a future live process,
    * which becomes available when replay processing is finished.
    */
-  def consume(eventSource: EventSource)(
+  def consume(
+      eventSource: EventSource,
+      replayConfig: ReplayProcessConfig,
+      liveConfig: LiveProcessConfig)(
       implicit
-      ec: ExecutionContext): ReplayProcess[LiveProcess] = {
+      ec: ExecutionContext): ReplayProcess[(ReplayResult[SID], LiveProcess)] = {
 
     val selector = this.selector(eventSource)
-    val tickWindow = this.tickWindow
-    require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
 
-    val tickAtStart = eventSource.maxTick.await(33.seconds)
-    val (replayStatus, replayFinish) = this.catchUp(eventSource)
-    val liveProc = replayFinish.flatMap { _ =>
-        val liveProcessor = this.liveProcessor(eventSource)
+    val tickBeforeReplay = eventSource.maxTick.await(10.seconds)
+    val (replayStatus, replayFinish) = this.catchUp(eventSource, replayConfig)
+    val liveProc = replayFinish.flatMap { replayCompletion =>
+      val liveProcessor = this.liveProcessor(eventSource, liveConfig)
+      val completionReplays = completeStreams(
+        eventSource, replayCompletion.incompleteStreams, liveProcessor)
+
+      (Future sequence completionReplays.values).transformWith { _ =>
         val liveSubscription = eventSource.subscribe(selector.toStreamsSelector)(liveProcessor)
         // close window for potential race condition
         // with subscription, by re-querying anything
         // since starting replay.
-        fromTick(tickAtStart) match {
-          case Long.MinValue =>
-            val query = eventSource.query(selector) _
-            StreamPromise.foreach(query)(liveProcessor)
-          case fromTick =>
-            val windowQuery = eventSource.querySince(fromTick, selector) _
-            StreamPromise.foreach(windowQuery)(liveProcessor)
-        }
-        val windowClosed = tickAtStart match {
-          case None =>
-            val query = eventSource.query(selector) _
-            StreamPromise.foreach(query)(liveProcessor)
-          case Some(tickAtStart) =>
-            val windowQuery = eventSource.querySince(tickAtStart - tickWindow, selector) _
-            StreamPromise.foreach(windowQuery)(liveProcessor)
-        }
-        windowClosed.map { _ =>
-          new LiveProcess {
-            def cancel() = liveSubscription.cancel()
-            def name = replayStatus.name
+        val windowClosed =
+          replayConfig.adjustToWindow(tickBeforeReplay) match {
+            case None =>
+              val query = eventSource.query(selector) _
+              StreamPromise.foreach(query)(liveProcessor)
+            case Some(fromTick) =>
+              val windowQuery = eventSource.querySince(fromTick, selector) _
+              StreamPromise.foreach(windowQuery)(liveProcessor)
           }
+
+        windowClosed.map { _ =>
+          val streamErrors =
+            completionReplays.view
+              .mapValues(_.value)
+              .collect {
+                case (id, Some(Failure(failure))) => id -> failure
+              }
+              .toMap
+          ReplayResult(replayCompletion.txCount, streamErrors) ->
+            new LiveProcess {
+              def cancel() = liveSubscription.cancel()
+              def name = replayStatus.name
+            }
         }
+      }
     }
 
     ReplayProcess(replayStatus, liveProc)

@@ -6,6 +6,8 @@ import java.util.Optional
 
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
+import delta.process.ReplayProcessConfig
+import delta.process.LiveProcessConfig
 
 /**
   * [[delta.process.PersistentConsumer]], adapted for Java.
@@ -21,8 +23,8 @@ with delta.process.EventSourceConsumer[ID, EVT] {
   def this(tickWatermark: java.lang.Long, evtType: Class[_ <: EVT]) =
     this(Option(tickWatermark).map(_.longValue))(ClassTag(evtType))
 
-  protected def replayProcessor(es: EventSource): this.ReplayProcessor
-  protected def liveProcessor(es: EventSource): this.LiveProcessor
+  protected def replayProcessor(es: EventSource, config: ReplayProcessConfig): this.ReplayProcessor
+  protected def liveProcessor(es: EventSource, config: LiveProcessConfig): this.LiveProcessor
 
   /** Turn Scala `List` of events into Java `Iterable`. */
   protected def iterable(list: List[_ >: EVT]): java.lang.Iterable[EVT] = {

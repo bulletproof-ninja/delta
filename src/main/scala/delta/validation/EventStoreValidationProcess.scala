@@ -1,6 +1,7 @@
 package delta.validation
 
-import delta.process.{ EventSourceProcessing, ReplayProcess }
+import delta.process._
+import scala.concurrent.Future
 
 /**
   * Process for validation of [[delta.EventStore]].
@@ -23,19 +24,27 @@ extends EventSourceProcessing[SID, EVT] {
   type ConsistentEventStore = EventSource with ConsistencyValidation[SID, _ >: EVT]
 
   /** The transaction proceesor, per instance. */
-  def txProcessor(es: EventSource): LiveProcessor =
-    this.liveProcessor(es)
+  def txProcessor(es: EventSource, config: LiveProcessConfig): LiveProcessor =
+    this.liveProcessor(es, config)
 
   /**
     * Validate any outstanding transactions.
-    * @note Should only be done from a single instance.
+    * @note Should only be done from a single instance
+    * at startup.
     */
   def validate(
-      eventStore: ConsistentEventStore)
-      : ReplayProcess[Unit] = {
+      eventStore: ConsistentEventStore,
+      replayConfig: ReplayProcessConfig)
+      : ReplayProcess[ReplayCompletion[SID]] = {
 
-    val (status, replayFinished) = this.catchUp(eventStore: EventSource)
+    val (status, replayFinished) = this.catchUp(eventStore: EventSource, replayConfig)
     ReplayProcess(status, replayFinished)
   }
 
+  override def completeStreams(
+      eventSource: EventSource,
+      incompleteStreams: List[ReplayCompletion.IncompleteStream[SID]],
+      processor: LiveProcessor)
+      : Map[SID,Future[Unit]] =
+    super.completeStreams(eventSource, incompleteStreams, processor)
 }

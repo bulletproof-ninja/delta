@@ -24,6 +24,7 @@ object ReplayProcess {
       def name = status.name
       def activeTransactions: Int = status.activeTransactions
       def totalTransactions: Long = status.totalTransactions
+      def numErrors: Int = status.numErrors
     }
 
   def apply[F, T](
@@ -35,6 +36,7 @@ object ReplayProcess {
       def name = proc.name
       def activeTransactions: Int = proc.activeTransactions
       def totalTransactions: Long = proc.totalTransactions
+      def numErrors: Int = proc.numErrors
     }
 }
 

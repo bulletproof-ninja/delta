@@ -5,7 +5,7 @@ import com.hazelcast.core.IMap
 import delta.Tick
 import delta.process._
 
-import scala.concurrent._, duration.FiniteDuration
+import scala.concurrent._
 import scala.reflect.ClassTag
 
 import scuff.concurrent.{ PartitionedExecutionContext, Threads }
@@ -36,19 +36,18 @@ object HzMonotonicReplayProcessor {
 abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, U](
   tickWatermark: Option[Tick],
   persistentState: IMap[ID, _ <: EntryState[S, EVT]],
-  finalizeProcessingTimeout: FiniteDuration,
+  protected val replayConfig: ReplayProcessConfig,
   partitionThreads: PartitionedExecutionContext,
   cmap: collection.concurrent.Map[ID, ConcurrentMapStore.State[S]])(
   implicit
-  ec: ExecutionContext)
-extends MonotonicReplayProcessor[ID, EVT, S, U](
-  finalizeProcessingTimeout, HzMonotonicReplayProcessor.localReplayStore(cmap, tickWatermark, persistentState))
+  protected val executionContext: ExecutionContext)
+extends MonotonicReplayProcessor[ID, EVT, S, U]
 with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
 
   def this(
       tickWatermark: Option[Tick],
       persistentState: IMap[ID, EntryState[S, EVT]],
-      finalizeProcessingTimeout: FiniteDuration,
+      replayConfig: ReplayProcessConfig,
       failureReporter: Throwable => Unit,
       localThreadCount: Int = 1.max(Runtime.getRuntime.availableProcessors - 1),
       cmap: collection.concurrent.Map[ID, ConcurrentMapStore.State[S]] =
@@ -56,13 +55,20 @@ with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
       implicit
       ec: ExecutionContext) =
     this(
-      tickWatermark, persistentState, finalizeProcessingTimeout,
+      tickWatermark, persistentState, replayConfig,
       PartitionedExecutionContext(
           localThreadCount, failureReporter,
           Threads.factory(s"${persistentState.getName}-replay-processor", failureReporter)),
       cmap)
 
+  require(
+    !replayConfig.writeTickOrdered,
+    s"Cannot enforce writing in tick order. Set ${classOf[ReplayProcessConfig].getSimpleName}(writeTickOrdered=false)")
+
   override type Snapshot = delta.Snapshot[S]
+
+  protected val processStore =
+    HzMonotonicReplayProcessor.localReplayStore(cmap, tickWatermark, persistentState)
 
   protected def processContext(id: ID): ExecutionContext = partitionThreads.singleThread(id.##)
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]] =

@@ -1,11 +1,9 @@
 package delta.java
 
 import scala.jdk.CollectionConverters._
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{ FiniteDuration, TimeUnit }
 
 import delta.{ Tick, Revision }
-import delta.process.StreamProcessStore
+import delta.process.{ StreamProcessStore, ReplayProcessConfig }
 
 import java.util.Optional
 
@@ -17,12 +15,10 @@ with LiveProcessor[ID, EVT]
 
 /** Monotonic replay processor. */
 abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
-  processStore: StreamProcessStore[ID, S, U],
-  ec: ExecutionContext,
-  completionTimeout: Int, completionUnit: TimeUnit)
-extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U](
-  new FiniteDuration(completionTimeout, completionUnit),
-  processStore)(ec)
+  protected val processStore: StreamProcessStore[ID, S, U],
+  // protected val executionContext: ExecutionContext,
+  protected val replayConfig: ReplayProcessConfig)
+extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U]
 with ReplayProcessor[ID, EVT]
 
 /** Monotonic processor with join state. */
@@ -34,10 +30,10 @@ with delta.process.MonotonicJoinState[ID, EVT, S, U]
 /** Monotonic replay processor with join state. */
 abstract class JoinStateReplayProcessor[ID, EVT, S >: Null, U](
   processStore: StreamProcessStore[ID, S, U],
-  ec: ExecutionContext,
-  completionTimeout: Int, completionUnit: TimeUnit)
+  // ec: ExecutionContext,
+  replayConfig: ReplayProcessConfig)
 extends MonotonicReplayProcessor[ID, EVT, S, U](
-  processStore, ec, completionTimeout, completionUnit)
+  processStore, replayConfig)
 with delta.process.MonotonicJoinState[ID, EVT, S, U] {
 
   protected def join(streamId: ID, streamRevision: Revision, tick: Tick, evt: EVT, metadata: Map[String, String]): Map[ID, Processor] = {

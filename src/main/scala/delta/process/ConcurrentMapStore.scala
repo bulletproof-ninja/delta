@@ -18,7 +18,7 @@ object ConcurrentMapStore {
   def typed[K, S](cmap: java.util.concurrent.ConcurrentMap[Any, Any]): CMap[K, State[S]] =
     typed(cmap.asScala)
 
-  final case class State[S](snapshot: delta.Snapshot[S], modified: Boolean = true)
+  final case class State[S](snapshot: delta.Snapshot[S], updated: Boolean = true)
 
   def asReplayStore[K, S, U](
       temp: CMap[K, ConcurrentMapStore.State[S]],
@@ -85,7 +85,7 @@ object ConcurrentMapStore {
 final class ConcurrentMapStore[K, W, U] private (
   cmap: CMap[K, ConcurrentMapStore.State[W]],
   val name: String,
-  val tickWatermark: Option[Tick],
+  getTickWatermark: => Option[Tick],
   readThrough: K => Future[Option[delta.Snapshot[W]]])(
   implicit protected val updateCodec: UpdateCodec[W, U])
 extends StreamProcessStore[K, W, U]
@@ -93,9 +93,11 @@ with NonBlockingCASWrites[K, W, U] {
 
   import ConcurrentMapStore.State
 
+  def tickWatermark: Option[Tick] = getTickWatermark
+
   private[this] val unknownKeys = new collection.concurrent.TrieMap[K, Unit]
 
-  def modifiedSnapshots: Iterator[(K, Snapshot)] =
+  def updatedSnapshots: Iterator[(K, Snapshot)] =
     cmap.iterator
       .collect {
         case (key, State(snapshot, true)) => key -> snapshot
@@ -134,13 +136,13 @@ with NonBlockingCASWrites[K, W, U] {
   }
 
   def read(key: K): Future[Option[Snapshot]] = cmap.get(key) match {
-    case found @ Some(_) => Future successful found.map(_.snapshot)
+    case Some(state) => Future successful Some(state.snapshot)
     case None =>
       if (unknownKeys contains key) Future.none
       else readThrough(key).map {
 
         case fallbackSnapshot @ Some(snapshot) =>
-          cmap.putIfAbsent(key, State(snapshot, modified = false))
+          cmap.putIfAbsent(key, State(snapshot, updated = false))
             .map(_.snapshot) orElse fallbackSnapshot
 
         case None =>

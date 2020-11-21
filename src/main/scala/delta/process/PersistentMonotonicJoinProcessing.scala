@@ -8,13 +8,14 @@ import scala.concurrent.ExecutionContext
  * for join state (cross stream state).
   * @see [[delta.process.PersistentMonotonicProcessing]] for details.
  */
-abstract class PersistentMonotonicJoinProcessing[SID, EVT: ClassTag, S >: Null, U](
-  implicit ec: ExecutionContext)
+abstract class PersistentMonotonicJoinProcessing[SID, EVT: ClassTag, S >: Null, U]
 extends PersistentMonotonicProcessing[SID, EVT, S, U]
 with JoinState[SID, EVT, S] {
 
-  override protected def replayProcessor(es: EventSource) =
-    new ReplayConsumer with MonotonicJoinState[SID, EVT, S, U] {
+  protected def adHocContext: ExecutionContext
+
+  override protected def replayProcessor(es: EventSource, config: ReplayProcessConfig) =
+    new ReplayConsumer(config, adHocContext) with MonotonicJoinState[SID, EVT, S, U] {
 
       def processStream(tx: Transaction, currState: Option[S]) =
         PersistentMonotonicJoinProcessing.this.processStream(tx, currState)
@@ -26,8 +27,8 @@ with JoinState[SID, EVT, S] {
 
     }
 
-  override protected def liveProcessor(es: EventSource) =
-    new LiveConsumer(es) with MonotonicJoinState[SID, EVT, S, U] {
+  override protected def liveProcessor(es: EventSource, config: LiveProcessConfig) =
+    new LiveConsumer(es, config) with MonotonicJoinState[SID, EVT, S, U] {
 
       def processStream(tx: Transaction, currState: Option[S]) =
         PersistentMonotonicJoinProcessing.this.processStream(tx, currState)
@@ -46,7 +47,6 @@ with JoinState[SID, EVT, S] {
   * consumption with cross referenced streams in different channels.
   * @see [[delta.process.PersistentMonotonicJoinProcessing]] for details.
   */
-abstract class PersistentMonotonicJoinConsumer[SID, EVT: ClassTag, Work >: Null, U](
-  implicit ec: ExecutionContext)
+abstract class PersistentMonotonicJoinConsumer[SID, EVT: ClassTag, Work >: Null, U]
 extends PersistentMonotonicJoinProcessing[SID, EVT, Work, U]
 with EventSourceConsumer[SID, EVT]

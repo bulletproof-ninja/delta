@@ -3,7 +3,10 @@ package delta.process
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
 
+import scala.util.{ Success, Failure }
 import scala.concurrent._
+
+import ReplayCompletion.IncompleteStream
 
 /**
   * General [[delta.EventSource]] processing trait.
@@ -22,24 +25,8 @@ trait EventSourceProcessing[SID, EVT] {
   type EventSource = delta.EventSource[SID, _ >: EVT]
   protected type Transaction = delta.Transaction[SID, _ >: EVT]
 
-  protected type ReplayProcessor = StreamConsumer[Transaction, Future[Unit]] with ReplayStatus
+  protected type ReplayProcessor = StreamConsumer[Transaction, Future[ReplayCompletion[SID]]] with ReplayStatus
   protected type LiveProcessor = Transaction => Future[LiveResult]
-
-  /**
-   * The largest possible tick skew combined with network
-   * propagation delay, and in other factors that might affect
-   * tick differences.
-   * @note A tick window that's _too large_ can lead to unnecessary
-   * processing of already processed transactions. But it won't
-   * affect correctness. A tick window that's too small could
-   * possibly miss processing of transactions, thus the known state
-   * will be outdated. Any subsequent updates to stale state will
-   * correct this, so it's an intermittent problem, but only if state
-   * is updated again, which might not happen. In other words, unless
-   * other reasons exist, it's safer to make the window larger than
-   * smaller.
-   */
-  protected def tickWindow: Int
 
   /** Transaction selector. */
   protected def selector(es: EventSource): es.Selector
@@ -64,7 +51,10 @@ trait EventSourceProcessing[SID, EVT] {
    * It is highly recommended to return an instance of
    * [[delta.process.MonotonicReplayProcessor]] here.
    */
-  protected def replayProcessor(es: EventSource): ReplayProcessor
+  protected def replayProcessor(
+      es: EventSource,
+      config: ReplayProcessConfig)
+      : ReplayProcessor
 
   /**
    * When replay processing is completed, a live processor
@@ -79,26 +69,15 @@ trait EventSourceProcessing[SID, EVT] {
    * [[delta.process.MonotonicProcessor]] here,
    * which will handle all 3 above cases.
    *
-   * @param es The [[delta.EventSource]] being processed.
-   * @param replayResult The result of replay processing, if any.
    * @return A live transaction processing function
    */
-  protected def liveProcessor(es: EventSource): LiveProcessor
+  protected def liveProcessor(
+      es: EventSource,
+      config: LiveProcessConfig)
+      : LiveProcessor
 
   /** The currently processed tick watermark. */
   protected def tickWatermark: Option[Tick]
-
-  /** @return Tick to start from or `Long.MinValue` from beginning of time. */
-  protected def fromTick(watermark: Option[Tick]): Tick = {
-    val tickWatermark = watermark getOrElse Long.MinValue
-    val tickWindow = this.tickWindow
-    require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
-    if (tickWindow == Int.MaxValue) Long.MinValue
-    else ((tickWatermark - tickWindow) min tickWatermark) match {
-      case `tickWatermark` => Long.MinValue
-      case adjusted => adjusted
-    }
-  }
 
   /**
    * Catch up on missed historic transactions, if any,
@@ -109,16 +88,45 @@ trait EventSourceProcessing[SID, EVT] {
    * thus state is considered current.
    */
   protected def catchUp(
-      eventSource: EventSource): (ReplayStatus, Future[Unit]) = {
-    val replayProc = replayProcessor(eventSource)
+      eventSource: EventSource,
+      replayConfig: ReplayProcessConfig)
+      : (ReplayStatus, Future[ReplayCompletion[SID]]) = {
+    val replayProc = replayProcessor(eventSource, replayConfig)
     val replayPromise = StreamPromise(replayProc)
-    fromTick(tickWatermark) match {
-      case Long.MinValue =>
+    replayConfig.adjustToWindow(tickWatermark) match {
+      case None =>
         eventSource.query(selector(eventSource))(replayPromise)
-      case fromTick =>
+      case Some(fromTick) =>
         eventSource.querySince(fromTick, selector(eventSource))(replayPromise)
     }
     replayProc -> replayPromise.future
   }
+
+  /**
+    * Replay transactions missed during replay
+    * processing. However, since replay state is
+    * now lost, we replay all transactions since
+    * the first missing revision.
+    */
+  protected def completeStreams(
+      eventSource: EventSource,
+      incompleteStreams: List[ReplayCompletion.IncompleteStream[SID]],
+      processor: LiveProcessor): Map[SID, Future[Unit]] =
+
+    if (incompleteStreams.isEmpty) Map.empty
+    else {
+      val replayer = new MissingRevisionsReplayer(eventSource)
+      incompleteStreams.iterator
+        .flatMap {
+          case IncompleteStream(id, Success(missingRevisions)) =>
+            id -> replayer.requestReplayFrom(id, missingRevisions.head)(processor) :: Nil
+          case IncompleteStream(id, Failure(cause)) =>
+            id -> (Future failed cause) :: Nil
+          case _ =>
+            Nil
+        }
+        .toMap
+    }
+
 
 }

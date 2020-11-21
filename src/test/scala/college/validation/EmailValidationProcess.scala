@@ -27,7 +27,7 @@ class EmailValidationProcess(
   emailIndex: EmailIndex,
   msgHub: UpdateHub[Int, Unit])(
   implicit
-  ec: ExecutionContext,
+  protected val adHocContext: ExecutionContext,
   metadata: () => Metadata)
 extends PersistentMonotonicProcessing[Int, StudentEvent, State, Unit]
 with EventStoreValidationProcess[Int, StudentEvent, State] {

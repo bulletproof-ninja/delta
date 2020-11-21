@@ -15,7 +15,9 @@ import delta.process.ConcurrentMapStore
 import delta.process.Update
 
 import scuff.concurrent.{ PartitionedExecutionContext, ScuffFutureObject }
-
+import delta.process.ReplayCompletion
+import delta.process.ReplayProcessConfig
+import delta.process.StreamProcessStore
 
 class TestMonotonicProcessor {
   private[this] val NoFallback = (_: Int) => Future.none
@@ -33,11 +35,15 @@ class TestMonotonicProcessor {
       @volatile var latch: CountDownLatch = _
     }
     class Mono(implicit ec: ExecutionContext)
-    extends MonotonicReplayProcessor[Int, Char, String, String](
-        20.seconds,
-        ConcurrentMapStore(Tracker.snapshotMap, "", None)(NoFallback)) {
-      def whenDone() = Future.unit
-      def tickWindow = None
+    extends MonotonicReplayProcessor[Int, Char, String, String] {
+        protected def executionContext = ec
+        protected val replayConfig = ReplayProcessConfig(10.seconds, 100)
+        protected val processStore: StreamProcessStore[Int,String,String] =
+          ConcurrentMapStore(Tracker.snapshotMap, "", None)(NoFallback)
+
+        protected def whenDone(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] =
+          Future successful status
+
       override def onUpdate(id: Int, update: Update) = {
         // println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
         // assertEquals(42, update.id)
@@ -120,15 +126,17 @@ class TestMonotonicProcessor {
         //        println(s"Testing with $exeCtx")
         type State = ConcurrentMapStore.State[String]
         val snapshotMap = new TrieMap[Int, State]
-        val processor = new MonotonicReplayProcessor[Int, Char, String, String](
-          20.seconds,
-          ConcurrentMapStore(snapshotMap, "", None)(NoFallback)) {
+        val processor = new MonotonicReplayProcessor[Int, Char, String, String] {
+          protected def executionContext = ec
+          protected val replayConfig = ReplayProcessConfig(20.seconds, 100)
+          protected val processStore: StreamProcessStore[Int,String,String] =
+            ConcurrentMapStore(snapshotMap, "", None)(NoFallback)
           protected def processContext(id: Int): ExecutionContext = ec match {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
           }
-          protected def tickWindow = None
-          protected def whenDone() = Future.unit
+          protected def whenDone(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] =
+            Future successful status
           protected def process(tx: Transaction, currState: Option[String]) = {
             val sb = new StringBuilder(currState getOrElse "")
             tx.events.foreach {

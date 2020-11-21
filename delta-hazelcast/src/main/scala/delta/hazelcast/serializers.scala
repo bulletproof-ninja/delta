@@ -188,15 +188,15 @@ trait ConcurrentMapStoreValueSerializer
 extends StreamSerializer[delta.process.ConcurrentMapStore.State[Any]] {
   type State = delta.process.ConcurrentMapStore.State[Any]
   def write(out: ObjectDataOutput, value: State): Unit = {
-    out writeBoolean value.modified
+    out writeBoolean value.updated
     out writeObject value.snapshot.state
     out writeInt value.snapshot.revision
     out writeLong value.snapshot.tick
   }
   def read(inp: ObjectDataInput): State = {
-    val modified = inp.readBoolean()
+    val updated = inp.readBoolean()
     val snapshot = new Snapshot(inp.readObject[Any], inp.readInt, inp.readLong)
-    new State(snapshot, modified)
+    new State(snapshot, updated)
   }
 
 }

@@ -208,15 +208,15 @@ extends RecursiveUpsert[SID] {
   final protected def upsertRecursive[R](
       id: SID, existing: Option[Snapshot],
       updateThunk: Option[Snapshot] => Future[(Option[Snapshot], R)],
-      updateThunkTimeout: FiniteDuration,
+      updateThunkAwaitTimeout: FiniteDuration,
       writeIfExpected: (SID, Option[Snapshot], Snapshot) => Either[ConflictingSnapshot, ContentUpdated],
       retries: Int)(
       implicit
       updateContext: ExecutionContext,
       updateCodec: UpdateCodec[S, U]): (Option[Update], R) = {
 
-    val updated = Future(updateThunk(existing)).flatMap(identity)
-    blocking(updated.await(updateThunkTimeout)) match {
+    val updated = Future(updateThunk(existing)).flatten
+    updated.await(updateThunkAwaitTimeout) match {
       case (result, payload) =>
         if (result.isEmpty || result == existing) None -> payload
         else {
@@ -229,7 +229,7 @@ extends RecursiveUpsert[SID] {
               if (retries > 0) {
                 upsertRecursive(
                   id, Some(conflict),
-                  updateThunk, updateThunkTimeout,
+                  updateThunk, updateThunkAwaitTimeout,
                   writeIfExpected, retries - 1)
               } else retriesExhausted(id, conflict, newSnapshot)
           }
@@ -315,7 +315,8 @@ extends BlockingRecursiveUpsert[SID, S, U] {
    */
   protected def writeReplacement(conn: Conn)(id: SID, oldSnapshot: Snapshot, newSnapshot: Snapshot): Option[Snapshot]
 
-  protected val updateThunkTimeout: FiniteDuration = 11.seconds
+  private[this] val defaultBlockingTimeout = 10.seconds
+  protected def updateThunkBlockingTimeout = defaultBlockingTimeout // probably excessive, but if not, override
 
   implicit protected def updateCodec: UpdateCodec[S, U]
 
@@ -343,7 +344,7 @@ extends BlockingRecursiveUpsert[SID, S, U] {
 
     readForUpdate(id) {
       case (conn, existing) =>
-        upsertRecursive(id, existing, updateThunk, updateThunkTimeout, tryWriteSnapshot(conn), upsertRetryLimit)
+        upsertRecursive(id, existing, updateThunk, updateThunkBlockingTimeout, tryWriteSnapshot(conn), upsertRetryLimit)
     }
 
   }

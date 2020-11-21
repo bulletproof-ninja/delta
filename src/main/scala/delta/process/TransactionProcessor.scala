@@ -27,10 +27,11 @@ trait TransactionProcessor[SID, EVT, S >: Null] {
     try process(tx, currState) catch {
       case NonFatal(cause) =>
         Future failed new IllegalStateException(
-s"""Failed processing of transaction ${tx.stream}:${tx.revision}
-Preprocess state: $currState
+s"""Failed processing of transaction ${tx.stream} (revision ${tx.revision})
+----
+State: $currState
 Transaction: $tx
-""", cause)
+----""", cause)
     }
 
   /** Convenience wrapping of state into `Future`. */

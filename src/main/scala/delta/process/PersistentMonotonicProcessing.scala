@@ -3,8 +3,6 @@ package delta.process
 import scala.concurrent._
 import scuff.concurrent._
 import scala.reflect.ClassTag
-import scala.concurrent.duration._
-import java.util.concurrent.ScheduledExecutorService
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
 
 /**
@@ -26,8 +24,7 @@ import scala.collection.concurrent.{ Map => CMap, TrieMap }
  * @tparam U The update type (often the same as `Work`)
  * @param ec General execution context for light work
  */
-abstract class PersistentMonotonicProcessing[SID, EVT: ClassTag, Work >: Null, U](
-  implicit ec: ExecutionContext)
+abstract class PersistentMonotonicProcessing[SID, EVT: ClassTag, Work >: Null, U]
 extends EventSourceProcessing[SID, EVT]
 with TransactionProcessor[SID, EVT, Work] {
 
@@ -35,36 +32,10 @@ with TransactionProcessor[SID, EVT, Work] {
   protected type Snapshot = delta.Snapshot[Work]
   protected type Update = delta.process.Update[U]
 
-  /** Batch size when persisting result of replay. */
-  protected def replayPersistenceBatchSize: Int
-
   protected def processStore: StreamProcessStore[SID, Work, U]
   def name = processStore.name
 
   protected def reportFailure(th: Throwable): Unit
-  /**
-    * Time delay before replaying missing revisions.
-    * This allows some margin for delayed out-of-order transactions,
-    * either due to choice of messaging infrastructure, or consistency
-    * validation, where transaction propagation is delayed and
-    * intentionally out-of-order during a consistency violation.
-    */
-  protected def replayMissingDelay: FiniteDuration
-  protected def replayMissingScheduler: ScheduledExecutorService
-
-  /**
-    * Time allowed for replay processor to finish processing
-    * remaining transactions once replay has completed.
-    *
-    * @note If replay is not throttled and transaction processing
-    * is relatively time consuming, it's likely that replay will
-    * finish, but with most transactions queued in thread pools.
-    * Such a condition will require a post-replay timeout that is
-    * large enough to accomodate completing all transactions.
-    * As such, ''it might be sensible to have this value be
-    * configurable''.
-    */
-  protected def postReplayTimeout: FiniteDuration
 
   /**
     * Callback on snapshot updates from live processing.
@@ -102,23 +73,21 @@ with TransactionProcessor[SID, EVT, Work] {
 
   protected type LiveResult = Work
 
-  protected class ReplayConsumer
+  protected class ReplayConsumer(
+    config: ReplayProcessConfig,
+    protected val executionContext: ExecutionContext)
   extends PersistentMonotonicReplayProcessor[SID, EVT, Work, U](
       processStore,
-      postReplayTimeout,
-      replayPersistenceBatchSize,
+      config,
       newPartitionedExecutionContext(replay = true), newReplayMap) {
-
-    def tickWindow = Some(PersistentMonotonicProcessing.this.tickWindow)
     override protected def process(tx: Transaction, state: Option[Work]): Future[Work] =
       PersistentMonotonicProcessing.this.process(tx, state)
 
   }
 
-  protected class LiveConsumer(es: EventSource)
+  protected class LiveConsumer(es: EventSource, config: LiveProcessConfig)
   extends PersistentMonotonicProcessor[SID, EVT, Work, U](
-      es,
-      replayMissingDelay, replayMissingScheduler,
+      es, config,
       newPartitionedExecutionContext(replay = false)) {
 
     protected def processStore = PersistentMonotonicProcessing.this.processStore
@@ -129,11 +98,12 @@ with TransactionProcessor[SID, EVT, Work] {
 
   }
 
-  protected def replayProcessor(es: EventSource): ReplayProcessor =
-    new ReplayConsumer
+  protected def adHocContext: ExecutionContext
+  protected def replayProcessor(es: EventSource, config: ReplayProcessConfig): ReplayProcessor =
+    new ReplayConsumer(config, adHocContext)
 
-  protected def liveProcessor(es: EventSource): LiveProcessor =
-    new LiveConsumer(es)
+  protected def liveProcessor(es: EventSource, config: LiveProcessConfig): LiveProcessor =
+    new LiveConsumer(es, config)
 
 }
 
@@ -142,7 +112,6 @@ with TransactionProcessor[SID, EVT, Work] {
   * consumption.
   * @see [[delta.process.PersistentMonotonicProcessing]] for details.
   */
-abstract class PersistentMonotonicConsumer[SID, EVT: ClassTag, Work >: Null, U](
-  implicit ec: ExecutionContext)
+abstract class PersistentMonotonicConsumer[SID, EVT: ClassTag, Work >: Null, U]
 extends PersistentMonotonicProcessing[SID, EVT, Work, U]
 with EventSourceConsumer[SID, EVT]

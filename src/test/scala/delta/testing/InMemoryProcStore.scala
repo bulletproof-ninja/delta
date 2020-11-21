@@ -10,7 +10,7 @@ import scuff.concurrent._
 import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scuff.reflect.Surgeon
 
-abstract class InMemoryProcStore[K, S <: AnyRef, U](
+class InMemoryProcStore[K, S <: AnyRef, U](
   val name: String,
   protected val snapshots: CMap[K, delta.Snapshot[S]] = TrieMap.empty[K, delta.Snapshot[S]])(
   implicit
@@ -91,7 +91,7 @@ with AggregationSupport {
         snapshots.updateIfPresent(key)(_.copy(tick = tick, revision = revision))
     }
   }
-  def tickWatermark: Option[Tick] = None
+  def tickWatermark: Option[Tick] = snapshots.values.map(_.tick).maxOption
   protected def readForUpdate[R](key: K)(thunk: (Unit, Option[Snapshot]) => R): Future[R] = Future {
     thunk((), snapshots.get(key))
   }

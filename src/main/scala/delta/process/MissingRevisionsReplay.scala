@@ -1,6 +1,6 @@
 package delta.process
 
-import delta.EventSource
+import delta.{ Revision, EventSource }
 
 import scuff.StreamConsumer
 import scuff.concurrent._
@@ -10,6 +10,8 @@ import scala.concurrent._, duration.FiniteDuration
 
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledExecutorService
+import scala.util.Try
+import scala.util.Success
 
 /**
  * Request replay of transactions from [[delta.EventSource]]
@@ -24,7 +26,7 @@ trait MissingRevisionsReplay[ID, EVT] {
   protected def replayMissingRevisions(
       es: EventSource[ID, _ >: EVT],
       delayReplay: Option[(FiniteDuration, ScheduledExecutorService)])(
-      id: ID, missing: Range)(replayProcess: Transaction => _): Future[Unit] =
+      id: ID, missing: Range)(replayProcess: Transaction => Any): Future[Unit] =
     if (!(outstandingReplays contains id)) {
       scheduleRevisionsReplay(id, missing, es, delayReplay, replayProcess)
     } else Future.unit
@@ -62,13 +64,32 @@ trait MissingRevisionsReplay[ID, EVT] {
 
   private def replayNow(
       id: ID, missing: Range, es: EventSource[ID, _ >: EVT],
-      replayProcess: Transaction => _, whenDone: Promise[Unit]): Unit = {
+      replayProcess: Transaction => Any, whenDone: Promise[Unit]): Unit = {
+
     val replayConsumer = new StreamConsumer[Transaction, Unit] {
-      def onNext(tx: Transaction) = replayProcess(tx)
-      def onError(th: Throwable) = whenDone failure th
-      def onDone() = whenDone success ()
+      @volatile private[this] var txs: List[Transaction] = Nil
+      def onNext(tx: Transaction) =
+        txs = tx :: txs
+      def onError(th: Throwable) =
+        whenDone failure th
+      def onDone() = {
+        txs
+          .map(tx => Try(replayProcess(tx)))
+          .collectFirst {
+            case Success(f: Future[_]) => f.map { _ => () } (Threads.PiggyBack)
+            case tr => Future fromTry tr.map { _ => () }
+          } match {
+            case None =>
+              whenDone success ()
+            case Some(future) =>
+              whenDone completeWith future
+          }
+      }
     }
-    es.replayStreamRange(id, missing)(replayConsumer)
+    if (missing.last == Int.MaxValue)
+      es.replayStreamFrom(id, missing.head)(replayConsumer)
+    else
+      es.replayStreamRange(id, missing)(replayConsumer)
   }
 
 }
@@ -83,5 +104,9 @@ extends MissingRevisionsReplay[ID, EVT] {
   def requestReplay(
       id: ID, missing: Range)(replayProcess: delta.Transaction[ID, _ >: EVT] => _): Future[Unit] =
     requestMissingReplay(id, missing)(replayProcess)
+
+  def requestReplayFrom(
+      id: ID, from: Revision)(replayProcess: delta.Transaction[ID, _ >: EVT] => _): Future[Unit] =
+    requestMissingReplay(id, from to Int.MaxValue)(replayProcess)
 
 }

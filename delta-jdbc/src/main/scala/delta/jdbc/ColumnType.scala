@@ -19,17 +19,25 @@ extends ReadColumn[T]
 with delta.conv.StorageType[T] {
   final val jvmType: Class[T] = classTag[T].runtimeClass.asInstanceOf[Class[T]]
   def typeName: String
+  def adapt[S: ClassTag](codec: Codec[S, T]): ColumnType[S] =
+    ColumnType[S, T](codec)
 }
 
 object ColumnType {
 
   def apply[T: ClassTag, SQL: ColumnType](
-      codec: Codec[T, SQL]): ColumnType[T] = new ColumnType[T] {
-    def typeName = implicitly[ColumnType[SQL]].typeName
-    def readFrom(rs: ResultSet, col: Int): T = codec decode {
-      implicitly[ColumnType[SQL]].readFrom(rs, col)
+      codec: Codec[T, SQL]): ColumnType[T] =
+    new ColumnType[T] {
+      private[this] val underlying = implicitly[ColumnType[SQL]]
+
+      def typeName =
+        underlying.typeName
+
+      def readFrom(rs: ResultSet, col: Int): T =
+        codec decode underlying.readFrom(rs, col)
+
+      override def writeAs(t: T) =
+        underlying.writeAs(codec encode t)
     }
-    override def writeAs(t: T) = implicitly[ColumnType[SQL]].writeAs(codec encode t)
-  }
 
 }

@@ -4,6 +4,8 @@ import delta._
 import scala.concurrent._
 import scala.collection.concurrent.TrieMap
 import scala.util.{ Success, Failure }
+import delta.process.ReplayProcess
+import delta.process.ReplayResult
 
 /**
  * Apply this trait to the [[delta.EventStore]] `with` [[delta.TransactionPublishing]]
@@ -26,20 +28,64 @@ extends TransactionPublishing[SID, EVT] {
   }
 
   private[this] val activation = Promise[Activation]()
-
-  def activate[S](
-      validation: EventStoreValidationProcess[SID, _ <: EVT, S])
+  private[this] def activate[S](
+      processor: Transaction => Future[S],
+      comp: PartialFunction[Channel, Compensation[SID, S]])
       : Unit =
     try
       activation success new Activation {
         type State = S
-        val txProcessor = validation.txProcessor(ConsistencyValidation.this)
-        def compensation = validation.compensation
+        def txProcessor = processor
+        def compensation = comp
       }
     catch {
       case _: IllegalStateException =>
         throw new IllegalStateException(s"Already activated for validation!")
     }
+
+  /** Activate this validation. */
+  def activate[S](
+      validation: EventStoreValidationProcess[SID, _ <: EVT, S],
+      config: delta.process.LiveProcessConfig)
+      : Unit =
+    activate(
+      validation.txProcessor(this, config),
+      validation.compensation)
+
+  /**
+    * Activate this validation, and also validate any outstanding
+    * transactions.
+    * @note Should generally only be done from a single instance
+    * at startup, but if the compensating commands are idempotent,
+    * it should be safe to do in general.
+    */
+  def activateAndValidate[S](
+      validation: EventStoreValidationProcess[SID, _ <: EVT, S],
+      replayConfig: delta.process.ReplayProcessConfig,
+      liveConfig: delta.process.LiveProcessConfig)(
+      implicit
+      ec: ExecutionContext)
+      : ReplayProcess[ReplayResult[SID]] = {
+
+    val txProcessor = validation.txProcessor(this, liveConfig)
+
+    activate(txProcessor, validation.compensation)
+
+    val replayProc = validation.validate(this, replayConfig)
+    val streamCompletion =
+      replayProc.finished
+        .flatMap { replayCompletion =>
+          val completions = validation.completeStreams(this, replayCompletion.incompleteStreams, txProcessor)
+          (Future sequence completions.values).transform { _ =>
+            val errors = completions.flatMap {
+              case (id, future) =>
+                future.value.get.failed.toOption.map(id -> _)
+            }
+            Success(ReplayResult(replayCompletion.txCount, errors))
+          }
+        }
+    ReplayProcess(replayProc, streamCompletion)
+  }
 
   // While it's unlikely that there'll be multiple concurrent
   // compensating transactions for the same stream,

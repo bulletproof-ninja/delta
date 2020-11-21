@@ -1,17 +1,15 @@
 package delta.hazelcast
 
-import java.util.concurrent.ScheduledExecutorService
-
 import scala.jdk.CollectionConverters._
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration._
 import scala.reflect.ClassTag
 
 import com.hazelcast.core.IMap
 
+import scuff.concurrent.PartitionedExecutionContext
+
 import delta.Projector
 import delta.process._
-import scuff.concurrent.PartitionedExecutionContext
 
 /**
  * @tparam ID The key identifier
@@ -20,29 +18,13 @@ import scuff.concurrent.PartitionedExecutionContext
  */
 abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag](
   implicit
-  ec: ExecutionContext,
-  scheduler: ScheduledExecutorService)
+  ec: ExecutionContext)
 extends EventSourceConsumer[ID, EVT] {
 
   protected type LiveResult = EntryUpdateResult
 
   protected def imap: IMap[ID, _ <: EntryState[S, EVT]]
   protected def tickWatermark: Option[Tick]
-
-  /**
-   * If revisions are detected missing during live
-   * processing, this is the delay before requesting
-   * replay. If the messaging infrastructure is not
-   * guaranteed to be ordered per stream, a delay can
-   * prevent unnecessary replay.
-   */
-  protected def missingRevisionsReplayDelay: FiniteDuration
-
-  /**
-   * How long to wait for replay processing to finish,
-   * once all transactions have been replayed.
-   */
-  protected def finalizeReplayProcessingTimeout: FiniteDuration
 
   protected def projector(tx: Transaction): Projector[S, EVT]
   protected def reportFailure(th: Throwable): Unit
@@ -86,24 +68,22 @@ extends EventSourceConsumer[ID, EVT] {
     * It is highly recommended to return an instance of
     * [[delta.process.MonotonicReplayProcessor]] here.
     */
-  protected def replayProcessor(es: EventSource) = {
+  protected def replayProcessor(es: EventSource, config: ReplayProcessConfig) = {
     val projector = Projector(this.projector) _
 
     new HzMonotonicReplayProcessor[ID, EVT, S, Unit](
         tickWatermark,
         imap,
-        finalizeReplayProcessingTimeout,
+        config,
         newPartitionedExecutionContext,
         newReplayMap) {
       def process(tx: Transaction, currState: Option[S]) = projector(tx, currState)
-      def tickWindow = Some(HzPersistentMonotonicConsumer.this.tickWindow)
     }
 
   }
 
-  protected def liveProcessor(es: EventSource): LiveProcessor =
+  protected def liveProcessor(es: EventSource, config: LiveProcessConfig): LiveProcessor =
     new HzMonotonicProcessor[ID, EVT, S](
-      es, imap, projector, reportFailure,
-      missingRevisionsReplayDelay)
+      es, imap, projector, reportFailure, config)
 
 }
