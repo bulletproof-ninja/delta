@@ -1,13 +1,13 @@
 plugins {
     id "com.jfrog.bintray" version '1.8.5'
-    id 'com.adarshr.test-logger' version '2.1.0'
+    id 'com.adarshr.test-logger' version '2.1.1'
 }
 
 ext {
     getScalaFull = [
         '2.11': '2.11.12',
         '2.12': '2.12.12',
-        '2.13': '2.13.3'
+        '2.13': '2.13.4'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.13'
@@ -53,7 +53,7 @@ allprojects {
 
     dependencies {
         compile "org.scala-lang:scala-reflect:$vScalaFull"
-        compile "org.scala-lang.modules:scala-collection-compat_$vScala:2.1.6"
+        compile "org.scala-lang.modules:scala-collection-compat_$vScala:2.2.0"
         testCompile "org.scala-lang:scala-reflect:$vScalaFull"
 
         testCompile "junit:junit:4.12"
