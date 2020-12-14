@@ -22,10 +22,10 @@ import scala.collection.concurrent.{ Map => CMap, _ }
   */
 abstract class PersistentMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, U](
   persistentStore: StreamProcessStore[ID, S, U],
-  protected val replayConfig: ReplayProcessConfig,
+  replayConfig: ReplayProcessConfig,
   partitionThreads: PartitionedExecutionContext,
   cmap: CMap[ID, ConcurrentMapStore.State[S]])
-extends MonotonicReplayProcessor[ID, EVT, S, U]
+extends MonotonicReplayProcessor[ID, EVT, S, U](replayConfig)
 with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
 
   def this(

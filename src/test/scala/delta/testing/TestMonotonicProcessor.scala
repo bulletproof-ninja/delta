@@ -35,9 +35,9 @@ class TestMonotonicProcessor {
       @volatile var latch: CountDownLatch = _
     }
     class Mono(implicit ec: ExecutionContext)
-    extends MonotonicReplayProcessor[Int, Char, String, String] {
+    extends MonotonicReplayProcessor[Int, Char, String, String](
+      ReplayProcessConfig(10.seconds, 100)) {
         protected def executionContext = ec
-        protected val replayConfig = ReplayProcessConfig(10.seconds, 100)
         protected val processStore: StreamProcessStore[Int,String,String] =
           ConcurrentMapStore(Tracker.snapshotMap, "", None)(NoFallback)
 
@@ -126,9 +126,9 @@ class TestMonotonicProcessor {
         //        println(s"Testing with $exeCtx")
         type State = ConcurrentMapStore.State[String]
         val snapshotMap = new TrieMap[Int, State]
-        val processor = new MonotonicReplayProcessor[Int, Char, String, String] {
+        val processor = new MonotonicReplayProcessor[Int, Char, String, String](
+          ReplayProcessConfig(20.seconds, 100)) {
           protected def executionContext = ec
-          protected val replayConfig = ReplayProcessConfig(20.seconds, 100)
           protected val processStore: StreamProcessStore[Int,String,String] =
             ConcurrentMapStore(snapshotMap, "", None)(NoFallback)
           protected def processContext(id: Int): ExecutionContext = ec match {

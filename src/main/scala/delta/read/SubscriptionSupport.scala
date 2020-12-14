@@ -292,7 +292,7 @@ extends StreamId {
     val timeout = if (readTimeout != null) readTimeout else defaultReadTimeout
     val timeoutTask = scheduler.schedule(timeout) {
       p tryFailure
-        new Timeout(id, timeout, s"Custom read for $id timed out after $timeout")
+        new Timeout(id, timeout, s"$rmName: Custom read for $id timed out after $timeout")
     }
 
     p.future.andThen {
@@ -302,5 +302,37 @@ extends StreamId {
     }
 
   }
+
+  private lazy val rmName = s"${classOf[ReadModel[_, _]].getSimpleName}{${this.name}}"
+
+  private def Timeout(
+      id: ID, snapshot: Option[Snapshot],
+      minRevision: Revision, minTick: Tick, timeout: FiniteDuration): ReadRequestFailure = {
+    snapshot match {
+      case None =>
+        val errMsg = s"$rmName: Failed to read `$id` within timeout of $timeout"
+        new Timeout(id, timeout, errMsg) with UnknownIdRequested
+      case Some(snapshot) =>
+        assert(minRevision != -1 || minTick != Long.MinValue)
+        val revText = if (minRevision != -1) s"revision >= $minRevision" else ""
+        val tickText = if (minTick != Long.MinValue) s"tick >= $minTick" else ""
+        val failedCondition =
+          if (revText == "") tickText
+          else if (tickText == "") revText
+          else s"BOTH $revText AND $tickText"
+        val errMsg = s"$rmName: Failed to read $id expecting $failedCondition within timeout of $timeout"
+        if (minRevision != -1)
+          if (minTick != Long.MinValue)
+            new Timeout(id, timeout, errMsg) with UnknownRevisionRequested with UnknownTickRequested {
+              def knownRevision = snapshot.revision; def knownTick = snapshot.tick
+            }
+          else
+            new Timeout(id, timeout, errMsg) with UnknownRevisionRequested { def knownRevision = snapshot.revision }
+        else
+          new Timeout(id, timeout, errMsg) with UnknownTickRequested { def knownTick = snapshot.tick }
+    }
+  }
+
+
 
 }

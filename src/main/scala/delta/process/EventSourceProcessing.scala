@@ -3,7 +3,7 @@ package delta.process
 import scuff.StreamConsumer
 import scuff.concurrent.StreamPromise
 
-import scala.util.{ Success, Failure }
+import scala.util._
 import scala.concurrent._
 
 import ReplayCompletion.IncompleteStream
@@ -17,6 +17,8 @@ import ReplayCompletion.IncompleteStream
   * @tparam EVT The processing event type. Can be a sub-type of the evemt source event type
   */
 trait EventSourceProcessing[SID, EVT] {
+
+  def name: String
 
   protected type LiveResult
 
@@ -90,16 +92,20 @@ trait EventSourceProcessing[SID, EVT] {
   protected def catchUp(
       eventSource: EventSource,
       replayConfig: ReplayProcessConfig)
-      : (ReplayStatus, Future[ReplayCompletion[SID]]) = {
-    val replayProc = replayProcessor(eventSource, replayConfig)
-    val replayPromise = StreamPromise(replayProc)
-    replayConfig.adjustToWindow(tickWatermark) match {
-      case None =>
-        eventSource.query(selector(eventSource))(replayPromise)
-      case Some(fromTick) =>
-        eventSource.querySince(fromTick, selector(eventSource))(replayPromise)
+      : ReplayProcess[ReplayCompletion[SID]] = {
+    Try(replayProcessor(eventSource, replayConfig)) match {
+      case Failure(cause) =>
+        ReplayProcess.failed(this.name, cause)
+      case Success(replayProc) =>
+        val replayPromise = StreamPromise(replayProc)
+        replayConfig.adjustToWindow(tickWatermark) match {
+          case None =>
+            eventSource.query(selector(eventSource))(replayPromise)
+          case Some(fromTick) =>
+            eventSource.querySince(fromTick, selector(eventSource))(replayPromise)
+        }
+        ReplayProcess(replayProc,  replayPromise.future)
     }
-    replayProc -> replayPromise.future
   }
 
   /**
@@ -107,26 +113,37 @@ trait EventSourceProcessing[SID, EVT] {
     * processing. However, since replay state is
     * now lost, we replay all transactions since
     * the first missing revision.
+    * @return Stream failures, if any
     */
   protected def completeStreams(
       eventSource: EventSource,
       incompleteStreams: List[ReplayCompletion.IncompleteStream[SID]],
-      processor: LiveProcessor): Map[SID, Future[Unit]] =
+      processor: LiveProcessor)(
+      implicit
+      ec: ExecutionContext): Future[Map[SID, Throwable]] =
 
-    if (incompleteStreams.isEmpty) Map.empty
+    if (incompleteStreams.isEmpty) Future successful Map.empty
     else {
       val replayer = new MissingRevisionsReplayer(eventSource)
-      incompleteStreams.iterator
-        .flatMap {
-          case IncompleteStream(id, Success(missingRevisions)) =>
-            id -> replayer.requestReplayFrom(id, missingRevisions.head)(processor) :: Nil
-          case IncompleteStream(id, Failure(cause)) =>
-            id -> (Future failed cause) :: Nil
-          case _ =>
-            Nil
+      val replays =
+        incompleteStreams.iterator
+          .flatMap {
+            case IncompleteStream(id, Success(missingRevisions)) =>
+              id -> replayer.requestReplayFrom(id, missingRevisions.head)(processor) :: Nil
+            case IncompleteStream(id, Failure(cause)) =>
+              id -> (Future failed cause) :: Nil
+            case _ =>
+              Nil
+          }
+      Future.sequence(replays.map(_._2)).map { _ =>
+          replays.flatMap {
+            case (id, future) =>
+              future.value.flatMap {
+                case Failure(cause) => Some(id -> cause)
+                case _ => None
+              }
+          }.toMap
         }
-        .toMap
     }
-
 
 }

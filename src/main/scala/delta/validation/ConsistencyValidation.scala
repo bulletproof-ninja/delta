@@ -75,14 +75,10 @@ extends TransactionPublishing[SID, EVT] {
     val streamCompletion =
       replayProc.finished
         .flatMap { replayCompletion =>
-          val completions = validation.completeStreams(this, replayCompletion.incompleteStreams, txProcessor)
-          (Future sequence completions.values).transform { _ =>
-            val errors = completions.flatMap {
-              case (id, future) =>
-                future.value.get.failed.toOption.map(id -> _)
+          validation.completeStreams(this, replayCompletion.incompleteStreams, txProcessor)
+            .map { streamErrors =>
+              ReplayResult(replayCompletion.txCount, streamErrors)
             }
-            Success(ReplayResult(replayCompletion.txCount, errors))
-          }
         }
     ReplayProcess(replayProc, streamCompletion)
   }

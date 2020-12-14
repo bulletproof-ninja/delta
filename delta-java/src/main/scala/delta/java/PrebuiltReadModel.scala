@@ -6,29 +6,32 @@ import delta.process.Update
 import scala.concurrent.duration._
 import java.util.concurrent.ScheduledExecutorService
 
-abstract class PrebuiltReadModel[ID, S, MHID, U](
+abstract class PrebuiltReadModel[ID, S, SID, U](
+  name: String,
   defaultReadTimeout: FiniteDuration,
-  protected val hub: MessageHub[MHID, delta.process.Update[U]],
+  protected val hub: MessageHub[SID, delta.process.Update[U]],
   protected val scheduler: ScheduledExecutorService)(
   implicit
-  idConv: ID => MHID)
-extends impl.PrebuiltReadModel[ID, S, MHID, U](defaultReadTimeout)
+  idConv: ID => SID)
+extends impl.PrebuiltReadModel[ID, S, SID, U](name, defaultReadTimeout)
 with MessageHubSupport[ID, S, U]
 with SubscriptionAdapter[ID, S, U] {
 
   def this(
+      name: String,
       defaultLookupTimeoutLength: Long, defaultLookupTimeoutUnits: TimeUnit,
-      hub: MessageHub[MHID, Update[U]],
+      hub: MessageHub[SID, Update[U]],
       scheduler: ScheduledExecutorService)(
       implicit
-      idConv: ID => MHID) =
-    this(FiniteDuration(defaultLookupTimeoutLength, defaultLookupTimeoutUnits), hub, scheduler)
+      idConv: ID => SID) =
+    this(name, FiniteDuration(defaultLookupTimeoutLength, defaultLookupTimeoutUnits), hub, scheduler)
 
   def this(
-      hub: MessageHub[MHID, Update[U]],
+      name: String,
+      hub: MessageHub[SID, Update[U]],
       scheduler: ScheduledExecutorService)(
       implicit
-      idConv: ID => MHID) =
-    this(DefaultReadTimeout, hub, scheduler)
+      idConv: ID => SID) =
+    this(name, DefaultReadTimeout, hub, scheduler)
 
 }

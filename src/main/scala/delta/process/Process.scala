@@ -16,6 +16,14 @@ with ReplayStatus {
   override def toString() = s"ReplayProcess($name)"
 }
 object ReplayProcess {
+  def failed[T](process: String, cause: Throwable): ReplayProcess[T] =
+    new ReplayProcess[T] {
+      def name: String = process
+      def totalTransactions: Long = 0
+      def activeTransactions: Int = 0
+      def numErrors: Int = 0
+      val finished: Future[T] = Future failed cause
+    }
   def apply[T](
       status: ReplayStatus, future: Future[T])
       : ReplayProcess[T] =

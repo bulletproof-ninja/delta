@@ -17,8 +17,8 @@ with LiveProcessor[ID, EVT]
 abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
   protected val processStore: StreamProcessStore[ID, S, U],
   // protected val executionContext: ExecutionContext,
-  protected val replayConfig: ReplayProcessConfig)
-extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U]
+  replayConfig: ReplayProcessConfig)
+extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U](replayConfig)
 with ReplayProcessor[ID, EVT]
 
 /** Monotonic processor with join state. */

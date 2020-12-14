@@ -14,15 +14,16 @@ trait ReadModel[ID, S] {
   type Id = ID
   type Snapshot = delta.Snapshot[S]
 
+  protected def name: String
+
   protected def readSnapshot(id: ID)(
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]]
 
   /**
-   * Read latest snapshot. This is intended
-   * to get *some* revision fast. This
-   * may, or may not, be the latest revision.
-   *
+   * Read snapshot.
+   * @param minRevision Optional minimum revision. If not provided, then
+   * an arbitrary revision is provided, which may, or may not, be the latest revision.
    * @return Latest accessible snapshot, or [[delta.read.UnknownIdRequested]] if unknown id
    */
   def read(id: ID, minRevision: Option[Revision] = None)(

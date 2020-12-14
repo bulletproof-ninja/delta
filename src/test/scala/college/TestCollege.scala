@@ -280,12 +280,12 @@ class TestCollege {
     type State = ConcurrentMapStore.State[Model]
 
     class ModelBuilder(memMap: TrieMap[Int, State])
-      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model]
+      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model](
+        ReplayProcessConfig(10.seconds, 100))
       with MonotonicJoinState[Int, SemesterEvent, Model, Model] {
         protected def executionContext = ec
         protected val processStore: StreamProcessStore[Int,Model,Model] =
           ConcurrentMapStore(memMap, "semester", None)(_ => Future.none)
-        protected val replayConfig = ReplayProcessConfig(10.seconds, 100)
 
         protected def prepareJoin(
           semesterId: Int, semesterRev: Revision, tick: Tick, md: Map[String, String])(
@@ -399,6 +399,7 @@ class TestCollege {
       new ReadModel[Student.Id, Unit]
       with SnapshotReaderSupport[Student.Id, Unit]
       with MessageHubSupport[Student.Id, Unit, Unit] {
+        def name = "unit"
         protected type StreamId = Int
         protected def StreamId(id: Student.Id): StreamId = id.int
         protected val snapshotReader = EmailIndexStore.asSnapshotReader[Unit]

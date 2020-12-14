@@ -15,24 +15,26 @@ import delta._
  * Uses a [[delta.process.StreamProcessStore]] for
  * storing state and subscribes to a [[delta.EventSource]]
  * for any new events, and updates the process store
- * if anything changed.
- * @note *Cannot* be used for state derived
+ * if anything changed, subsequntly publishing those changes
+ * over the [[delta.MessageHub]].
+ * @note ''Cannot'' be used for state derived
  * from joined streams.
  * @tparam ID The id type
- * @tparam ESID The event source id
+ * @tparam SID The stream id
  * @tparam EVT The event type
  * @tparam Work The model type, for projection updates
  * @tparam Stored The model type, for storage
  * @tparam U The update model
  */
-abstract class IncrementalReadModel[ID, ESID, EVT: ClassTag, Work >: Null, Stored, U](
-  es: EventSource[ESID, _ >: EVT])(
+abstract class IncrementalReadModel[ID, SID, EVT: ClassTag, Work >: Null, Stored, U](
+  protected val name: String,
+  es: EventSource[SID, _ >: EVT])(
   implicit
   stateCodec: AsyncCodec[Work, Stored],
-  convId: ID => ESID)
-extends EventSourceReadModel[ID, ESID, EVT, Work, Stored](es)
+  convId: ID => SID)
+extends EventSourceReadModel[ID, SID, EVT, Work, Stored](es)
 with MessageHubSupport[ID, Stored, U]
-with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
+with ProcessStoreSupport[ID, SID, Work, Stored, U] {
 
   protected def readSnapshot(id: ID)(
       implicit
@@ -70,19 +72,19 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
   protected def replayDelayOnMissing: FiniteDuration = 2.seconds
 
   private[this] val onTxUpdate =
-    new MonotonicProcessor[ESID, EVT, Work, U]
-    with MissingRevisionsReplay[ESID, EVT] {
+    new MonotonicProcessor[SID, EVT, Work, U]
+    with MissingRevisionsReplay[SID, EVT] {
 
-      protected def onMissingRevisions(id: ESID, missing: Range): Unit =
+      protected def onMissingRevisions(id: SID, missing: Range): Unit =
         replayMissingRevisions(
           eventSource, Some(replayDelayOnMissing -> scheduler))(
           id, missing)(this.apply)
 
-      protected def onUpdate(id: ESID, update: Update): Unit =
+      protected def onUpdate(id: SID, update: Update): Unit =
         hub.publish(id, update)
 
       protected val processStore = IncrementalReadModel.this.processStore.adaptState(stateCodec, stateCodecContext)
-      protected def processContext(id: ESID) = IncrementalReadModel.this.processContext(id)
+      protected def processContext(id: SID) = IncrementalReadModel.this.processContext(id)
 
       private[this] val projector = Projector(IncrementalReadModel.this.projector) _
       protected def process(tx: Transaction, currState: Option[Work]): Future[Work] =
@@ -95,11 +97,12 @@ with ProcessStoreSupport[ID, ESID, Work, Stored, U] {
 /**
   * Model where the various state representations are identical.
   */
-abstract class SimpleIncrementalReadModel[ID, ESID, EVT: ClassTag, S >: Null](
-  es: EventSource[ESID, _ >: EVT])(
+abstract class SimpleIncrementalReadModel[ID, SID, EVT: ClassTag, S >: Null](
+  name: String,
+  es: EventSource[SID, _ >: EVT])(
   implicit
-  convId: ID => ESID)
-extends IncrementalReadModel[ID, ESID, EVT, S, S, S](es) {
+  convId: ID => SID)
+extends IncrementalReadModel[ID, SID, EVT, S, S, S](name, es) {
 
   protected def stateCodecContext = scuff.concurrent.Threads.PiggyBack
   protected def updateState(id: ID, prevState: Option[S], currState: S) = Some(currState)

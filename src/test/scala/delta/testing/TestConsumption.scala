@@ -78,7 +78,7 @@ class TestConsumption {
     val procStore = newProcessStore[String]("phrase-book")
     val updateHub = MessageHub[UUID, String](transport, topic)
     val rm =
-      new SimplePrebuiltReadModel[UUID, String, UUID](500.millis)
+      new SimplePrebuiltReadModel[UUID, String, UUID]("test", 500.millis)
       with read.SnapshotReaderSupport[UUID, String]
       with read.MessageHubSupport[UUID, String, String] {
         protected def scheduler = Scheduler

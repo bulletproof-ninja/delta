@@ -36,12 +36,12 @@ object HzMonotonicReplayProcessor {
 abstract class HzMonotonicReplayProcessor[ID, EVT: ClassTag, S >: Null, U](
   tickWatermark: Option[Tick],
   persistentState: IMap[ID, _ <: EntryState[S, EVT]],
-  protected val replayConfig: ReplayProcessConfig,
+  replayConfig: ReplayProcessConfig,
   partitionThreads: PartitionedExecutionContext,
   cmap: collection.concurrent.Map[ID, ConcurrentMapStore.State[S]])(
   implicit
   protected val executionContext: ExecutionContext)
-extends MonotonicReplayProcessor[ID, EVT, S, U]
+extends MonotonicReplayProcessor[ID, EVT, S, U](replayConfig)
 with ConcurrentMapReplayPersistence[ID, EVT, S, U] {
 
   def this(

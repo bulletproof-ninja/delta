@@ -69,10 +69,11 @@ allprojects {
     }
 
     tasks.withType(ScalaCompile) {
+        def sharedDefault = "-feature -deprecation -explaintypes -unchecked -Xcheckinit -Xlint -language:implicitConversions,existentials,higherKinds"
         def args = System.properties.compilerArgs ?:
             vScala == "2.13"
-            ? "-feature -deprecation -explaintypes -unchecked -Xlint -language:implicitConversions,existentials,higherKinds -Wunused"
-            : "-feature -deprecation -explaintypes -unchecked -Xlint -language:implicitConversions,existentials,higherKinds -Ywarn-unused"
+            ? "$sharedDefault -Wunused"
+            : "$sharedDefault -Ywarn-unused"
 	    scalaCompileOptions.additionalParameters = args.split(" ").toList()
     }
 
@@ -139,7 +140,7 @@ subprojects {
 }
 
 wrapper {
-    gradleVersion = '6.5.1'
+    gradleVersion = '6.7.1'
 }
 
 project(':delta-cassandra') {

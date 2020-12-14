@@ -2,6 +2,7 @@ package delta.validation
 
 import delta.process._
 import scala.concurrent.Future
+import scala.concurrent.ExecutionContext
 
 /**
   * Process for validation of [[delta.EventStore]].
@@ -35,16 +36,15 @@ extends EventSourceProcessing[SID, EVT] {
   def validate(
       eventStore: ConsistentEventStore,
       replayConfig: ReplayProcessConfig)
-      : ReplayProcess[ReplayCompletion[SID]] = {
-
-    val (status, replayFinished) = this.catchUp(eventStore: EventSource, replayConfig)
-    ReplayProcess(status, replayFinished)
-  }
+      : ReplayProcess[ReplayCompletion[SID]] =
+    this.catchUp(eventStore: EventSource, replayConfig)
 
   override def completeStreams(
       eventSource: EventSource,
       incompleteStreams: List[ReplayCompletion.IncompleteStream[SID]],
-      processor: LiveProcessor)
-      : Map[SID,Future[Unit]] =
+      processor: LiveProcessor)(
+      implicit
+      ec: ExecutionContext)
+      : Future[Map[SID, Throwable]] =
     super.completeStreams(eventSource, incompleteStreams, processor)
 }

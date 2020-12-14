@@ -289,7 +289,8 @@ with TransactionProcessor[ID, EVT, S] {
  * @tparam S State type
  * @tparam U State update type
  */
-abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U]
+abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
+  protected val replayConfig: ReplayProcessConfig)
 extends MonotonicProcessor[ID, EVT, S, U]
 with AsyncStreamConsumer[Transaction[ID, _ >: EVT], ReplayCompletion[ID]]
 with ReplayStatus {
@@ -304,7 +305,6 @@ with ReplayStatus {
   private def instanceName = s"${getClass.getSimpleName}(${processStore.name})"
   override def toString() = s"$instanceName@${hashCode}"
 
-  protected def replayConfig: ReplayProcessConfig
   protected final def completionTimeout = replayConfig.finishProcessingTimeout
 
   private def incompleteStreams(timeout: Option[TimeoutException]): Try[List[IncompleteStream]] = {
@@ -382,7 +382,6 @@ with ReplayStatus {
 trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U] {
   proc: MonotonicReplayProcessor[ID, EVT, S, U] =>
 
-  type Snapshot = delta.Snapshot[S]
   protected type State = ConcurrentMapStore.State[S]
 
   /**

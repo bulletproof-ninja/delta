@@ -22,6 +22,7 @@ import scuff.concurrent.Threads
  * @tparam View The view model type
  */
 abstract class StatelessReadModel[ID, SID, EVT: ClassTag, Work >: Null: ClassTag, View](
+  protected val name: String,
   es: EventSource[SID, _ >: EVT])(
   implicit
   stateCodec: AsyncCodec[Work, View],
@@ -54,10 +55,11 @@ extends EventSourceReadModel[ID, SID, EVT, Work, View](es) {
   * @tparam S The state type
   */
 abstract class SimpleStatelessReadModel[ID, SID, EVT: ClassTag, S >: Null: ClassTag](
+  name: String,
   es: EventSource[SID, _ >: EVT])(
   implicit
   idConv: ID => SID)
-extends StatelessReadModel[ID, SID, EVT, S, S](es) {
+extends StatelessReadModel[ID, SID, EVT, S, S](name, es) {
 
   protected val stateCodec = AsyncCodec.noop[S]
   protected def stateCodecContext = Threads.PiggyBack

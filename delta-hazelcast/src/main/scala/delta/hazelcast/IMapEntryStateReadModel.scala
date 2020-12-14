@@ -1,6 +1,5 @@
 package delta.hazelcast
 
-
 import java.util.concurrent.ScheduledExecutorService
 
 import scala.concurrent.{ Future, Promise, ExecutionContext }
@@ -14,10 +13,11 @@ import delta.process.UpdateCodec
 
 import scuff.Subscription
 
-
 object IMapEntryStateReadModel {
 
   import Predef.{ implicitly => ? }
+
+  private implicit def toSecond[B](a: Any, b: B): B = b
 
   def apply[ID, S, U](
       imap: IMap[ID, _ <: EntryState[S, _]],
@@ -85,6 +85,8 @@ class IMapEntryStateReadModel[ID, S, MID, ES, U](
   fromView: S => Option[ES])
 extends ReadModel[ID, S]
 with SubscriptionSupport[ID, S, U] {
+
+  protected def name: String = imap.getName
 
   protected type StreamId = MID
   protected def StreamId(id: ID) = toMapKey(id)

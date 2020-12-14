@@ -8,7 +8,6 @@ import scala.jdk.CollectionConverters._
 import scala.collection.immutable.Seq
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
-import scala.util.control.NonFatal
 
 import com.datastax.driver.core._
 
@@ -168,7 +167,7 @@ extends EventStore[ID, EVT] {
         while (iter.hasNext) callback onNext iter.next()
       } match {
         case Success(_) => callback.onDone()
-        case Failure(NonFatal(cause)) => callback onError cause
+        case Failure(cause) => callback onError cause
       }
     }
   }
@@ -445,7 +444,7 @@ extends EventStore[ID, EVT] {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {
           case Success(_) => callback.onDone()
-          case Failure(NonFatal(th)) => callback.onError(th)
+          case Failure(th) => callback onError th
         }
       case Left((id, stm)) =>
         queryAsync(Some(id), callback, stm)
@@ -457,7 +456,7 @@ extends EventStore[ID, EVT] {
       case Right(stms) =>
         processMultiple(callback.onNext, stms).onComplete {
           case Success(_) => callback.onDone()
-          case Failure(NonFatal(th)) => callback.onError(th)
+          case Failure(th) => callback onError th
         }
       case Left((id, stm)) =>
         queryAsync(Some(id), callback, stm)

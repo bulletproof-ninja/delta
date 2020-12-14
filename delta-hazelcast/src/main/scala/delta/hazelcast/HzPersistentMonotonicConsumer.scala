@@ -24,6 +24,7 @@ extends EventSourceConsumer[ID, EVT] {
   protected type LiveResult = EntryUpdateResult
 
   protected def imap: IMap[ID, _ <: EntryState[S, EVT]]
+  def name = imap.getName
   protected def tickWatermark: Option[Tick]
 
   protected def projector(tx: Transaction): Projector[S, EVT]

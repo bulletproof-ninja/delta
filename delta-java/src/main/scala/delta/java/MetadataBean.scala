@@ -72,7 +72,6 @@ private object MetadataBean {
             else null
           case stringValue =>
             val typedValue = DynamicConstructor[Any](stringValue)(ClassTag(method.getReturnType))
-            println(s"Raw value $stringValue was turned into $typedValue")
             if (method.getReturnType == classOf[Option[_]]) typedValue
             else if (method.getReturnType == classOf[Optional[_]]) Optional.ofNullable(typedValue.orNull)
             else typedValue.orNull

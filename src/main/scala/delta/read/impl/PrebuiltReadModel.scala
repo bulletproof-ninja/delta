@@ -16,6 +16,7 @@ import delta.read._
  * @tparam U The update type
  */
 abstract class PrebuiltReadModel[ID, V, SID, U](
+  protected val name: String,
   protected val defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
   implicit
   idConv: ID => SID)
@@ -28,10 +29,11 @@ with SubscriptionSupport[ID, V, U] {
 }
 
 abstract class SimplePrebuiltReadModel[ID, S, SID](
+  name: String,
   defaultReadTimeout: FiniteDuration = DefaultReadTimeout)(
   implicit
   idConv: ID => SID)
-extends PrebuiltReadModel[ID, S, SID, S](defaultReadTimeout) {
+extends PrebuiltReadModel[ID, S, SID, S](name, defaultReadTimeout) {
 
   protected def updateState(id: ID, prevState: Option[S], currState: S): Option[S] = Some(currState)
 

@@ -2,11 +2,8 @@ package delta.process
 
 import scala.collection.compat._
 import scala.concurrent._, duration._
-import scala.util.{ Success, Failure }
 
 import scuff.concurrent._
-
-import delta.process.ReplayCompletion.IncompleteStream
 
 /**
   * General trait for consuming an [[delta.EventSource]].
@@ -35,45 +32,36 @@ extends EventSourceProcessing[SID, EVT] {
     val selector = this.selector(eventSource)
 
     val tickBeforeReplay = eventSource.maxTick.await(10.seconds)
-    val (replayStatus, replayFinish) = this.catchUp(eventSource, replayConfig)
-    val liveProc = replayFinish.flatMap { replayCompletion =>
+    val replayProcess = this.catchUp(eventSource, replayConfig)
+    val liveProc = replayProcess.finished.flatMap { replayCompletion =>
       val liveProcessor = this.liveProcessor(eventSource, liveConfig)
-      val completionReplays = completeStreams(
-        eventSource, replayCompletion.incompleteStreams, liveProcessor)
-
-      (Future sequence completionReplays.values).transformWith { _ =>
-        val liveSubscription = eventSource.subscribe(selector.toStreamsSelector)(liveProcessor)
-        // close window for potential race condition
-        // with subscription, by re-querying anything
-        // since starting replay.
-        val windowClosed =
-          replayConfig.adjustToWindow(tickBeforeReplay) match {
-            case None =>
-              val query = eventSource.query(selector) _
-              StreamPromise.foreach(query)(liveProcessor)
-            case Some(fromTick) =>
-              val windowQuery = eventSource.querySince(fromTick, selector) _
-              StreamPromise.foreach(windowQuery)(liveProcessor)
-          }
-
-        windowClosed.map { _ =>
-          val streamErrors =
-            completionReplays.view
-              .mapValues(_.value)
-              .collect {
-                case (id, Some(Failure(failure))) => id -> failure
-              }
-              .toMap
-          ReplayResult(replayCompletion.txCount, streamErrors) ->
-            new LiveProcess {
-              def cancel() = liveSubscription.cancel()
-              def name = replayStatus.name
+      completeStreams(eventSource, replayCompletion.incompleteStreams, liveProcessor)
+        .flatMap { streamErrors =>
+          val liveSubscription = eventSource.subscribe(selector.toStreamsSelector)(liveProcessor)
+          // close window for potential race condition
+          // with subscription, by re-querying anything
+          // since starting replay.
+          val windowClosed =
+            replayConfig.adjustToWindow(tickBeforeReplay) match {
+              case None =>
+                val query = eventSource.query(selector) _
+                StreamPromise.foreach(query)(liveProcessor)
+              case Some(fromTick) =>
+                val windowQuery = eventSource.querySince(fromTick, selector) _
+                StreamPromise.foreach(windowQuery)(liveProcessor)
             }
+
+          windowClosed.map { _ =>
+            ReplayResult(replayCompletion.txCount, streamErrors) ->
+              new LiveProcess {
+                def cancel() = liveSubscription.cancel()
+                def name = replayProcess.name
+              }
+          }
         }
-      }
     }
 
-    ReplayProcess(replayStatus, liveProc)
+    ReplayProcess(replayProcess, liveProc)
 
   }
 
