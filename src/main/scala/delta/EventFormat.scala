@@ -64,7 +64,9 @@ object EventFormat {
    * @param channel Stream channel
    * @param metadata Transaction metadata
    */
-  class Encoded[SF] (val name: String, _version: Byte, val data: SF, val channel: Channel, val metadata: Map[String, String]) {
+  final class Encoded[SF] (
+      val name: String, _version: Byte, val data: SF,
+      val channel: Channel, val metadata: Map[String, String]) {
 
     def withData[T](t: T): Encoded[T] = new Encoded(name, _version, t, channel, metadata)
     def mapData[T](f: SF => T): Encoded[T] = new Encoded(name, _version, f(data), channel, metadata)
@@ -73,9 +75,14 @@ object EventFormat {
      * Version, *if* version is supported, i.e. not `NoVersion`.
      */
     @throws[IllegalStateException]("if version is unsupported")
+    @inline
     def version: Byte =
       if (_version != NoVersion) _version
-      else throw new IllegalStateException(s"Versioning not supported for event '$name'")
+      else throw new IllegalStateException(s"Versioning not supported for event `$name`")
+
+    def version[R](pf: PartialFunction[Byte, R]): R = try pf(version) catch {
+      case _: MatchError => throw new IllegalStateException(s"Version $version not handled for event `$name`")
+    }
 
   }
 
