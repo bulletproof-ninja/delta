@@ -11,6 +11,7 @@ private[impl] trait ProcessStoreSupport[ID, ESID, Work >: Null, Stored, U] {
 
   protected def processContext(id: ESID): ExecutionContext
   protected def processStore: StreamProcessStore[StreamId, Stored, U]
+  protected def name = processStore.name
 
   private type Update = delta.process.Update[U]
 

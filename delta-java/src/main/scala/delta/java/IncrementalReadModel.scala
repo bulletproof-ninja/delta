@@ -10,7 +10,6 @@ import delta.MessageHub
 import delta.process._
 
 abstract class IncrementalReadModel[ID, SID, EVT, Work >: Null, Stored, U](
-  name: String,
   eventClass: Class[EVT],
   protected val processStore: StreamProcessStore[SID, Stored, U],
   stateCodec: AsyncCodec[Work, Stored],
@@ -18,6 +17,6 @@ abstract class IncrementalReadModel[ID, SID, EVT, Work >: Null, Stored, U](
   protected val scheduler: ScheduledExecutorService)(
   eventSource: EventSource[SID, _ >: EVT],
   idConv: ID => SID)
-extends delta.read.impl.IncrementalReadModel[ID, SID, EVT, Work, Stored, U](name, eventSource)(
+extends delta.read.impl.IncrementalReadModel[ID, SID, EVT, Work, Stored, U](eventSource)(
   ClassTag(eventClass), stateCodec, idConv)
 with SubscriptionAdapter[ID, Stored, U]

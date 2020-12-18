@@ -27,7 +27,6 @@ import delta._
  * @tparam U The update model
  */
 abstract class IncrementalReadModel[ID, SID, EVT: ClassTag, Work >: Null, Stored, U](
-  protected val name: String,
   es: EventSource[SID, _ >: EVT])(
   implicit
   stateCodec: AsyncCodec[Work, Stored],
@@ -98,11 +97,10 @@ with ProcessStoreSupport[ID, SID, Work, Stored, U] {
   * Model where the various state representations are identical.
   */
 abstract class SimpleIncrementalReadModel[ID, SID, EVT: ClassTag, S >: Null](
-  name: String,
   es: EventSource[SID, _ >: EVT])(
   implicit
   convId: ID => SID)
-extends IncrementalReadModel[ID, SID, EVT, S, S, S](name, es) {
+extends IncrementalReadModel[ID, SID, EVT, S, S, S](es) {
 
   protected def stateCodecContext = scuff.concurrent.Threads.PiggyBack
   protected def updateState(id: ID, prevState: Option[S], currState: S) = Some(currState)
