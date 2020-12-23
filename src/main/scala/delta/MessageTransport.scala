@@ -168,7 +168,7 @@ trait MessageTransport {
 
 /**
  * Apply this trait to [[delta.MessageTransport]] implementations
- * as a buffer against failed publish failures, with
+ * as a buffer against publish failures, with
  * automatic retry.
  * @note After publish failures, messages may get
  * re-ordered thus eventually delivered out of order.

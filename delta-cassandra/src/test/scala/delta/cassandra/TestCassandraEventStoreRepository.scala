@@ -30,17 +30,17 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
     def encode(evt: AggrEvent): String = evt.dispatch(this)
 
     def on(evt: AggrCreated) = JsStr(evt.status).toJson
-    def aggrCreated(enc: Encoded): AggrCreated = enc.version match {
+    def aggrCreated(enc: Encoded): AggrCreated = enc.version {
       case 1 => AggrCreated((JsVal parse enc.data).asStr)
     }
 
     def on(evt: NewNumberWasAdded) = evt.n.toString
-    def newNumberWasAdded(enc: Encoded): NewNumberWasAdded = enc.version match {
+    def newNumberWasAdded(enc: Encoded): NewNumberWasAdded = enc.version {
       case 1 => NewNumberWasAdded(enc.data.toInt)
     }
 
     def on(evt: StatusChanged) = JsStr(evt.newStatus).toJson
-    def statusChanged(enc: Encoded): StatusChanged = enc.version match {
+    def statusChanged(enc: Encoded): StatusChanged = enc.version {
       case 1 => StatusChanged((JsVal parse enc.data).asStr)
     }
   }

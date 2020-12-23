@@ -50,17 +50,17 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     def encode(evt: AggrEvent): BsonValue = evt.dispatch(this)
 
     def on(evt: AggrCreated) = new BsonString(evt.status)
-    def offAggrCreated(bson: Encoded): AggrCreated = bson.version match {
+    def offAggrCreated(bson: Encoded): AggrCreated = bson.version {
       case 1 => AggrCreated(bson.data.asString.getValue)
     }
 
     def on(evt: NewNumberWasAdded) = new BsonInt32(evt.n)
-    def offNewNumberWasAdded(bson: Encoded): NewNumberWasAdded = bson.version match {
+    def offNewNumberWasAdded(bson: Encoded): NewNumberWasAdded = bson.version {
       case 1 => NewNumberWasAdded(bson.data.asNumber.asInt32.intValue)
     }
 
     def on(evt: StatusChanged) = new BsonString(evt.newStatus)
-    def offStatusChanged(bson: Encoded): StatusChanged = bson.version match {
+    def offStatusChanged(bson: Encoded): StatusChanged = bson.version {
       case 1 => StatusChanged(bson.data.asString.getValue)
     }
   }

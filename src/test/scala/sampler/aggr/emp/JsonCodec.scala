@@ -34,16 +34,16 @@ trait JsonCodec
   }
 
   def on(evt: EmployeeRegistered): String = EmployeeRegisteredCodecV1.encode(evt)
-  def onEmployeeRegistered(encoded: Encoded): EmployeeRegistered = encoded.version match {
+  def onEmployeeRegistered(encoded: Encoded): EmployeeRegistered = encoded.version {
     case 1 => EmployeeRegisteredCodecV1.decode(encoded.data)
   }
   def on(evt: EmployeeSalaryChange): String = evt.newSalary.toString
-  def onEmployeeSalaryChange(encoded: Encoded): EmployeeSalaryChange = encoded.version match {
+  def onEmployeeSalaryChange(encoded: Encoded): EmployeeSalaryChange = encoded.version {
     case 1 => new EmployeeSalaryChange(newSalary = encoded.data.toInt)
   }
 
   def on(evt: EmployeeTitleChange): String = JsStr(evt.newTitle).toJson
-  def onEmployeeTitleChange(encoded: Encoded): EmployeeTitleChange = encoded.version match {
+  def onEmployeeTitleChange(encoded: Encoded): EmployeeTitleChange = encoded.version {
     case 1 => new EmployeeTitleChange(newTitle = JsVal.parse(encoded.data).asStr)
   }
 
