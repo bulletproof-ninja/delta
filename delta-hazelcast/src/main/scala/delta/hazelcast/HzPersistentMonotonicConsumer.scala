@@ -16,7 +16,7 @@ import delta.process._
  * @tparam EVT The event type
  * @tparam S The state type
  */
-abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag](
+abstract class HzPersistentMonotonicConsumer[ID, EVT: ClassTag, S >: Null: ClassTag, U](
   implicit
   ec: ExecutionContext)
 extends EventSourceConsumer[ID, EVT] {
@@ -24,8 +24,9 @@ extends EventSourceConsumer[ID, EVT] {
   protected type LiveResult = EntryUpdateResult
 
   protected def imap: IMap[ID, _ <: EntryState[S, EVT]]
-  def name = imap.getName
-  protected def tickWatermark: Option[Tick]
+  protected def persistentStore: StreamProcessStore[ID, S, U]
+  def name = persistentStore.name
+  protected def tickWatermark = persistentStore.tickWatermark
 
   protected def projector(tx: Transaction): Projector[S, EVT]
   protected def reportFailure(th: Throwable): Unit
@@ -72,13 +73,13 @@ extends EventSourceConsumer[ID, EVT] {
   protected def replayProcessor(es: EventSource, config: ReplayProcessConfig) = {
     val projector = Projector(this.projector) _
 
-    new HzMonotonicReplayProcessor[ID, EVT, S, Unit](
-        tickWatermark,
-        imap,
+    new HzMonotonicReplayProcessor[ID, EVT, S, U](
+        persistentStore,
         config,
         newPartitionedExecutionContext,
         newReplayMap) {
-      def process(tx: Transaction, currState: Option[S]) = projector(tx, currState)
+      def process(tx: Transaction, currState: Option[S]) =
+        projector(tx, currState)
     }
 
   }

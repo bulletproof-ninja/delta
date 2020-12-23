@@ -375,14 +375,10 @@ with ReplayStatus {
   protected def whenDone(status: ReplayCompletion[ID]): Future[ReplayCompletion[ID]]
 }
 
-/**
-  * Replay persistence coordination, expecting a
-  * `concurrent.Map` to hold replay state.
-  */
-trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U] {
+trait ReplayPersistence[ID, EVT, S >: Null, U] {
   proc: MonotonicReplayProcessor[ID, EVT, S, U] =>
 
-  protected type State = ConcurrentMapStore.State[S]
+  protected def persistentStore: StreamProcessStore[ID, S, U]
 
   /**
     * Persist snapshots from completed replay.
@@ -392,9 +388,59 @@ trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U] {
     * missed transaction when replaying.
     * To prevent this, clear the store before restart
     * *OR* persist in ascending tick order (default).
-    * @param snapshots
+    * @param snapshots The snapshots to persist
+    * @param isTickOrdered `true` if iterator is ordered by tick
     */
-  protected def persistReplayState(snapshots: Iterator[(ID, Snapshot)]): Future[Unit]
+  protected def persistReplayState(
+      snapshots: Iterator[(ID, Snapshot)],
+      isTickOrdered: Boolean,
+      batchSize: Int): Future[Unit] =
+    if (isTickOrdered) persistOrdered(batchSize, snapshots)
+    else persistParallel(batchSize, snapshots)
+
+  private def persistOrdered(batchSize: Int, snapshots: Iterator[(ID, Snapshot)]): Future[Unit] =
+    if (batchSize > 1) {
+      snapshots.grouped(batchSize).foldLeft(Future.unit) {
+        case (prevWrite, batch) =>
+          prevWrite.flatMap { _ =>
+            persistentStore writeBatch batch.toMap
+          }
+      }
+    } else {
+      snapshots.foldLeft(Future.unit) {
+        case (prevWrite, snapshot) =>
+          prevWrite.flatMap { _ =>
+            persistentStore write snapshot
+          }
+      }
+    }
+
+  private def persistParallel(batchSize: Int, snapshots: Iterator[(ID, Snapshot)]): Future[Unit] = {
+    val writes: Iterator[Future[Unit]] =
+      if (batchSize > 1) {
+        snapshots.grouped(batchSize).map { batch =>
+          persistentStore writeBatch batch.toMap
+        }
+      } else {
+        snapshots.map(persistentStore.write)
+      }
+
+    Future.sequence(writes).map(_ => ())
+  }
+
+
+}
+
+/**
+  * Replay persistence coordination, expecting a
+  * `concurrent.Map` to hold replay state.
+  */
+trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U]
+extends ReplayPersistence[ID, EVT, S, U] {
+  proc: MonotonicReplayProcessor[ID, EVT, S, U] =>
+
+  protected type State = ConcurrentMapStore.State[S]
+
   protected def onReplayCompletion(): Future[collection.concurrent.Map[ID, State]]
 
   protected def whenDone(status: ReplayCompletion[ID]): Future[ReplayCompletion[ID]] =
@@ -415,9 +461,9 @@ trait ConcurrentMapReplayPersistence[ID, EVT, S >: Null, U] {
             }
             cmap.clear()
             Arrays.sort(snapshotArray, MonotonicProcessor.TickComparator[ID, S])
-            persistReplayState(snapshotArray.iterator)
+            persistReplayState(snapshotArray.iterator, true, replayConfig.writeBatchSize)
           } else {
-            persistReplayState(snapshots)
+            persistReplayState(snapshots, false, replayConfig.writeBatchSize)
               .andThen { case _ => cmap.clear() }
           }
 
