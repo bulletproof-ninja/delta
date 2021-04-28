@@ -1,13 +1,15 @@
 package delta_testing
 
-import org.junit._, Assert._
 import delta.mongo._
-import delta.testing.RandomDelayExecutionContext
 import delta.testing._
 import org.bson._
 import org.bson.codecs._
 
 object TestMongoStreamProcessStore {
+
+}
+
+class TestMongoStreamProcessStore extends TestStreamProcessStore {
 
   import com.mongodb.async.client._
   import TestStreamProcessStore._
@@ -29,14 +31,12 @@ object TestMongoStreamProcessStore {
     }
   }
 
-  implicit val ec = RandomDelayExecutionContext
-
   val snapshotVersion = 1: Short
   @volatile var coll: MongoCollection[BsonDocument] = _
   @volatile private var client: MongoClient = _
 
-  @BeforeClass
-  def setupClass(): Unit = {
+  override def beforeAll(): Unit = {
+    super.beforeAll()
     client = MongoClients.create()
     coll =
       client
@@ -45,17 +45,14 @@ object TestMongoStreamProcessStore {
       .withDocumentClass(classOf[BsonDocument])
     withBlockingCallback[Void]()(coll.drop(_))
   }
-  @AfterClass
-  def teardownClass(): Unit = {
+
+  override def afterAll(): Unit = {
     withBlockingCallback[Void]()(coll.drop(_))
     client.close()
+    super.afterAll()
   }
-}
 
-class TestMongoStreamProcessStore extends TestStreamProcessStore {
 
-  import TestMongoStreamProcessStore._
-  implicit def exeCtx = ec
   implicit def snapshotCodec =
     SnapshotCodec[String]("string") {
       scuff.Codec(
@@ -66,8 +63,4 @@ class TestMongoStreamProcessStore extends TestStreamProcessStore {
   override def newStore() =
     new MongoStreamProcessStore[Long, String, String](coll)
 
-  @Test
-  def mock(): Unit = {
-    assertTrue(true)
-  }
 }

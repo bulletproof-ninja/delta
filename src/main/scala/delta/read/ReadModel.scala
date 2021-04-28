@@ -14,7 +14,7 @@ trait ReadModel[ID, S] {
   type Id = ID
   type Snapshot = delta.Snapshot[S]
 
-  protected def name: String
+  def name: String
 
   protected def readSnapshot(id: ID)(
       implicit
@@ -34,7 +34,7 @@ trait ReadModel[ID, S] {
         read(id, minRevision)
       case _ =>
         readSnapshot(id).map {
-          verify(id, _)
+          verify(id, _, name)
         }
     }
 

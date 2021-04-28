@@ -8,19 +8,23 @@ import delta.Channel
 import delta.process._
 import delta.util.TransientEventStore
 import delta.util.LocalTransport
-import delta.read.impl.SimplePrebuiltReadModel
+import delta.read.impl.PrebuiltReadModel
 
 import scuff.LamportClock
 import scuff.Codec
 
 import scala.concurrent._, duration._
 
-import org.junit._, Assert._
 import scala.reflect.ClassTag
+import delta.process.LiveProcessConfig.DelayedReplay
+import scuff.JavaSerializer
 
-object TestConsumption {
-  val Scheduler = Executors.newSingleThreadScheduledExecutor()
-  implicit def ec = RandomDelayExecutionContext
+
+class TestConsumption
+extends BaseTest {
+
+  implicit val Scheduler = Executors.newSingleThreadScheduledExecutor()
+
   object CharFmt extends EventFormat[Char, String] {
 
     protected def getName(cls: EventClass): String = {
@@ -34,21 +38,17 @@ object TestConsumption {
     def decode(encoded: Encoded): Char = encoded.data charAt 0
 
   }
-}
 
-class TestConsumption {
-
-  import TestConsumption._
-
-  def newTransport[S](topic: Topic): MessageTransport { type TransportType = (UUID, Update[S]) } =
-    new LocalTransport[(UUID, Update[S])](_ => topic, ec)
+  def newUpdateTransport[S](topic: Topic): MessageTransport[(UUID, Update[S])] =
+    new LocalTransport[(UUID, Update[S])](ec)
 
   def newEventStore[EVT](
-      channels: Set[Channel], ticker: Ticker, evtFmt: EventFormat[EVT, String])
-      : EventStore[UUID, EVT] with TransactionPublishing[UUID, EVT] =
-    new TransientEventStore[UUID, EVT, String](ec, evtFmt)(_ => ticker)
-    with LocalTransactionPublishing[UUID, EVT] {
-      def txChannels = channels
+      theTicker: Ticker, evtFmt: EventFormat[EVT, String])
+      : EventStore[UUID, EVT]
+      // with TransactionPublishing[UUID, EVT]
+      =
+    new TransientEventStore[UUID, EVT, String](ec, evtFmt) {
+      def ticker = theTicker
     }
 
   def newProcessStore[S <: AnyRef: ClassTag](name: String)
@@ -56,43 +56,40 @@ class TestConsumption {
     new InMemoryProcStore[UUID, S, S](name)
 
 
-  @Test
-  def `recover from missing transactions during replay`(): Unit = {
-    val failures = new java.util.concurrent.CopyOnWriteArrayList[Throwable]
-    val ticker = LamportTicker(new LamportClock(99), () => ())
-    val ch = Channel("1")
+  test("recover from missing transactions during replay") {
+    val ticker = LamportTicker(new LamportClock(99))
+    val ch = Channel("4")
     val topic = Topic("update")
-    val transport = newTransport[String](topic)
+    val transport = newUpdateTransport[String](topic)
     val helloW = UUID.randomUUID()
-    val es = newEventStore[Char](Set(ch), ticker, CharFmt)
+    val es = newEventStore[Char](ticker, CharFmt)
 
     val helloWorld = "Hello, World!"
     val done =
       helloWorld.zipWithIndex.foldLeft(Future.unit: Future[Any]) {
         case (f, (char, idx)) =>
           f.flatMap { _ =>
-            es.commit(ch, helloW, idx, es.ticker.nextTick(), char :: Nil, Map.empty)
+            es.commit(ch, helloW, idx, char :: Nil, Map.empty)
           }
       }
     done.await
     val procStore = newProcessStore[String]("phrase-book")
-    val updateHub = MessageHub[UUID, String](transport, topic)
+    val updateHub = MessageHub.forUpdates[UUID, String](transport, topic)
     val rm =
-      new SimplePrebuiltReadModel[UUID, String, UUID]("test", 500.millis)
+      new PrebuiltReadModel[UUID, UUID, String]("test", 5000.millis)
       with read.SnapshotReaderSupport[UUID, String]
-      with read.MessageHubSupport[UUID, String, String] {
-        protected def scheduler = Scheduler
+      with read.MessageSourceSupport[UUID, String, String] {
         protected def snapshotReader = procStore
-        protected def hub = updateHub
+        protected def updateSource = updateHub
     }
 
     procStore.write(helloW, Snapshot("Hello, W", 7, 107)).await
 
     val replayConfig = ReplayProcessConfig(
-        writeBatchSize = 1, finishProcessingTimeout = 5.seconds, tickWindow = 1)
+        writeBatchSize = 1, completionTimeout = 5.seconds, tickWindow = 1)
 
-    val consumer = new PersistentMonotonicConsumer[UUID, Char, String, String] {
-      protected def adHocContext = ec
+    val consumer = new IdempotentConsumer[UUID, Char, String, String] {
+      protected def adHocExeCtx = ec
       protected def processStore = procStore
       override protected def tickWatermark: Option[Tick] =
         super.tickWatermark.map(_ + replayConfig.tickWindow + 2) // Too high, we'll miss txs on replay
@@ -102,29 +99,29 @@ class TestConsumption {
         tx.events.foldLeft(new StringBuilder(currState getOrElse "")) {
           case (sb, char) => sb append char
         }.result()
-      protected def reportFailure(th: Throwable): Unit = failures add th
+      protected def reportFailure(th: Throwable): Unit = ec reportFailure th
       protected def onUpdate(id: UUID, update: Update): Unit =
         updateHub.publish(id, update)
     }
 
-    val replayProcess = consumer.consume(es,
-      replayConfig, LiveProcessConfig.apply(2.seconds, Scheduler))
+    val replayProcess = consumer.start(es,
+      replayConfig, LiveProcessConfig(DelayedReplay(2.seconds, Scheduler)))
 
     val (replayResult, live) = replayProcess.finished.await
 
     assert(replayResult.processErrors.isEmpty)
 
     val snapshot = procStore.read(helloW).await.get
-    assertEquals(helloWorld.length-1, snapshot.revision)
-    assertEquals(snapshot.revision + 100L, snapshot.tick)
-    assertEquals(helloWorld, snapshot.state)
+    assert(helloWorld.length-1 === snapshot.revision)
+    assert(snapshot.revision + 100L === snapshot.tick)
+    assert(helloWorld === snapshot.state)
 
-    es.commit(ch, helloW, snapshot.revision + 1, es.ticker.nextTick(), '?' :: '!' :: Nil, Map.empty).await
+    es.commit(ch, helloW, snapshot.revision + 1, '?' :: '!' :: Nil).await
     val updSnapshot = rm.read(helloW, snapshot.revision + 1).await
-    assertEquals(s"$helloWorld?!", updSnapshot.state)
+    assert(s"$helloWorld?!" === updSnapshot.state)
 
     live.cancel()
 
-    assert(failures.isEmpty())
+    assert(this.failures.isEmpty)
   }
 }

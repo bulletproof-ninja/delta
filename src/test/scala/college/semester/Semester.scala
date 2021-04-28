@@ -14,33 +14,33 @@ object Semester extends Entity("semester", SemesterState) {
     semester
   }
 
-  def init(state: State, concurrentUpdates: List[Transaction]) =
-    new Semester(state)
+  def init(id: Id, stateRef: StateRef, concurrentUpdates: List[Transaction]) =
+    new Semester(stateRef)
 
-  def state(instance: Semester) = instance.state
+  def StateRef(instance: Semester) = instance.stateRef
 
   def validate(state: SemesterState) = require(state != null)
 
 }
 
 class Semester private (
-    private[Semester] val state: Semester.State = Semester.newState()) {
+    private[Semester] val stateRef: Semester.StateRef = Semester.newStateRef()) {
 
-  private def semester = state.get
+  private def semester = stateRef.get
 
   private def apply(cmd: CreateClass): Unit = {
     require(semester == null)
-    state(ClassCreated(cmd.className))
+    stateRef apply ClassCreated(cmd.className)
   }
 
   def apply(cmd: EnrollStudent): Unit = {
     if (!semester.enrolled(cmd.student)) {
-      state(StudentEnrolled(cmd.student))
+      stateRef apply StudentEnrolled(cmd.student)
     }
   }
   def apply(cmd: CancelStudent): Unit = {
     if (semester.enrolled(cmd.student)) {
-      state(StudentCancelled(cmd.student))
+      stateRef apply StudentCancelled(cmd.student)
     }
   }
 }

@@ -34,12 +34,11 @@ object MessageTransport {
 }
 
 /**
- * Message transport.
+ * Generic message transport.
  */
-trait MessageTransport {
+trait MessageTransport[Type] {
 
-  /** Native message transport. */
-  type TransportType
+  type TransportType = Type
 
   type Topic = MessageTransport.Topic
   def Topic(name: String): Topic = MessageTransport.Topic(name)
@@ -93,6 +92,8 @@ trait MessageTransport {
    */
   protected type SubscriptionKey
 
+  protected type Callback = (Topic, TransportType) => Unit
+
   /**
    *  Define subscription key(s) from requested topic(s).
    */
@@ -102,7 +103,7 @@ trait MessageTransport {
    *  @param key Subscription key
    *  @param callback Topic + Message callback
    */
-  protected def subscribeToKey(key: SubscriptionKey)(callback: (Topic, TransportType) => Unit): Subscription
+  protected def subscribeToKey(key: SubscriptionKey)(callback: Callback): Subscription
 
   protected final class Subscriber[M: ClassTag](topics: Set[Topic], callback: PartialFunction[M, Unit]) {
     @inline def matches[M2: ClassTag](topic: Topic) = (topics contains topic) && (classTag[M] == classTag[M2])
@@ -110,7 +111,7 @@ trait MessageTransport {
   }
 
   /** Java-friendly subscription. */
-  final def subscribe[M](msgType: Class[M], decoder: TransportType => M, topics: java.lang.Iterable[Topic], callback: java.util.function.Consumer[_ >: M]): Subscription = {
+  final def subscribe[M](msgType: Class[M], decoder: Type => M, topics: java.lang.Iterable[Topic], callback: java.util.function.Consumer[_ >: M]): Subscription = {
     import scala.jdk.CollectionConverters._
     implicit val tag = ClassTag[M](msgType)
     subscribe[M](topics.asScala) {
@@ -128,7 +129,7 @@ trait MessageTransport {
       topics: Iterable[Topic])(
       callback: PartialFunction[M, Unit])(
       implicit
-      decoder: TransportType => M): Subscription = {
+      decoder: Type => M): Subscription = {
 
     require(topics.nonEmpty, "Must subscribe at least one topic")
 
@@ -136,7 +137,7 @@ trait MessageTransport {
     val keys = subscriptionKeys(topicSet)
     require(keys.nonEmpty, "Method 'subscriptionKeys' must return at least one key; was empty")
     val subscriber = new Subscriber(topicSet, callback)
-    val internalCallback: (Topic, TransportType) => Unit = {
+    val internalCallback: (Topic, Type) => Unit = {
       case (topic, ht) if (subscriber matches topic) =>
         val msg = decoder(ht)
         subscriber notifyIfMatch msg
@@ -177,7 +178,7 @@ trait MessageTransport {
  * implementation, if necessary.
  */
 trait BufferedRetryPublish {
-  transport: MessageTransport =>
+  transport: MessageTransport[_] =>
 
   /** The publish queue. */
   protected def publishQueue: BlockingQueue[(Topic, TransportType)]
@@ -189,8 +190,10 @@ trait BufferedRetryPublish {
   override def publish[M](topic: Topic, msg: M)(
       implicit
       encoder: M => TransportType): Unit = {
+
     if (!publishThread.isAlive) publishThread.start()
     enqueue(topic, encoder(msg))
+
   }
 
   private def enqueue(topic: Topic, msg: TransportType): Unit = {
@@ -201,8 +204,8 @@ trait BufferedRetryPublish {
   }
 
   private class PublishDelay(delay: FiniteDuration)
-    extends RuntimeException(s"Failed to publish. Will retry again in $delay")
-    with NoStackTrace
+  extends RuntimeException(s"Failed to publish. Will retry again in $delay")
+  with NoStackTrace
 
   private val publisherThreadGroup = Threads.newThreadGroup(
       s"${getClass.getName}:publisher", daemon = false, publishCtx.reportFailure)
@@ -224,7 +227,8 @@ trait BufferedRetryPublish {
           publishCtx reportFailure new PublishDelay(timeout)
           timeout.unit.sleep(timeout.length)
         }
-        val (topic, msg) = publishQueue.take() // blocking
+        val (topic, anyMsg) = publishQueue.take(/* blocking*/)
+        val msg: TransportType = anyMsg.asInstanceOf[TransportType]
         publishCtx execute new Runnable {
           def run = try {
             publish(msg, topic)
@@ -250,7 +254,7 @@ trait BufferedRetryPublish {
  * happens, at most, once per message, not per subscriber.
  */
 trait SubscriptionPooling {
-  transport: MessageTransport =>
+  transport: MessageTransport[_] =>
 
   /** Optional delay in propagating pooled subscription cancellation. */
   protected def cancellationDelay: Option[(ScheduledExecutorService, FiniteDuration)]
@@ -318,7 +322,7 @@ trait SubscriptionPooling {
 
   private[this] val pooledSubscriptions = new Memoizer[SubscriptionKey, PooledSubscription[_]](new PooledSubscription(_))
 
-  override def subscribe[M: ClassTag](
+  def subscribe[M: ClassTag](
       topics: Iterable[Topic])(
       callback: PartialFunction[M, Unit])(
       implicit

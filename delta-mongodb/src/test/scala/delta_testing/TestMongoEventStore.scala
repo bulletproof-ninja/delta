@@ -2,18 +2,17 @@ package delta_testing
 
 import com.mongodb.client.result.DeleteResult
 
-import org.junit._
-import org.junit.Assert._
 import delta.util._
 import delta.write._
 import delta.testing._
 import delta.EventFormat
-import delta.MessageTransportPublishing
 import org.bson.BsonValue
 import org.bson.BsonString
 import org.bson.BsonInt32
+import delta.LamportTicker
+import scuff.LamportClock
 
-object TestMongoEventStore {
+class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
   import com.mongodb.async.client._
   import org.bson.Document
   import delta.mongo._
@@ -21,22 +20,17 @@ object TestMongoEventStore {
   @volatile var coll: MongoCollection[Document] = _
   @volatile private var client: MongoClient = _
 
-  @BeforeClass
-  def setupClass(): Unit = {
+  override def beforeAll(): Unit = {
+    super.beforeAll()
     client = MongoClients.create()
     coll = client.getDatabase("test").getCollection(getClass.getName.replaceAll("[\\.\\$]+", "_"))
   }
-  @AfterClass
-  def teardownClass(): Unit = {
+
+  override def afterAll(): Unit = {
+    super.afterAll()
     withBlockingCallback[Void]()(coll.drop(_))
     client.close()
   }
-}
-
-class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
-  import TestMongoEventStore._
-  import org.bson.Document
-  import delta.mongo._
 
   object MongoDBAggrEventFmt
       extends ReflectiveDecoder[AggrEvent, BsonValue]
@@ -65,19 +59,23 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     }
   }
 
-  @Before
-  def setup(): Unit = {
+  override def beforeEach(): Unit = {
+    super.beforeEach()
     val result = deleteAll()
-    assertTrue(result.wasAcknowledged)
-    es = new MongoEventStore[String, AggrEvent](
-        coll, MongoDBAggrEventFmt)(
-        _ => ticker) with MessageTransportPublishing[String, AggrEvent] {
-      def toTopic(ch: Channel) = Topic(ch.toString)
-      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txCodec = scuff.Codec.noop[Transaction]
-    }.ensureIndexes()
-    repo = new EntityRepository(TheOneAggr)(es)
+    assert(result.wasAcknowledged)
+    es =
+      new MongoEventStore[String, AggrEvent](
+          coll, MongoDBAggrEventFmt) {
+        lazy val ticker = LamportTicker.subscribeTo(this)
+        def publishCtx = ec
+        def subscribeGlobal[U](selector: StreamsSelector)(callback: Transaction => U) =
+          subscribeLocal(selector)(callback)
+        // type TransportType = Transaction
+        // val transport = new LocalTransport[Transaction](ec)
+        // val txTransportChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
+        // val txTransportCodec = scuff.Codec.noop[Transaction]
+      }.ensureIndexes()
+    repo = new EntityRepository(TheOneAggr)(es, ec)
   }
   private def deleteAll(): DeleteResult = {
     val result = withBlockingCallback[DeleteResult]() { callback =>
@@ -85,9 +83,10 @@ class TestMongoEventStore extends AbstractEventStoreRepositoryTest {
     }
     result.get
   }
-  @After
-  def teardown(): Unit = {
+
+  override def afterEach(): Unit = {
     val result = deleteAll()
-    assertTrue(result.wasAcknowledged)
+    assert(result.wasAcknowledged)
+    super.afterEach()
   }
 }

@@ -9,12 +9,12 @@ import scuff.concurrent._
   * or can simply be expensive to generate.
   */
 abstract class AsyncCodec[W, S] extends Serializable {
-  def encode(ws: W)(implicit ec: ExecutionContext): Future[S]
+  def encode(ws: W)/*(implicit ec: ExecutionContext)*/: Future[S]
   def decode(ss: S): W
 
-  final def encode(ws: Option[W])(implicit ec: ExecutionContext): Future[Option[S]] =
+  final def encode(ws: Option[W])/*(implicit ec: ExecutionContext)*/: Future[Option[S]] =
     if (ws.isEmpty) Future.none
-    else encode(ws.get)(ec).map(Some(_))(Threads.PiggyBack)
+    else encode(ws.get)/*(ec)*/.map(Some(_))(Threads.PiggyBack)
   final def decode(ss: Option[S]): Option[W] =
     if (ss.isEmpty) None
     else Some(decode(ss.get))
@@ -25,14 +25,14 @@ abstract class AsyncCodec[W, S] extends Serializable {
 
 private[process] final class SyncCodec[W, S](sync: scuff.Codec[W, S])
 extends AsyncCodec[W, S] {
-  def encode(ws: W)(implicit ec: ExecutionContext): Future[S] = successful(sync encode ws)
+  def encode(ws: W)/*(implicit ec: ExecutionContext)*/: Future[S] = successful(sync encode ws)
   def decode(ss: S): W = sync decode ss
 }
 
 object AsyncCodec {
 
   private[delta] final object NoOp extends AsyncCodec[Any, Any] {
-    def encode(ws: Any)(implicit ec: ExecutionContext): Future[Any] = successful(ws)
+    def encode(ws: Any)/*(implicit ec: ExecutionContext)*/: Future[Any] = successful(ws)
     def decode(ss: Any): Any = ss
   }
 

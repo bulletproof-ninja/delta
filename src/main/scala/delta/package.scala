@@ -2,7 +2,7 @@ import scuff.FakeType
 
 package object delta {
 
-  type Revision = Int // >= 0
+  type Revision = Int // >= 0, or -1 for unknown/unavailable
   type Tick = Long
 
   type Channel = Channel.Type

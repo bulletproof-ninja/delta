@@ -7,16 +7,32 @@ import scala.{ Left, Right }
 import scala.jdk.CollectionConverters._
 import scala.collection.immutable.Seq
 import scala.concurrent.{ ExecutionContext, Future, Promise }
-import scala.util.{ Failure, Success, Try }
+import scala.util.Try
 
 import com.datastax.driver.core._
 
-import scuff.{ Memoizer, StreamConsumer }
+import scuff.{ Memoizer, Reduction }
 import scuff.concurrent._
 
 import delta._
+import com.datastax.driver.core.exceptions.QueryValidationException
 
 private[cassandra] object CassandraEventStore {
+
+  private def execute(session: Session)(cql: String): Unit = {
+    try session execute cql
+    catch {
+      case e: QueryValidationException =>
+        throw new IllegalArgumentException(s"${e.getMessage}\n$cql", e)
+    }
+  }
+
+  private def prepare(session: Session)(cql: String): PreparedStatement =
+    try session prepare cql
+    catch {
+      case e: QueryValidationException =>
+        throw new IllegalArgumentException(s"${e.getMessage}\n$cql", e)
+    }
 
   private def ensureTable[ID: ColumnType, SF: ColumnType](
       session: Session, keyspace: String, table: String, replication: Map[String, Any]): Unit = {
@@ -26,8 +42,8 @@ private[cassandra] object CassandraEventStore {
       case (key, any) => s"'$key':$any"
     }.mkString("{", ",", "}")
       def cqlName[T: ColumnType]: String = implicitly[ColumnType[T]].typeName
-    session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH REPLICATION = $replicationStr")
-    session.execute(s"""
+    execute(session)(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH REPLICATION = $replicationStr")
+    execute(session)(s"""
       CREATE TABLE IF NOT EXISTS $keyspace.$table (
         stream_id ${cqlName[ID]},
         revision INT,
@@ -39,7 +55,7 @@ private[cassandra] object CassandraEventStore {
         metadata MAP<TEXT,TEXT>,
         PRIMARY KEY ((stream_id), revision)
       ) WITH CLUSTERING ORDER BY (revision ASC)""")
-    session.execute(s"""CREATE INDEX IF NOT EXISTS ON $keyspace.$table(channel)""")
+    execute(session)(s"""CREATE INDEX IF NOT EXISTS ON $keyspace.$table(channel)""")
   }
 
   private val StreamColumns = Seq("revision", "tick", "channel", "event_names", "event_versions", "event_data", "metadata")
@@ -81,16 +97,16 @@ trait TableDescriptor {
  * @param exeCtx The internal execution context
  * @param session The Cassandra session (connection pool)
  * @param td The table descriptor
+ * @param evtFmt The event format type class
  */
 abstract class CassandraEventStore[ID: ColumnType, EVT, SF: ColumnType](
+  exeCtx: ExecutionContext,
   session: Session, td: TableDescriptor,
-  evtFmt: EventFormat[EVT, SF])(
-  initTicker: CassandraEventStore[ID, EVT, SF] => Ticker)(
-  implicit
-  ec: ExecutionContext)
+  evtFmt: EventFormat[EVT, SF],
+  protected val publishCtx: ExecutionContext)
 extends EventStore[ID, EVT] {
 
-  lazy val ticker = initTicker(this)
+  protected implicit def ec: ExecutionContext = exeCtx
 
   import CassandraEventStore._
 
@@ -160,16 +176,19 @@ extends EventStore[ID, EVT] {
   }
 
   // TODO: Make fully non-blocking
-  private def queryAsync[U](stream: Some[ID], callback: StreamConsumer[Transaction, U], stm: BoundStatement): Unit = {
+  private def queryAsync[U](
+      stream: Some[ID],
+      reduction: Reduction[Transaction, Future[U]],
+      stm: BoundStatement): Future[U] = {
     execute(stm) { rs =>
-      Try {
-        val iter = rs.iterator().asScala.map(row => toTransaction(stream, row, StreamColumnsIdx))
-        while (iter.hasNext) callback onNext iter.next()
-      } match {
-        case Success(_) => callback.onDone()
-        case Failure(cause) => callback onError cause
+      val iter =
+        rs.iterator().asScala
+          .map(row => toTransaction(stream, row, StreamColumnsIdx))
+      while (iter.hasNext) {
+        reduction next iter.next()
       }
-    }
+      reduction.result()
+    }.flatten
   }
 
   private def fromJLists(channel: Channel, metadata: Map[String, String])(types: JList[String], vers: JList[JByte], data: JList[SF]): List[EVT] = {
@@ -198,7 +217,7 @@ extends EventStore[ID, EVT] {
   }
 
   private lazy val CurrentRevision = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT revision
       FROM $TableName
       WHERE stream_id = ?
@@ -211,7 +230,7 @@ extends EventStore[ID, EVT] {
   }
 
   private lazy val GetLastTick = {
-    val ps = session.prepare(s"SELECT MAX(tick) FROM $TableName")
+    val ps = prepare(session)(s"SELECT MAX(tick) FROM $TableName")
     () => ps.bind()
   }
   def maxTick: Future[Option[Tick]] =
@@ -220,14 +239,14 @@ extends EventStore[ID, EVT] {
     }
 
   private lazy val ReplayEverything: () => BoundStatement = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT $txColumns
       FROM $TableName
       """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     () => ps.bind()
   }
   private lazy val ReplayEverythingSince: Long => BoundStatement = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT $txColumns
       FROM $TableName
       WHERE tick >= ?
@@ -243,27 +262,26 @@ extends EventStore[ID, EVT] {
     }
   }
 
-  private val ReplayByChannels: Set[Channel] => BoundStatement = {
+  private val ReplayByChannel: Channel => BoundStatement = {
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
-      session.prepare(s"""
+      prepare(session)(s"""
         SELECT $txColumns
         FROM $TableName
         WHERE $channelMatch
         ALLOW FILTERING
         """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     })
-    (channels: Set[Channel]) => {
-      val ps = getStatement(channels.size)
-      val args = channels.toSeq
-      ps.bind(args: _*)
+    (channel: Channel) => {
+      val ps = getStatement(1)
+      ps.bind(channel)
     }
   }
 
-  private val ReplayByChannelsSince: (Set[Channel], Long) => BoundStatement = {
+  private val ReplayByChannelSince: (Channel, Long) => BoundStatement = {
     val getStatement = new Memoizer((channelCount: Int) => {
       val channelMatch = where("channel", channelCount)
-      session.prepare(s"""
+      prepare(session)(s"""
         SELECT $txColumns
         FROM $TableName
         WHERE $channelMatch
@@ -271,14 +289,14 @@ extends EventStore[ID, EVT] {
         ALLOW FILTERING
         """).setConsistencyLevel(ConsistencyLevel.SERIAL)
     })
-    (channels: Set[Channel], sinceTick: Tick) => {
-      val ps = getStatement(channels.size)
-      val args: List[Object] = channels.toList :+ Long.box(sinceTick)
+    (channel: Channel, sinceTick: Tick) => {
+      val ps = getStatement(1)
+      val args: List[Object] = channel :: Long.box(sinceTick) :: Nil
       ps.bind(args: _*)
     }
   }
   private def ReplayByEvent: (Channel, Class[_ <: EVT]) => BoundStatement = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT $txColumns
       FROM $TableName
       WHERE channel = ?
@@ -291,7 +309,7 @@ extends EventStore[ID, EVT] {
     }
   }
   private def ReplayByEventSince: (Channel, Class[_ <: EVT], Long) => BoundStatement = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT $txColumns
       FROM $TableName
       WHERE channel = ?
@@ -306,41 +324,48 @@ extends EventStore[ID, EVT] {
   }
 
   private lazy val ReplayStream: ID => BoundStatement = {
-    val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ?")
+    val ps = prepare(session)(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID) => ps.bind(ct[ID].writeAs(id))
   }
-  def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStream[R](stream: ID)(reduction: Reduction[Transaction, Future[R]]): Future[R] = {
     val stm = ReplayStream(stream)
-    queryAsync(Some(stream), callback, stm)
+    queryAsync(Some(stream), reduction, stm)
   }
 
   private lazy val ReplayStreamFrom: (ID, Int) => BoundStatement = {
-    val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision >= ?")
+    val ps = prepare(session)(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision >= ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, fromRev: Revision) => ps.bind(ct[ID].writeAs(id), Int.box(fromRev))
   }
-  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStreamFrom[R](
+      stream: ID,
+      fromRevision: Revision)(
+      reduction: Reduction[Transaction, Future[R]])
+      : Future[R] =
     if (fromRevision == 0) {
-      replayStream(stream)(callback)
+      replayStream(stream)(reduction)
     } else {
       val stm = ReplayStreamFrom(stream, fromRevision)
-      queryAsync(Some(stream), callback, stm)
+      queryAsync(Some(stream), reduction, stm)
     }
-  }
 
   private lazy val ReplayStreamTo: (ID, Int) => BoundStatement = {
-    val ps = session.prepare(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision <= ?")
+    val ps = prepare(session)(s"SELECT $streamColumns FROM $TableName WHERE stream_id = ? AND revision <= ?")
       .setConsistencyLevel(ConsistencyLevel.SERIAL)
     (id: ID, toRev: Revision) => ps.bind(ct[ID].writeAs(id), Int.box(toRev))
   }
-  override def replayStreamTo[R](stream: ID, toRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit = {
+  override def replayStreamTo[R](
+      stream: ID,
+      toRevision: Revision)(
+        reduction: Reduction[Transaction, Future[R]])
+        : Future[R] = {
     val stm = ReplayStreamTo(stream, toRevision)
-    queryAsync(Some(stream), callback, stm)
+    queryAsync(Some(stream), reduction, stm)
   }
 
   private lazy val ReplayStreamRange: (ID, Range) => BoundStatement = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT $streamColumns
       FROM $TableName
       WHERE stream_id = ?
@@ -353,35 +378,41 @@ extends EventStore[ID, EVT] {
       ps.bind(ct[ID].writeAs(id), first, last)
     }
   }
-  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStreamRange[R](
+      stream: ID, revisionRange: Range)(
+      reduction: Reduction[Transaction, Future[R]])
+      : Future[R] = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val from = revisionRange.head
     val to = revisionRange.last
     if (from == to) {
-      replayStreamRevision(stream, from)(callback)
+      replayStreamRevision(stream, from)(reduction)
     } else if (from == 0) {
-      replayStreamTo(stream, to)(callback)
+      replayStreamTo(stream, to)(reduction)
     } else {
       val ps = ReplayStreamRange(stream, revisionRange)
-      queryAsync(Some(stream), callback, ps)
+      queryAsync(Some(stream), reduction, ps)
     }
   }
 
   private lazy val ReplayStreamRevision: (ID, Int) => BoundStatement = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       SELECT $streamColumns
       FROM $TableName
       WHERE stream_id = ?
       AND revision = ?""").setConsistencyLevel(ConsistencyLevel.SERIAL)
     (stream: ID, rev: Revision) => ps.bind(ct[ID].writeAs(stream), Int box rev)
   }
-  private def replayStreamRevision[U](stream: ID, revision: Revision)(callback: StreamConsumer[Transaction, U]): Unit = {
+  private def replayStreamRevision[R](
+      stream: ID, revision: Revision)(
+      reduction: Reduction[Transaction, Future[R]])
+      : Future[R] = {
     val stm = ReplayStreamRevision(stream, revision)
-    queryAsync(Some(stream), callback, stm)
+    queryAsync(Some(stream), reduction, stm)
   }
 
   private lazy val RecordFirstRevision = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, channel, revision)
       VALUES(?,?,?,?,?,?,?,0) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
@@ -396,7 +427,7 @@ extends EventStore[ID, EVT] {
     }
   }
   private lazy val RecordLaterRevision = {
-    val ps = session.prepare(s"""
+    val ps = prepare(session)(s"""
       INSERT INTO $TableName
       (stream_id, tick, event_names, event_versions, event_data, metadata, revision)
       VALUES(?,?,?,?,?,?,?) IF NOT EXISTS""").setSerialConsistencyLevel(ConsistencyLevel.SERIAL)
@@ -425,9 +456,14 @@ extends EventStore[ID, EVT] {
     }
   }
 
-  def commit(
-      channel: Channel, stream: ID, revision: Revision, tick: Tick,
-      events: List[EVT], metadata: Map[String, String]): Future[Transaction] = {
+  protected def commit(
+    tick: Tick,
+    channel: Channel,
+    stream: ID,
+    revision: Revision,
+    metadata: Map[String, String],
+    events: List[EVT])
+    : Future[Transaction] = {
     insert(channel, stream, revision, tick, events, metadata) { rs =>
       if (rs.wasApplied) {
         Transaction(tick, channel, stream, revision, metadata, events)
@@ -439,31 +475,40 @@ extends EventStore[ID, EVT] {
 
   }
 
-  def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
+  def query[R](
+      selector: Selector)(
+      reduction: Reduction[Transaction, Future[R]])
+      : Future[R] = {
     resolve(selector, None) match {
       case Right(stms) =>
-        processMultiple(callback.onNext, stms).onComplete {
-          case Success(_) => callback.onDone()
-          case Failure(th) => callback onError th
-        }
+        processMultiple(reduction.next, stms)
+          .flatMap { _ =>
+            reduction.result()
+          }
       case Left((id, stm)) =>
-        queryAsync(Some(id), callback, stm)
+        queryAsync(Some(id), reduction, stm)
     }
   }
 
-  def querySince[U](sinceTick: Tick, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
+  def querySince[R](
+      sinceTick: Tick, selector: Selector)(
+      reduction: Reduction[Transaction, Future[R]])
+      : Future[R] = {
     resolve(selector, Some(sinceTick)) match {
       case Right(stms) =>
-        processMultiple(callback.onNext, stms).onComplete {
-          case Success(_) => callback.onDone()
-          case Failure(th) => callback onError th
-        }
+        processMultiple(reduction.next, stms)
+          .flatMap { _ =>
+            reduction.result()
+          }
       case Left((id, stm)) =>
-        queryAsync(Some(id), callback, stm)
+        queryAsync(Some(id), reduction, stm)
     }
   }
 
-  private def resolve(selector: Selector, sinceTick: Option[Tick]): Either[(ID, BoundStatement), Seq[BoundStatement]] = {
+  private def resolve(
+      selector: Selector,
+      sinceTick: Option[Tick])
+      : Either[(ID, BoundStatement), Seq[BoundStatement]] = {
 
     selector match {
       case Everything => Right {
@@ -474,8 +519,10 @@ extends EventStore[ID, EVT] {
       }
       case ChannelSelector(channels) => Right {
         sinceTick match {
-          case Some(sinceTick) => ReplayByChannelsSince(channels, sinceTick) :: Nil
-          case None => ReplayByChannels(channels) :: Nil
+          case Some(sinceTick) =>
+            channels.toList.map(ReplayByChannelSince(_, sinceTick))
+          case None =>
+            channels.toList.map(ReplayByChannel)
         }
       }
       case EventSelector(byChannel) => Right {

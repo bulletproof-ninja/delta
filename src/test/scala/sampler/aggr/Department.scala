@@ -5,6 +5,7 @@ import delta.write._
 import sampler._
 import sampler.aggr.dept._
 import scala.concurrent.Future
+import scala.concurrent.ExecutionContext
 
 /** Genesis command. */
 case class CreateDepartment(name: String)
@@ -17,11 +18,13 @@ trait Department {
 }
 
 object Department {
-  type State = delta.write.State[DeptState, DeptEvent]
-  implicit def ec = delta.testing.RandomDelayExecutionContext
+  type StateRef = delta.write.StateRef[DeptState, DeptEvent]
+
   def insert(repo: Repository[DeptId, Department])(
-    id: DeptId, cmd: CreateDepartment)(
-      thunk: Department => Metadata): Future[Int] = {
+      id: DeptId, cmd: CreateDepartment)(
+      thunk: Department => Metadata)(
+      implicit ec: ExecutionContext)
+      : Future[Int] = {
     val name = cmd.name.trim()
     require(name.length() > 0)
     val dept = new Impl
@@ -33,14 +36,15 @@ object Department {
   object Def extends Entity("Department", DeptProjector) {
     type Id = DeptId
     type Type = Department
-    def init(state: State, concurrentUpdates: List[Transaction]) = new Impl(state)
-    def state(dept: Department) = dept match {
+    def init(id: Id, state: StateRef, concurrentUpdates: List[Transaction]) = new Impl(state)
+    def StateRef(dept: Department) = dept match {
       case dept: Impl => dept.state
+      case _ => ???
     }
     def validate(state: DeptState) = require(state != null)
   }
 
-  private[aggr] class Impl(val state: State = Def.newState())
+  private[aggr] class Impl(val state: StateRef = Def.newStateRef())
       extends Department {
     @inline
     private def dept = state.get

@@ -3,33 +3,28 @@ package college.validation
 import college._
 import college.student._
 
-import delta.process.PersistentMonotonicProcessing
+import delta.process.IdempotentProcessing
 import delta.util.json.JSON
 
-import scala.concurrent._, duration._
-
-import java.util.concurrent.ScheduledExecutorService
+import scala.concurrent._
 
 import EmailValidationProcess._
 
 import delta.validation.EventStoreValidationProcess
 import delta.validation.EntityCompensation
-import delta.write.Metadata
+import delta.write._
 import delta.process.StreamProcessStore
 import delta.process.UpdateHub
 import scuff.EmailAddress
 
 class EmailValidationProcess(
-  protected val tickWindow: Int,
-  protected val processStore: StreamProcessStore[Int, State, Unit],
-  protected val replayMissingScheduler: ScheduledExecutorService)(
+  protected val processStore: StreamProcessStore[Int, State, Unit])(
   studentRepo: StudentRepo,
   emailIndex: EmailIndex,
   msgHub: UpdateHub[Int, Unit])(
   implicit
-  protected val adHocContext: ExecutionContext,
-  metadata: () => Metadata)
-extends PersistentMonotonicProcessing[Int, StudentEvent, State, Unit]
+  protected val adHocExeCtx: ExecutionContext)
+extends IdempotentProcessing[Int, StudentEvent, State, Unit]
 with EventStoreValidationProcess[Int, StudentEvent, State] {
 
   val compensation = {
@@ -39,11 +34,6 @@ with EventStoreValidationProcess[Int, StudentEvent, State] {
           studentRepo,
           new UniqueStudentEmailValidation(emailIndex))
   }
-
-  protected def replayPersistenceBatchSize: Int = 100
-  protected def reportFailure(th: Throwable): Unit = th.printStackTrace(System.err)
-  protected def replayMissingDelay: FiniteDuration = 2.seconds
-  protected def postReplayTimeout: FiniteDuration = 10.seconds
 
   protected def onUpdate(id: Int, update: Update): Unit =
     msgHub.publish(id, update)

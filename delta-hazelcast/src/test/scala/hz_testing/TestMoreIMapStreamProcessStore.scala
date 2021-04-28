@@ -1,7 +1,5 @@
 package hz_testing
 
-import org.junit._
-
 import delta.process._
 import delta.hazelcast._
 
@@ -32,8 +30,6 @@ extends ValueExtractor[delta.Snapshot[Contact], Void] {
 object TestMoreIMapStreamProcessStore {
   import com.hazelcast.Scala._
 
-  implicit def ec = RandomDelayExecutionContext
-
   final def ContactEmailRef = "contact_email"
   final def ContactNumRef = "contact_num"
 
@@ -59,18 +55,17 @@ object TestMoreIMapStreamProcessStore {
     conf.newClient()
   }
 
-  @AfterClass
-  def shutdown(): Unit = {
-    client.shutdown()
-    member.shutdown()
-  }
-
 }
 
 class TestMoreIMapStreamProcessStore
 extends TestMoreStreamProcessStore {
 
   import TestMoreIMapStreamProcessStore._
+
+  override def afterAll(): Unit = {
+    client.shutdown()
+    member.shutdown()
+  }
 
   abstract class AbstractStore protected (
     protected val imap: IMap[Long, Snapshot])
@@ -108,8 +103,5 @@ extends TestMoreStreamProcessStore {
     new LookupStore(client.getMap[Long, Snapshot](randomMapName))
   override def newDupeStore() =
     new DupeStore(client.getMap[Long, Snapshot](randomMapName))
-
-  @Test
-  def dummy(): Unit = ()
 
 }

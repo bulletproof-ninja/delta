@@ -14,6 +14,16 @@ with ReplayStatus {
   /** @return Future, which is available when replay is finished */
   def finished: Future[F]
   override def toString() = s"ReplayProcess($name)"
+  def map[T](fromTo: F => T): ReplayProcess[T] = {
+    val self = this
+    new ReplayProcess[T] {
+      def finished: Future[T] = self.finished.map(fromTo)(Threads.PiggyBack)
+      def name = self.name
+      def totalTransactions = self.totalTransactions
+      def activeTransactions = self.activeTransactions
+      def numErrors = self.numErrors
+    }
+  }
 }
 object ReplayProcess {
   def failed[T](process: String, cause: Throwable): ReplayProcess[T] =
@@ -35,17 +45,6 @@ object ReplayProcess {
       def numErrors: Int = status.numErrors
     }
 
-  def apply[F, T](
-      proc: ReplayProcess[F])(
-      map: F => T)
-      : ReplayProcess[T] =
-    new ReplayProcess[T] {
-      val finished = proc.finished.map(map)(Threads.PiggyBack)
-      def name = proc.name
-      def activeTransactions: Int = proc.activeTransactions
-      def totalTransactions: Long = proc.totalTransactions
-      def numErrors: Int = proc.numErrors
-    }
 }
 
 trait LiveProcess

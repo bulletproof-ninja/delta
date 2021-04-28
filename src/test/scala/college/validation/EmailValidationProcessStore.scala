@@ -35,7 +35,7 @@ with EmailIndex {
 
   protected def toQueryValue(addr: EmailAddress): QueryType
   def lookupAll(email: EmailAddress): Future[Map[Student.Id, Tick]] =
-    queryForTick(emailRefName -> toQueryValue(email))
+    readTicks(emailRefName -> toQueryValue(email))
       .map {
         _.map {
           case (id, tick) => new Student.Id(id) -> tick

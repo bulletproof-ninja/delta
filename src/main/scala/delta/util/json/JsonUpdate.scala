@@ -32,7 +32,7 @@ class JsonUpdate[U](contentJsonCodec: Codec[U, JSON], contentFieldName: String)
     this(contentJsonCodec, JsonUpdate.DefaultContentFieldName)
 
   def encode(update: Update[U]): JSON = {
-    val contentField: String = update.changed match {
+    val contentField: String = update.change match {
       case Some(content) => s""","$contentFieldName":${contentJsonCodec encode content}"""
       case _ => ""
     }
@@ -44,7 +44,7 @@ class JsonUpdate[U](contentJsonCodec: Codec[U, JSON], contentFieldName: String)
 
   private[json] def decode(ast: JsObj): Update[U] = {
     val tick = ast.tick.asNum
-    val revision = ast.revision getOrElse JsNum(-1)
+    val revision = ast.revision || JsNum(-1)
     val content = ast(contentFieldName) match {
       case JsUndefined | JsNull => None
       case ast => Some { contentJsonCodec decode ast.toJson }

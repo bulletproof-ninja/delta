@@ -1,35 +1,49 @@
 package delta.util
 
-import delta.MessageTransport
 import scala.concurrent.ExecutionContext
-import scuff.Codec
+import scala.util.control.NonFatal
+
+import delta.MessageTransport
 import scuff.Subscription
+import scuff.concurrent.MultiMap
 
 /**
-  * Local (JVM scope) transaction hub.
+  * JVM instance message transport.
+  *
+  * @param publishCtx The execution context used to notify subscribers
   */
-final class LocalTransport[M](
-  getTopic: M => MessageTransport.Topic,
+class LocalTransport[M](
   protected val publishCtx: ExecutionContext)
-extends MessageTransport {
+extends MessageTransport[M] {
 
-  type TransportType = M
-  protected val messageCodec = Codec.noop[TransportType]
-
-  protected type SubscriptionKey = Unit
-  private val SubscriptionKeys = Set(())
-  protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = SubscriptionKeys
-  protected def subscribeToKey(
-      key: SubscriptionKey)(
-      callback: (Topic, TransportType) => Unit)
-      : Subscription =
-    pubSub.subscribe(_ => true) { msg =>
-      callback(getTopic(msg), msg)
+  protected def publish(msg: M, topic: Topic): Unit =
+    publishCtx execute new Runnable {
+      override def hashCode = topic.##
+      def run =
+        subscribers(topic).foreach { sub =>
+          try sub(topic, msg) catch {
+            case NonFatal(cause) =>
+              publishCtx reportFailure cause
+          }
+        }
     }
 
-  private val pubSub = new scuff.PubSub[TransportType, TransportType](publishCtx)
+  protected type SubscriptionKey = Topic
 
-  protected def publish(msg: TransportType, topic: Topic) =
-    pubSub publish msg
+  private[this] val subscribers = new MultiMap[Topic, Callback]
+
+  protected def subscriptionKeys(topics: Set[Topic]): Set[SubscriptionKey] = topics
+
+  protected def subscribeToKey(
+      topic: Topic)(
+      callback: Callback)
+      : Subscription = {
+
+    subscribers.add(topic, callback)
+    new Subscription {
+      def cancel(): Unit =
+        subscribers.remove(topic, callback)
+    }
+  }
 
 }

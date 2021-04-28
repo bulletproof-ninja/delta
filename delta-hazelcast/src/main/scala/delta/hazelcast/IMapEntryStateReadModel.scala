@@ -12,11 +12,13 @@ import delta.read._
 import delta.process.UpdateCodec
 
 import scuff.Subscription
+import scala.annotation.nowarn
 
 object IMapEntryStateReadModel {
 
   import Predef.{ implicitly => ? }
 
+  @nowarn
   private implicit def toSecond[B](a: Any, b: B): B = b
 
   def apply[ID, S, U](
@@ -86,7 +88,7 @@ class IMapEntryStateReadModel[ID, S, MID, ES, U](
 extends ReadModel[ID, S]
 with SubscriptionSupport[ID, S, U] {
 
-  protected def name: String = imap.getName
+  def name: String = imap.getName
 
   protected type StreamId = MID
   protected def StreamId(id: ID) = toMapKey(id)
@@ -98,10 +100,10 @@ with SubscriptionSupport[ID, S, U] {
 
   protected def updateState(id: ID, prev: Option[S], update: U): Option[S] = {
     val updated = prev match {
-      case None => updateCodec.asSnapshot(None, update)
+      case None => updateCodec.updateState(None, update)
       case Some(prev) => fromView(prev) match {
         case None => None
-        case prev => updateCodec.asSnapshot(prev, update)
+        case prev => updateCodec.updateState(prev, update)
       }
     }
     updated.map(toView(id, _))
@@ -119,6 +121,11 @@ with SubscriptionSupport[ID, S, U] {
     imap.submitToKey(id, reader, callback)
     promise.future
   }
+
+  protected def readAgain(
+      id: ID, minRevision: Int, minTick: Long)(
+      implicit ec: ExecutionContext): Future[Option[Snapshot]] =
+    readSnapshot(id)
 
   protected def subscribe(id: ID)(callback: Update => Unit): Subscription = {
     val entryListener =

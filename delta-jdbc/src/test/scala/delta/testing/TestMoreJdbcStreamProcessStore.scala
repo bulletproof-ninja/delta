@@ -11,8 +11,6 @@ import scuff.jdbc.AsyncConnectionSource
 
 object TestMoreJdbcStreamProcessStore {
 
-  implicit def ec = RandomDelayExecutionContext
-
   implicit object ContactColumn extends ColumnType[Contact] {
     private val native = VarCharColumn(255 + Int.MinValue.toString.length)
     def typeName: String = native.typeName
@@ -31,13 +29,8 @@ object TestMoreJdbcStreamProcessStore {
     def readFrom(rs: ResultSet, col: Int) = EmailAddress(native.readFrom(rs, col))
   }
 
-  def EmailColumn = Nullable("contact_email")((contact: Contact) => Option(contact.email))
-  def NumColumn = NotNull("contact_number")((contact: Contact) => contact.num)
-
-  val indexColumns =
-    Index(EmailColumn) ::
-    Index(NumColumn) ::
-    Nil
+  def EmailColumn = NotNull("contact_email") { contact: Contact => contact.email }
+  def NumColumn = Nullable[Contact, Int]("contact_number") { case contact: Contact if contact.num > 0 => contact.num }
 
 }
 
@@ -46,14 +39,14 @@ extends TestMoreStreamProcessStore {
 
   import TestMoreJdbcStreamProcessStore._
 
-  abstract class ProcessStore(cs: AsyncConnectionSource, schema: String = null)
+  abstract class ProcessStore(
+    protected val connectionSource: AsyncConnectionSource,
+    schema: String = null)
   extends JdbcStreamProcessStore[Long, Contact, Contact](
-      Config(
-        pkColumn = "id",
-        table = s"contacts_${ju.UUID.randomUUID.toString.replace("-", "")}")
-        withVersion 1
-        withSchema schema,
-      cs,
-      indexColumns)
+      Table(s"contacts_${ju.UUID.randomUUID.toString.replace("-", "")}", schema = Option(schema))
+        withPrimaryKey "id"
+        withVersion 1,
+      Index(EmailColumn),
+      Index(NumColumn))
 
 }

@@ -3,20 +3,15 @@ package foo
 import delta.testing.TestStreamProcessStore
 import delta.redis._
 
-import org.junit._
 import delta.util.json
 import scuff.Codec
 import redis.clients.jedis.JedisPool
 import delta.process.StreamProcessStore
 
-object TestRedisStreamProcessStore {
-  val jedisProvider = new JedisProvider(new JedisPool)
-  val jsonStringCodec = Codec[String, String](str => s""""$str"""", jsonStr => jsonStr.substring(1, jsonStr.length - 1))
-}
-
 class TestRedisStreamProcessStore extends TestStreamProcessStore {
 
-  import TestRedisStreamProcessStore._
+  val jedisProvider = new JedisProvider(new JedisPool)
+  val jsonStringCodec = Codec[String, String](str => s""""$str"""", jsonStr => jsonStr.substring(1, jsonStr.length - 1))
 
   val snapshotVersion: Short = 1
 
@@ -28,13 +23,9 @@ class TestRedisStreamProcessStore extends TestStreamProcessStore {
       s"${getClass.getSimpleName}:$snapshotVersion", ec)(jedisProvider)
   }
 
-  @Before
-  def setup(): Unit = {
+  override def beforeEach(): Unit = {
+    super.beforeEach()
     jedisProvider(_.flushAll)
   }
 
-  @Test
-  def mock(): Unit = {
-
-  }
 }

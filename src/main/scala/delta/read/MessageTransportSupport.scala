@@ -11,9 +11,11 @@ extends SubscriptionSupport[ID, S, U] {
   protected type Topic = MessageTransport.Topic
   protected def Topic(name: String) = MessageTransport.Topic(name)
 
-  protected val transport: MessageTransport
+  protected type TransportType
+  protected def transportCodec: Codec[(StreamId, Update), TransportType]
+  protected val transport: MessageTransport[TransportType]
   protected def transportTopic: Topic
-  protected def transportCodec: Codec[(StreamId, Update), transport.TransportType]
+
   protected implicit lazy val encoder = transportCodec.encode _
   private[this] implicit lazy val decoder = transportCodec.decode _
 

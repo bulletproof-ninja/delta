@@ -23,11 +23,11 @@ object ReflectiveDecoder {
  * and returning an event.
  *
  * This is a convenience class to allow encoding and decoding of events
- * to be colocated, without the having to rely on symmetric traits.
+ * to be colocated, without having to rely on symmetric traits.
  * Encoder methods and decoder methods are matched upon instantiation, thus
  * will fail-fast at startup.
  */
-abstract class ReflectiveDecoder[EVT: ClassTag, SF <: Object: ClassTag] private (
+abstract class ReflectiveDecoder[EVT: ClassTag, SF <: AnyRef: ClassTag] private (
   decoderMatch: ReflectiveDecoder.DecoderMethodMatch,
   exclusiveChannel: Option[Channel])
 extends EventFormat[EVT, SF] {

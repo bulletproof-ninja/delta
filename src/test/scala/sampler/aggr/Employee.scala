@@ -19,7 +19,7 @@ case class PromoteEmployee(
 
 object Employee {
 
-  type State = delta.write.State[EmpState, EmpEvent]
+  type StateRef = delta.write.StateRef[EmpState, EmpEvent]
 
   def apply(cmd: RegisterEmployee): Employee = {
     val name = cmd.name.trim
@@ -28,23 +28,23 @@ object Employee {
     val title = cmd.title.trim
     require(title.length > 0)
     val emp = new Employee
-    emp.state(EmployeeRegistered(name, cmd.soch, cmd.dob, cmd.annualSalary, title))
+    emp.stateRef apply EmployeeRegistered(name, cmd.soch, cmd.dob, cmd.annualSalary, title)
     emp
   }
 
   object Def extends Entity("Employee", EmpProjector) {
     type Id = EmpId
     type Type = Employee
-    def init(state: State, concurrentUpdates: List[Transaction]) = new Employee(state)
-    def state(employee: Employee) = employee.state
+    def init(id: Id, state: StateRef, concurrentUpdates: List[Transaction]) = new Employee(state)
+    def StateRef(employee: Employee) = employee.stateRef
     def validate(state: EmpState) = require(state != null)
   }
 
 }
 
 class Employee private[aggr] (
-    private[aggr] val state: Employee.State = Employee.Def.newState()) {
-  @inline private def emp = state.get
+    private[aggr] val stateRef: Employee.StateRef = Employee.Def.newStateRef()) {
+  @inline private def emp = stateRef.get
 
   def apply(cmd: UpdateSalary): this.type =  {
     checkAndUpdateSalary(cmd.newSalary)
@@ -54,7 +54,7 @@ class Employee private[aggr] (
   private def checkAndUpdateSalary(newSalary: Int): Unit = {
     require(newSalary > 0)
     if (newSalary != emp.salary) {
-      state(EmployeeSalaryChange(newSalary))
+      stateRef apply EmployeeSalaryChange(newSalary)
     }
 
     assert(newSalary == emp.salary)
@@ -63,7 +63,7 @@ class Employee private[aggr] (
     val title = cmd.newTitle.trim
     require(title.length > 0)
     checkAndUpdateSalary(cmd.newSalary)
-    state(EmployeeTitleChange(title))
+    stateRef apply EmployeeTitleChange(title)
 
     assert(cmd.newSalary == emp.salary)
     assert(cmd.newTitle == emp.title)

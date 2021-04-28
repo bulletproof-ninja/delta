@@ -3,22 +3,22 @@ package delta.write
 import delta.Projector
 
 /**
-  * State wrapper. Encapsulates and transforms
+  * State reference. Encapsulates and transforms
   * immutable state by applying events.
   */
-final class State[S >: Null, EVT] private[write] (
+final class StateRef[S >: Null, EVT] private[write] (
     projector: Projector[S, EVT],
     private[this] var _state: S) {
 
   @inline // Just mutate, don't collect event
-  private[write] final def mutate(evt: EVT): Unit = reduce(evt)
+  private[write] final def mutate(evt: EVT): Unit = fold(evt)
   private[this] var _applied: List[EVT] = Nil
-  private[write] final def appliedEvents =
+  final def appliedEvents =
     if (_applied.isEmpty || _applied.tail.isEmpty) _applied
     else _applied.reverse
 
   @inline
-  private def reduce(evt: EVT): Unit = {
+  private def fold(evt: EVT): Unit = {
     _state = _state match {
       case null => projector.init(evt)
       case state => projector.next(state, evt)
@@ -30,7 +30,7 @@ final class State[S >: Null, EVT] private[write] (
     *  This will mutate state and collect event.
     */
   def apply(evt: EVT): Unit = {
-    reduce(evt)
+    fold(evt)
     _applied = evt :: _applied
   }
 

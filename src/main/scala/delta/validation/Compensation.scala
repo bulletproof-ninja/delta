@@ -20,7 +20,11 @@ trait Compensation[SID, S] {
   type Tick = delta.Tick
   type Snapshot = delta.Snapshot[S]
 
-  /** Given some state, issue compensating action, if needed. */
+  /**
+    * Given some snapshot state, issue compensating action, if needed.
+    * @return Map of stream ids that have been attempted compensation
+    * and the result, either a new revision, or failure.
+    */
   def ifNeeded(stream: SID, state: Snapshot)(
       implicit
       ec: ExecutionContext): Future[Map[SID, Try[Revision]]]

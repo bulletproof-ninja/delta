@@ -6,6 +6,7 @@ import delta.write._
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.control.NonFatal
 import scuff.concurrent.Threads.PiggyBack
+import scala.concurrent.Promise
 
 /**
   * [[delta.write.Repository]] wrapper for non-Event-source
@@ -17,6 +18,7 @@ abstract class PublishingRepository[ID, T <: AnyRef, EVT](
 extends Repository[ID, (T, List[EVT])]
 with ImmutableEntity {
 
+  implicit protected def ec = publishCtx
   protected def publish(id: ID, revision: Revision, events: List[EVT], metadata: Metadata): Unit
 
   private def publishEvents(id: ID, revision: Revision, events: List[EVT], metadata: Metadata): Unit = {
@@ -31,20 +33,24 @@ with ImmutableEntity {
   def exists(id: ID): Future[Option[Revision]] = impl.exists(id)
   def load(id: ID): Future[Loaded] = impl.load(id)
 
-  protected def update[R](
-      updateThunk: Loaded => Future[UT[R]],
-      id: ID, expectedRevision: Option[Revision])(
-      implicit
-      metadata: Metadata): Future[UM[R]] = {
-    @volatile var toPublish: List[EVT] = Nil
+  protected def update(
+      updateThunk: Loaded => Future[UpdateReturn],
+      id: ID, expectedRevision: Option[Revision])
+      : Future[Revision] = {
+    val toPublish = Promise[(List[EVT], Metadata)]()
     val updated = impl.update(id, expectedRevision) { loaded =>
       updateThunk(loaded).map {
-        case (result, events) =>
-          toPublish = events
-          result
+        case ((result, events), metadata) =>
+          toPublish success events -> metadata
+          result -> metadata
       }(PiggyBack)
     }
-    updated.foreach(publishEvents(id, _, toPublish, metadata))(publishCtx)
+    for {
+      rev <- updated
+      (events, metadata) <- toPublish.future
+    } {
+      publishEvents(id, rev, events, metadata)
+    }
     updated
   }
 

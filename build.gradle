@@ -1,44 +1,35 @@
 plugins {
-    id "com.jfrog.bintray" version '1.8.5'
     id 'com.adarshr.test-logger' version '2.1.1'
+    id 'com.github.maiflai.scalatest' version '0.29'
 }
 
 ext {
     getScalaFull = [
-        '2.11': '2.11.12',
-        '2.12': '2.12.12',
-        '2.13': '2.13.4'
+        '2.12': '2.12.15',
+        '2.13': '2.13.8'
     ]
 
     vScala = System.properties.scalaVersion ?: '2.13'
     vScalaFull = getScalaFull[vScala]
-    vScuff = '6.16.1'
-    vScalaTest = '3.0.6'
-    vSilencer = '1.7.1'
-}
-
-if (version == '') {
-    version = 'SNAPSHOT'
-}
-if (version == 'SNAPSHOT') {
-    version = tsVersion(version)
-}
-
-def tsVersion(version) {
-    java.text.SimpleDateFormat tsFmt = new java.text.SimpleDateFormat('yyMMddHHmm')
-    tsFmt.setCalendar(Calendar.getInstance(TimeZone.getTimeZone('UTC')))
-    return "${version}-b${tsFmt.format(new Date())}"
+    vScuff = '9.0.0-SNAPSHOT' //vScala == '2.13' ? 'SNAPSHOT-b2105241501' : 'SNAPSHOT-b2105241459'
+    vScalaTest = '3.2.2'
 }
 
 allprojects {
     repositories {
+        // jcenter()
+        mavenCentral()
+        maven {
+            url 'https://s01.oss.sonatype.org/content/repositories/snapshots/'
+        }
         mavenLocal()
         jcenter()
     }
 
     apply plugin: 'scala'
     apply plugin: 'maven-publish'
-    apply plugin: 'com.jfrog.bintray'
+    apply plugin: 'com.adarshr.test-logger'
+    apply plugin: 'com.github.maiflai.scalatest'
 
     sourceCompatibility = 1.8
     targetCompatibility = 1.8
@@ -53,15 +44,15 @@ allprojects {
 
     dependencies {
         compile "org.scala-lang:scala-reflect:$vScalaFull"
-        compile "org.scala-lang.modules:scala-collection-compat_$vScala:2.2.0"
+        compile "org.scala-lang.modules:scala-collection-compat_$vScala:2.7.0"
         testCompile "org.scala-lang:scala-reflect:$vScalaFull"
 
         testCompile "junit:junit:4.12"
         testCompile "org.slf4j:slf4j-simple:1.7.26"
+        testCompile "org.scalatest:scalatest_2.13:3.2.11"
+        testCompile "com.vladsch.flexmark:flexmark-all:0.62.2"
+        testCompile "io.scalaland:chimney_$vScala:0.6.1"
 
-        compileOnly "com.github.ghik:silencer-lib_$vScalaFull:$vSilencer"
-        testCompileOnly "com.github.ghik:silencer-lib_$vScalaFull:$vSilencer"
-        scalacPlugin "com.github.ghik:silencer-plugin_$vScalaFull:$vSilencer"
     }
 
     tasks.withType(Jar) {
@@ -78,6 +69,7 @@ allprojects {
     }
 
     jar {
+        version = properties.version ?: "0.0.1-SNAPSHOT"
         manifest {
             attributes "Implementation-Title": project.name, "Implementation-Version": version
         }
@@ -105,21 +97,8 @@ allprojects {
         }
     }
 
-    bintray {
-        user = System.properties.bintrayUser ?: "dryrun"
-        key = System.properties.bintrayKey ?: "dryrun"
-        dryRun = (user == "dryrun" || key == "dryrun" || version.contains('SNAPSHOT'))
-        publish = !dryRun
-        override = true
-        publications = ['maven']
-        pkg {
-            userOrg = System.properties.bintrayOrg ?: user
-            repo = "maven"
-            name = "Delta"
-        }
-    }
-
     test {
+        maxParallelForks = 1
         systemProperties System.properties
         testLogging {
             exceptionFormat = 'full'
@@ -140,7 +119,7 @@ subprojects {
 }
 
 wrapper {
-    gradleVersion = '6.7.1'
+    gradleVersion = '6.9'
 }
 
 project(':delta-cassandra') {
@@ -151,18 +130,19 @@ project(':delta-cassandra') {
 
 project(':delta-jdbc') {
     dependencies {
-        testCompile "com.h2database:h2:1.4.200"
+        testCompile "com.h2database:h2:2.1.210"
         testCompile "org.apache.derby:derby:10.12.1.1"
-        testCompile "mysql:mysql-connector-java:8.0.19"
+        testCompile "mysql:mysql-connector-java:8.0.23"
         testCompile "org.postgresql:postgresql:42.2.12"
         testCompile "com.microsoft.sqlserver:mssql-jdbc:7.2.2.jre8"
     }
 }
 
 project(':delta-hazelcast') {
+    def vHz = '3.12.12'
     dependencies {
-        compile "com.hazelcast:hazelcast:3.12.9"
-        testCompile "com.hazelcast:hazelcast-client:3.12.9"
+        compile "com.hazelcast:hazelcast:$vHz"
+        testCompile "com.hazelcast:hazelcast-client:$vHz"
         testCompile "com.hazelcast:hazelcast-scala_$vScala:3.12.1"
     }
 }
@@ -173,18 +153,16 @@ project(':delta-redis') {
     }
 }
 
-if (vScala != '2.11') {
-    project(':delta-java') {
-        dependencies {
-            testCompile project(":delta-jdbc")
-        }
+project(':delta-java') {
+    dependencies {
+        testCompile project(":delta-jdbc")
     }
 }
 
 project(':delta-mongodb') {
     dependencies {
-        compile "org.mongodb:mongodb-driver-async:3.12.1"
-        compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.8.0"
+        compile "org.mongodb:mongodb-driver-async:3.12.8"
+        // compile "org.mongodb.scala:mongo-scala-bson_$vScala:2.8.0"
         // compile "org.mongodb:mongodb-driver-reactivestreams:1.11.0"
     }
 }

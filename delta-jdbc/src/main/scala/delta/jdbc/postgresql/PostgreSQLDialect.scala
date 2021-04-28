@@ -9,6 +9,6 @@ import delta.jdbc._
 class PostgreSQLDialect[ID: ColumnType, EVT, SF: ColumnType](schema: String = null)
   extends delta.jdbc.Dialect[ID, EVT, SF](schema.optional) {
 
-  override def byteDataType = "SMALLINT"
+  override def eventVersionDataType = "SMALLINT"
 
 }

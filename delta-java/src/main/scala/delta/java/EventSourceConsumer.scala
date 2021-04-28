@@ -1,13 +1,13 @@
 package delta.java
 
 import delta.Tick
+import delta.process.ReplayProcessConfig
+import delta.process.LiveProcessConfig
 
 import java.util.Optional
 
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
-import delta.process.ReplayProcessConfig
-import delta.process.LiveProcessConfig
 
 /**
   * [[delta.process.PersistentConsumer]], adapted for Java.

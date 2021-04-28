@@ -23,6 +23,7 @@ extends StreamSerializer[delta.Transaction[Any, Any]] {
     val output = out match {
       case out: java.io.ObjectOutput => out
       case out: java.io.OutputStream => new ObjectOutputStream(out)
+      case _ => sys.error(s"Unexpected type: ${out.getClass}")
     }
     serializer.writeObject(tx, output)
   }
@@ -31,6 +32,7 @@ extends StreamSerializer[delta.Transaction[Any, Any]] {
     val input = inp match {
       case inp: java.io.ObjectInput => inp
       case inp: java.io.InputStream => new ObjectInputStream(inp)
+      case _ => sys.error(s"Unexpected type: ${inp.getClass}")
     }
     serializer.readObject[Any, Any](input) {
       case (tick, ch, id, rev, metadata, events) =>
@@ -60,7 +62,7 @@ trait UpdateSerializer
 extends StreamSerializer[Update[Any]] {
 
   def write(out: ObjectDataOutput, u: Update[Any]): Unit = {
-    out writeObject u.changed.orNull
+    out writeObject u.change.orNull
     out writeInt u.revision
     out writeLong u.tick
   }
@@ -185,8 +187,8 @@ extends StreamSerializer[IMapStreamProcessStore.Updater[Any, Any]] {
 }
 
 trait ConcurrentMapStoreValueSerializer
-extends StreamSerializer[delta.process.ConcurrentMapStore.State[Any]] {
-  type State = delta.process.ConcurrentMapStore.State[Any]
+extends StreamSerializer[delta.process.ReplayState[Any]] {
+  type State = delta.process.ReplayState[Any]
   def write(out: ObjectDataOutput, value: State): Unit = {
     out writeBoolean value.updated
     out writeObject value.snapshot.state
@@ -199,12 +201,6 @@ extends StreamSerializer[delta.process.ConcurrentMapStore.State[Any]] {
     new State(snapshot, updated)
   }
 
-}
-
-trait KeySnapshotProjectionSerializer
-extends StreamSerializer[KeySnapshotProjection.type] {
-  def write(out: ObjectDataOutput, value: KeySnapshotProjection.type): Unit = ()
-  def read(inp: ObjectDataInput): KeySnapshotProjection.type = KeySnapshotProjection
 }
 
 trait KeyTickProjectionSerializer

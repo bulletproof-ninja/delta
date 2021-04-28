@@ -13,6 +13,7 @@ import java.util.function.Consumer
 import scala.util.Failure
 import scala.util.control.NoStackTrace
 import scala.util.Try
+import scuff.concurrent._
 
 object ScalaHelp {
 
@@ -141,17 +142,22 @@ object ScalaHelp {
   def writeToStore[K, S, U](
       snapshots: java.util.Map[K, Snapshot[S]],
       batchSize: Int,
-      store: StreamProcessStore[K, S, U])(implicit ec: ExecutionContext): Future[Void] = {
-    require(batchSize > 0, s"Must have positive batch size, not $batchSize")
-    val futures: Iterator[Future[Unit]] =
-      if (batchSize == 1) {
+      store: StreamProcessStore[K, S, U])(implicit ec: ExecutionContext)
+      : Future[java.util.Map[K, Exception]] = {
+    require(batchSize > 0, s"Must have positive batch size, was $batchSize")
+
+    if (batchSize == 1) {
+      val futureWrites =
         snapshots.asScala.iterator.map {
-          case (key, snapshot) => store.write(key, snapshot)
+          case (key, snapshot) =>
+            key -> store.write(key, snapshot)
         }
-      } else {
-        snapshots.asScala.grouped(batchSize).map(store.writeBatch)
-      }
-    (Future sequence futures).map(_ => null: Void)
+      Future.sequenceTry(futureWrites)(_._2, _._1)
+    } else {
+      snapshots.asScala.grouped(batchSize)
+        .map(store.writeBatch)
+    }
+
   }
 
   def adapt[T](report: Consumer[T]): T => Unit = t => report.accept(t)

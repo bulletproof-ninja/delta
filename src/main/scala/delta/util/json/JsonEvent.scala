@@ -33,7 +33,7 @@ class JsonEvent[EVT, EF](evtFmt: EventFormat[EVT, EF])(
   def encode(evt: EVT): JSON = {
     val evtData: JSON = evtFmt encode evt
     (evtFmt signature evt) match {
-      case EventFormat.EventSig(evtName, EventFormat.NoVersion) =>
+      case EventFormat.EventSig(evtName, EventFormat.NotVersioned) =>
         s"""{"$nameField":"$evtName","$dataField":$evtData}"""
       case EventFormat.EventSig(evtName, evtVersion) =>
         s"""{"$nameField":"$evtName","$versionField":$evtVersion,"$dataField":$evtData}"""
@@ -44,7 +44,7 @@ class JsonEvent[EVT, EF](evtFmt: EventFormat[EVT, EF])(
     val evtName = jsObj(nameField).asStr.value
     val evtVersion = jsObj(versionField) match {
       case JsNum(num) => num.byteValue
-      case JsUndefined => EventFormat.NoVersion
+      case JsUndefined => EventFormat.NotVersioned
       case _ => ???
     }
     val evtData = jsObj(dataField)

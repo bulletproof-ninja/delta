@@ -9,7 +9,7 @@ import scala.util._
 import delta._
 import delta.process._
 
-class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null: ClassTag](
+class HzMonotonicProcessor[ID, EVT: ClassTag, S >: Null](
   es: EventSource[ID, _ >: EVT],
   imap: IMap[ID, _ <: EntryState[S, EVT]],
   getProjector: delta.Transaction[ID, _ >: EVT] => Projector[S, EVT],
@@ -21,7 +21,7 @@ extends (delta.Transaction[ID, _ >: EVT] => Future[EntryUpdateResult])
 with MissingRevisionsReplay[ID, EVT] {
 
   private[this] val replay =
-    replayMissingRevisions(es, Some(config.replayMissingDelay -> config.replayMissingScheduler)) _
+    replayMissingRevisions(es, config.onMissingRevision) _
 
   type Transaction = delta.Transaction[ID, _ >: EVT]
   def apply(tx: Transaction) = {

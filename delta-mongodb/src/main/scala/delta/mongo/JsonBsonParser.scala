@@ -2,22 +2,25 @@ package delta.mongo
 
 import org.bson._
 import org.bson.types.Decimal128
+import scuff.json.JsVal
 
 class JsonBsonParser(json: CharSequence, offset: Int = 0)
-  extends scuff.json.AbstractParser(json, offset) {
+extends scuff.json.AbstractParser(json, offset) {
 
   type JsVal = BsonValue
   type JsBool = BsonBoolean
   def True: JsBool = BsonBoolean.TRUE
   def False: JsBool = BsonBoolean.FALSE
   type JsObj = BsonDocument
-  def JsObj(m: Map[String, JsVal]): JsObj = m.foldLeft(new BsonDocument) {
-    case (doc, (key, value)) => doc.put(key, value); doc
-  }
+  def JsObj(m: Map[String, JsVal])(implicit config: JsVal.Config): JsObj =
+    m.foldLeft(new BsonDocument) {
+      case (doc, (key, value)) => doc.put(key, value); doc
+    }
   type JsArr = BsonArray
-  def JsArr(values: Seq[JsVal]): JsArr = values.foldLeft(new BsonArray) {
-    case (arr, value) => arr.add(value); arr
-  }
+  def JsArr(values: Seq[JsVal])(implicit config: JsVal.Config): JsArr =
+    values.foldLeft(new BsonArray) {
+      case (arr, value) => arr.add(value); arr
+    }
   type JsStr = BsonString
   def JsStr(s: String): JsStr = new BsonString(s)
   type JsNull = BsonNull

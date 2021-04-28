@@ -6,13 +6,12 @@ import scala.concurrent.duration.FiniteDuration
 /**
   * Replay process confguration.
   *
-  * @param finishProcessingTimeout
-  * If `true` will fail replay processing if there are
-  * incomplete streams once the `finishProcessingTimeout` is reached. Otherwise whatever
-  * state is available will be persisted, and the [[delta.processing.ReplayCompletion]]
-  * will be returned for any further mitigation. A stream is considered incomplete if there
-  * are missing revisions (typically `tickWindow` too small) or if there are errors in processing.
-  * Defaults to `true`.
+  * @param completionTimeout
+  * The time to wait for completion processing of remaining transactions,
+  * ''after'' all input has been exhausted.
+  *
+  * A stream is considered incomplete if there are missing revisions (typically
+  * `tickWindow` too small) or if there are errors in processing.
   *
   * @param writeBatchSize
   * The batch size used to persist replay state.
@@ -41,12 +40,22 @@ import scala.concurrent.duration.FiniteDuration
   * individually. Again, this will not affect correctness, but is ineffecient.
   *
   * Cannot be negative.
+  *
+  * Defaults to `MaxValue`, i.e. unbounded, which means that the entire event
+  * source history is consumed. This is likely to get ineffecient over time, but
+  * is a very safe default.
+  *
+  * @param maxBlockingQueueSize
+  * If processing is slow, it can be overwhelmed by data, leading to OOM errors.
+  * By settings a maximum queue size, the producer will be blocked instead of
+  * running out of memory.
   */
 final case class ReplayProcessConfig(
-  finishProcessingTimeout: FiniteDuration,
+  completionTimeout: FiniteDuration,
   writeBatchSize: Int,
   writeTickOrdered: Boolean = true,
-  tickWindow: Int = Int.MaxValue) {
+  tickWindow: Int = Int.MaxValue,
+  maxBlockingQueueSize: Int = Int.MaxValue) {
 
   require(writeBatchSize >= 1, s"Must have sensible batch size, not: $writeBatchSize")
   require(tickWindow >= 0, s"Cannot have negative tick window: $tickWindow")
@@ -62,6 +71,4 @@ final case class ReplayProcessConfig(
     }
   }
 
-
-
-  }
+}

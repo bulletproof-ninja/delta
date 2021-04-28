@@ -1,6 +1,5 @@
 package delta_testing
 
-import org.junit._, Assert._
 import delta.mongo._
 import delta.testing._
 import org.bson._
@@ -10,19 +9,21 @@ import scuff.EmailAddress
 
 import com.mongodb.async.client._
 
-object TestMoreMongoStreamProcessStore {
+class TestMoreMongoStreamProcessStore
+extends TestMoreStreamProcessStore {
+  import TestMoreStreamProcessStore._
 
-  implicit val ec = RandomDelayExecutionContext
 
   @volatile private var client: MongoClient = _
 
-  @BeforeClass
-  def setupClass(): Unit = {
+  override def beforeAll(): Unit = {
+    super.beforeAll()
     client = MongoClients.create()
   }
-  @AfterClass
-  def teardownClass(): Unit = {
+
+  override def afterAll(): Unit = {
     client.close()
+    super.afterAll()
   }
 
   def ContactRef = "contact"
@@ -32,17 +33,10 @@ object TestMoreMongoStreamProcessStore {
   def SearchEmailPath = s"$ContactRef.$SearchEmailField"
   def SearchNumPath = s"$ContactRef.$NumField"
 
-}
-
-class TestMoreMongoStreamProcessStore
-extends TestMoreStreamProcessStore {
-  import TestMoreStreamProcessStore._
-  import TestMoreMongoStreamProcessStore._
-
   private var coll: MongoCollection[BsonDocument] = _
 
-  @Before
-  def setup(): Unit = {
+  override def beforeEach(): Unit = {
+    super.beforeEach()
     val collName = s"contacts-${ju.UUID.randomUUID}"
     coll =
       client
@@ -51,9 +45,9 @@ extends TestMoreStreamProcessStore {
       .withDocumentClass(classOf[BsonDocument])
   }
 
-  @After
-  def teardown(): Unit = {
+  override def afterEach(): Unit = {
     withBlockingCallback[Void]()(coll.drop(_))
+    super.afterEach()
   }
 
 
@@ -95,8 +89,4 @@ extends TestMoreStreamProcessStore {
     }
   }.ensureIndexes()
 
-  @Test
-  def mock(): Unit = {
-    assertTrue(true)
-  }
 }

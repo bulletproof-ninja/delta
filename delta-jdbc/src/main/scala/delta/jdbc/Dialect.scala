@@ -7,19 +7,26 @@ import delta._
 import scala.util.Try
 
 class DefaultDialect[ID: ColumnType, EVT, SF: ColumnType](schema: String = null)
-  extends Dialect[ID, EVT, SF](schema.optional)
+extends Dialect[ID, EVT, SF](schema.optional)
 
 private[jdbc] object Dialect {
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = {
     sqlEx.isInstanceOf[SQLIntegrityConstraintViolationException] ||
-      Option(sqlEx.getSQLState).exists(_ startsWith "23")
+      Option(sqlEx).map(_.getSQLState).exists(_ startsWith "23") || {
+        Option(sqlEx).map(_.getCause) match {
+          case Some(sqlEx: SQLException) => isDuplicateKeyViolation(sqlEx)
+          case _ => false
+        }
+      }
   }
 
   def executeDDL(conn: Connection, ddl: String): Unit = {
     val stm = conn.createStatement()
     try stm.execute(ddl) catch {
       case cause: SQLException =>
-        throw new SQLException(s"Failed to execute DDL: $ddl", cause.getSQLState, cause.getErrorCode, cause)
+        val sqlState = cause.getSQLState()
+        val errCode = cause.getErrorCode()
+        throw new SQLException(s"Failed (state:$sqlState, err:$errCode) to execute DDL:\n${ddl.trim}", cause.getSQLState, cause.getErrorCode, cause)
     } finally stm.close()
   }
 
@@ -27,8 +34,8 @@ private[jdbc] object Dialect {
 
 }
 
-protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
-    final val schema: Option[String]) {
+class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected (
+  final val schema: Option[String]) {
 
   import Dialect.executeDDL
 
@@ -39,24 +46,29 @@ protected class Dialect[ID: ColumnType, EVT, SF: ColumnType] protected[jdbc] (
 
   def isDuplicateKeyViolation(sqlEx: SQLException): Boolean = Dialect.isDuplicateKeyViolation(sqlEx)
 
+  protected def tablesPrefix = "delta_"
+
   private[this] val _schemaPrefix = schema.map(_ + ".") getOrElse ""
   protected def schemaPrefix = _schemaPrefix
-  private[this] val _streamTable = s"${schemaPrefix}delta_stream"
-  protected def streamTable = _streamTable
-  private[this] val _transactionTable = s"${schemaPrefix}delta_transaction"
-  protected def transactionTable = _transactionTable
-  private[this] val _eventTable = s"${schemaPrefix}delta_event"
-  protected def eventTable = _eventTable
-  private[this] val _metadataTable = s"${schemaPrefix}delta_metadata"
-  protected def metadataTable = _metadataTable
-  private[this] val _channelIndex = s"${streamTable.replace(".", "_")}_channel_idx"
-  protected def channelIndex = _channelIndex
-  private[this] val _eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
-  protected def eventNameIndex = _eventNameIndex
-  private[this] val _tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
-  protected def tickIndex = _tickIndex
 
-  protected def byteDataType = "TINYINT"
+  private[this] val _streamTable = s"${schemaPrefix}${tablesPrefix}stream"
+  protected def streamTable = _streamTable
+
+  private[this] val _transactionTable = s"${schemaPrefix}${tablesPrefix}transaction"
+  protected def transactionTable = _transactionTable
+
+  private[this] val _eventTable = s"${schemaPrefix}${tablesPrefix}event"
+  protected def eventTable = _eventTable
+
+  private[this] val _metadataTable = s"${schemaPrefix}${tablesPrefix}metadata"
+  protected def metadataTable = _metadataTable
+
+  protected def channelIndex = s"${streamTable.replace(".", "_")}_channel_idx"
+  protected def eventNameIndex = s"${eventTable.replace(".", "_")}_event_idx"
+  protected def tickIndex = s"${transactionTable.replace(".", "_")}_tick_idx"
+
+  protected def eventIndexDataType = "SMALLINT"
+  protected def eventVersionDataType = "TINYINT"
 
   protected def schemaDDL(name: String): String = Dialect.schemaDDL(name)
   def createSchema(conn: Connection): Unit = schema.foreach(schema => executeDDL(conn, schemaDDL(schema)))
@@ -68,7 +80,7 @@ CREATE TABLE IF NOT EXISTS $streamTable (
 
   PRIMARY KEY (stream_id)
 )
-  """
+"""
   def createStreamTable(conn: Connection): Unit = executeDDL(conn, streamTableDDL)
 
   protected def channelIndexDDL: String = s"""
@@ -102,9 +114,9 @@ CREATE INDEX IF NOT EXISTS $tickIndex
 CREATE TABLE IF NOT EXISTS $eventTable (
   stream_id ${idType.typeName} NOT NULL,
   revision INT NOT NULL,
-  event_idx $byteDataType NOT NULL,
+  event_idx $eventIndexDataType NOT NULL,
   event_name $eventNameType NOT NULL,
-  event_version $byteDataType NOT NULL,
+  event_version $eventVersionDataType NOT NULL,
   event_data ${sfType.typeName} NOT NULL,
 
   PRIMARY KEY (stream_id, revision, event_idx),
@@ -303,7 +315,7 @@ $WHERE
 ORDER BY e.stream_id, e.revision, e.event_idx
 """
 
-  def selectTransactionsByChannels(channels: Set[Channel], sinceTick: Tick = Long.MinValue)(
+  private[jdbc] def selectTransactionsByChannels(channels: Set[Channel], sinceTick: Tick = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -323,7 +335,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
       }
     }
   }
-  def selectTransactionsByEvents(eventsByChannel: Map[Channel, Set[Class[_ <: EVT]]], sinceTick: Tick = Long.MinValue)(
+  private[jdbc] def selectTransactionsByEvents(eventsByChannel: Map[Channel, Set[Class[_ <: EVT]]], sinceTick: Tick = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection, evtFmt: EventFormat[EVT, SF]): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -348,7 +360,7 @@ ORDER BY e.stream_id, e.revision, e.event_idx
       }
     }
   }
-  def selectTransactions(sinceTick: Tick = Long.MinValue)(
+  private[jdbc] def selectTransactions(sinceTick: Tick = Long.MinValue)(
       thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val tickBound = sinceTick != Long.MinValue
@@ -395,7 +407,7 @@ ORDER BY e.revision, e.event_idx
 """
 
   private val streamQueryFull = makeStreamQuery()
-  def selectStreamFull(stream: ID)(thunk: (ResultSet, Columns) => Unit)(
+  private[jdbc] def selectStreamFull(stream: ID)(thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     conn.prepare(streamQueryFull) { ps =>
       ps.setValue(1, stream)
@@ -406,7 +418,7 @@ ORDER BY e.revision, e.event_idx
   }
 
   private val streamQuerySingleRevision = makeStreamQuery("AND t.revision = ?")
-  def selectStreamRevision(stream: ID, revision: Revision)(thunk: (ResultSet, Columns) => Unit)(
+  private[jdbc] def selectStreamRevision(stream: ID, revision: Revision)(thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     conn.prepare(streamQuerySingleRevision) { ps =>
       ps.setValue(1, stream)
@@ -418,7 +430,7 @@ ORDER BY e.revision, e.event_idx
   }
   private val streamQueryRevisionRange = makeStreamQuery("AND t.revision BETWEEN ? AND ?")
   private val streamQueryFromRevision = makeStreamQuery("AND t.revision >= ?")
-  def selectStreamRange(stream: ID, range: Range)(thunk: (ResultSet, Columns) => Unit)(
+  private[jdbc] def selectStreamRange(stream: ID, range: Range)(thunk: (ResultSet, Columns) => Unit)(
       implicit conn: Connection): Unit = {
     val bounded = range.last != Int.MaxValue
     val query = if (bounded) streamQueryRevisionRange else streamQueryFromRevision

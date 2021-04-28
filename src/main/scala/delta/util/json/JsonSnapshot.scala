@@ -43,9 +43,9 @@ extends Codec[Snapshot[T], JSON] {
 
   private[json] def decode(ast: JsObj): Snapshot[T] = {
     val tick = ast.tick.asNum
-    val revision = ast.revision getOrElse JsNum(-1)
+    val revision = ast.revision || JsNum(-1)
     val content = contentJsonCodec decode ast(contentFieldName).toJson
-    new Snapshot(content, revision.toInt, tick.toLong)
+    new Snapshot(content, revision, tick)
   }
 
 }

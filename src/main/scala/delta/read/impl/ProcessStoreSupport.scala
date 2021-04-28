@@ -6,12 +6,12 @@ import scala.concurrent.Future
 import delta.{ Revision, Tick }
 import delta.process.StreamProcessStore
 
-private[impl] trait ProcessStoreSupport[ID, ESID, Work >: Null, Stored, U] {
-  rm: EventSourceReadModel[ID, ESID, _, Work, Stored] =>
+private[impl] trait ProcessStoreSupport[ID, SID, InUse >: Null, AtRest, U] {
+  rm: EventSourceReadModel[ID, SID, _, InUse, AtRest] =>
 
-  protected def processContext(id: ESID): ExecutionContext
-  protected def processStore: StreamProcessStore[StreamId, Stored, U]
-  protected def name = processStore.name
+  protected def processContext(id: SID): ExecutionContext
+  protected def processStore: StreamProcessStore[StreamId, AtRest, U]
+  def name = processStore.name
 
   private type Update = delta.process.Update[U]
 

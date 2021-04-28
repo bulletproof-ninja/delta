@@ -11,6 +11,7 @@ class JavaEnumCodec[E <: java.lang.Enum[E]]()(implicit tag: ClassTag[E]) extends
     private[this] val byName =
       getEncoderClass.getEnumConstants.foldLeft(Map.empty[String, E]) {
         case (map, enum: E) => map.updated(enum.name, enum)
+        case _ => ???
       }
     def encode(writer: BsonWriter, value: E, encoderContext: EncoderContext): Unit = {
       stringCodec.encode(writer, value.name, encoderContext)

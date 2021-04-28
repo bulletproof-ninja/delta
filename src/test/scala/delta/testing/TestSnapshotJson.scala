@@ -1,6 +1,5 @@
 package delta.testing
 
-import org.junit._, Assert._
 import scuff.Codec
 import scuff.json._
 import delta.util.json._
@@ -20,7 +19,8 @@ case class Baz(number: Int, string: String, bool: Boolean, obj: String = null)(v
 
 }
 
-class TestSnapshotJson {
+class TestSnapshotJson
+extends BaseTest {
 
   object BazCodec extends Codec[Baz, String] {
     def encode(foo: Baz): String = {
@@ -32,8 +32,8 @@ class TestSnapshotJson {
     }
     def decode(json: String): Baz = {
       val foo = (JsVal parse json).asObj
-      val obj = foo.obj getOrElse JsStr(null)
-      val bool = foo.bool getOrElse JsBool.False
+      val obj = foo.obj || JsStr(null)
+      val bool = foo.bool || JsBool.False
       Baz(
         foo.number.asNum.toInt,
         foo.string.asStr.value,
@@ -42,8 +42,7 @@ class TestSnapshotJson {
     }
   }
 
-  @Test
-  def transpose(): Unit = {
+  test("transpose") {
     val snapshot = Snapshot(Option("Hello"), 1, 1)
     snapshot.transpose match {
       case Some(Snapshot("Hello", 1, 1)) => // as expected
@@ -51,36 +50,33 @@ class TestSnapshotJson {
     }
   }
 
-  @Test
-  def zeros(): Unit = {
+  test("zeros") {
     val codec = new JsonSnapshot(BazCodec, "foo")
     val snapshot = Snapshot(new Baz(42, "JSON", true)(Array("hello", "world")), 0, 0)
     val json = codec encode snapshot
     //    println(json)
-    assertEquals("""{"tick":0,"revision":0,"foo":{"number":42,"string":"JSON","bool":true,"list":["hello","world"]}}""", json)
+    assert("""{"tick":0,"revision":0,"foo":{"number":42,"string":"JSON","bool":true,"list":["hello","world"]}}""" === json)
     val snapshot2 = codec decode json
-    assertEquals(snapshot, snapshot2)
+    assert(snapshot === snapshot2)
   }
 
-  @Test
-  def max(): Unit = {
+  test("max") {
     val codec = new JsonSnapshot(BazCodec, "foo")
     val snapshot = Snapshot(new Baz(42, "JSON", false, "")(Array("hello", "world")), Int.MaxValue, Long.MaxValue)
     val json = codec encode snapshot
     //    println(json)
-    assertEquals(s"""{"tick":${Long.MaxValue},"revision":${Int.MaxValue},"foo":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""", json)
+    assert(s"""{"tick":${Long.MaxValue},"revision":${Int.MaxValue},"foo":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""" === json)
     val snapshot2 = codec decode json
-    assertEquals(snapshot, snapshot2)
+    assert(snapshot === snapshot2)
   }
 
-  @Test
-  def min(): Unit = {
+  test("min") {
     val codec = new JsonSnapshot(BazCodec, "foo")
     val snapshot = Snapshot(new Baz(42, "JSON", false, "")(Array("hello", "world")), Int.MinValue, Long.MinValue)
     val json = codec encode snapshot
-    assertEquals(s"""{"tick":${Long.MinValue},"foo":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""", json)
+    assert(s"""{"tick":${Long.MinValue},"foo":{"number":42,"string":"JSON","obj":"","list":["hello","world"]}}""" === json)
     val snapshot2 = codec decode json
-    assertEquals(snapshot.copy(revision = -1), snapshot2)
+    assert(snapshot.copy(revision = -1) === snapshot2)
   }
 
   private def testSnapshotUpdate(bazCodec: Codec[Baz, String], updated: Boolean): Unit = {
@@ -89,23 +85,20 @@ class TestSnapshotJson {
     val update999 = new Update(snapshot, updated)
     val update999Json = updateCodec encode update999
     val update999_2 = updateCodec decode update999Json
-    assertEquals(update999, update999_2)
+    assert(update999 === update999_2)
   }
 
-  @Test
-  def snapshotUpdate(): Unit = {
+  test("snapshotUpdate") {
     testSnapshotUpdate(BazCodec, true)
     testSnapshotUpdate(BazCodec, false)
   }
 
-  @Test
-  def snapshotUpdateArrayCodec(): Unit = {
+  test("snapshotUpdateArrayCodec") {
     testSnapshotUpdate(BazCodec, true)
     testSnapshotUpdate(BazCodec, false)
   }
 
-  @Test
-  def snapshotUpdateObjCodec(): Unit = {
+  test("snapshotUpdateObjCodec") {
     testSnapshotUpdate(BazCodec, true)
     testSnapshotUpdate(BazCodec, false)
   }

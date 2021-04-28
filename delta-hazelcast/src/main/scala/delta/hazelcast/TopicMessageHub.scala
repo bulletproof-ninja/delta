@@ -18,10 +18,10 @@ object TopicMessageTransport {
       hz: HazelcastInstance)(
       topic: Topic): ITopic[M] = hz.getTopic[M](topic.toString)
 
-  def apply[ID, U](
+  def forUpdates[ID, U](
       hz: HazelcastInstance,
       publishCtx: ExecutionContext)
-      : MessageTransport { type TransportType = (ID, Update[U]) } =
+      : MessageTransport[(ID, Update[U])] =
     new TopicMessageTransport(hz, publishCtx)
 
 }
@@ -35,18 +35,16 @@ object TopicMessageTransport {
  * @param messageCodec Message translation codec
  */
 class TopicMessageTransport[M](
-    getITopic: MessageTransport.Topic => ITopic[M],
-    protected val publishCtx: ExecutionContext)
-  extends MessageTransport {
+  getITopic: MessageTransport.Topic => ITopic[M],
+  protected val publishCtx: ExecutionContext)
+extends MessageTransport[M] {
 
   def this(
       hz: HazelcastInstance,
       publishCtx: ExecutionContext) =
     this(TopicMessageTransport.getITopic[M](hz) _, publishCtx)
 
-  type TransportType = M
-
-  protected def publish(msg: TransportType, topic: Topic) = blocking {
+  protected def publish(msg: M, topic: Topic) = blocking {
     getITopic(topic).publish(msg)
   }
 

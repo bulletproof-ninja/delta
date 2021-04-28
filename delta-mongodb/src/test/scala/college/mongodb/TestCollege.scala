@@ -1,15 +1,11 @@
 package college.mongodb
 
-import org.junit._, Assert._
-
 import college._
 import college.validation.EmailValidationProcessStore
 import college.validation.EmailValidationProcess.State
 
-import delta.testing.RandomDelayExecutionContext
 import delta.mongo._
 import delta.util.LocalTransport
-import delta.MessageTransportPublishing
 import delta.validation.ConsistencyValidation
 
 import org.bson._
@@ -20,9 +16,12 @@ import scala.jdk.CollectionConverters._
 import scala.collection.compat._
 
 import scuff.EmailAddress
+import delta.{EventStore, MessageTransport}
+import delta.Channel
+import delta.LamportTicker
 
+class TestCollege extends college.TestCollege {
 
-object TestCollege {
   import com.mongodb.async.client._
   import org.bson.Document
 
@@ -51,8 +50,8 @@ object TestCollege {
   var emailColl: MongoCollection[BsonDocument] = _
   private var client: MongoClient = _
 
-  @BeforeClass
-  def setupClass(): Unit = {
+  override def beforeAll(): Unit = {
+    super.beforeAll()
     val settings = com.mongodb.MongoClientSettings.builder().build()
     client = MongoClients.create(settings)
     val ns = new MongoNamespace("unit-testing", getClass.getName.replaceAll("[\\.\\$]+", "_"))
@@ -63,21 +62,17 @@ object TestCollege {
       .withDocumentClass(classOf[BsonDocument])
 
   }
-  @AfterClass
-  def teardownClass(): Unit = {
+  override def afterAll(): Unit = {
+    super.afterAll()
     withBlockingCallback[Void]()(esColl.drop(_))
     withBlockingCallback[Void]()(emailColl.drop(_))
     client.close()
   }
-}
 
-class TestCollege extends college.TestCollege {
-  import TestCollege._
-
-  @After
-  def dropColl(): Unit = {
+  override def afterEach(): Unit = {
     withBlockingCallback[Void]()(esColl.drop(_))
     withBlockingCallback[Void]()(emailColl.drop(_))
+    super.afterEach()
   }
 
   def EvtFormat = CollegeEventFormat.adapt[BsonValue]
@@ -92,21 +87,25 @@ class TestCollege extends college.TestCollege {
     }
   }.ensureIndexes()
 
-  override def newEventStore(): CollegeEventStore = {
-    new MongoEventStore[Int, CollegeEvent](esColl, EvtFormat)(initTicker)
-    with MessageTransportPublishing[Int, CollegeEvent]
+  override def newEventStore[MT](
+      allChannels: Set[Channel.Type],
+      txTransport: MessageTransport[MT])(
+      implicit
+      encode: Transaction => MT,
+      decode: MT => Transaction) = {
+
+    new MongoEventStore[Int, CollegeEvent](esColl, EvtFormat)
     with ConsistencyValidation[Int, CollegeEvent] {
-      def toTopic(ch: Channel) = Topic(ch.toString)
-      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txChannels = Set(college.semester.Semester.channel, college.student.Student.channel)
-      val txCodec = scuff.Codec.noop[Transaction]
-      def validationContext(stream: Int): ExecutionContext = RandomDelayExecutionContext
+      lazy val ticker = LamportTicker.subscribeTo(this)
+      def validationContext(stream: Int): ExecutionContext = ec
+      def publishCtx = ec
+      def subscribeGlobal[U](selector: StreamsSelector)(callback: Transaction => U) =
+        subscribeLocal(selector)(callback)
+      // type TransportType = MT
+      // val transport = txTransport
+      // val txTransportChannels = Set(college.semester.Channel, college.student.Channel)
+      // val txTransportCodec = scuff.Codec(encode, decode)
     }
   }.ensureIndexes()
-
-  @Test
-  def mock(): Unit = {
-    assertTrue(true)
-  }
 
 }

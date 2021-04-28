@@ -12,19 +12,18 @@ import delta.process._
 
 import scuff.jdbc.AsyncConnectionSource
 
-
 /**
  * Keep history of all snapshots generated,
  * to ensure a complete audit trail.
  */
 class JdbcStreamProcessHistory[ID: ColumnType, S: ColumnType, U](
-    protected val cs: AsyncConnectionSource,
-    version: Short, withTimestamp: TimestampColumn,
+    protected val connectionSource: AsyncConnectionSource,
+    version: Short, withTimestamp: UpdateTimestamp,
     pkColName: String, table: String,
     schema: Option[String] = None)(
     implicit
     protected val updateCodec: UpdateCodec[S, U])
-  extends AbstractJdbcStore(Some(version), table, schema)
+  extends AbstractJdbcStore(Some(version), schema.map(_ concat s".$table") getOrElse table.trim, schema)
   with StreamProcessStore[ID, S, U]
   with BlockingCASWrites[ID, S, U, Connection] {
 
@@ -91,7 +90,7 @@ AND t.tick = (
   protected def createTickIndex(conn: Connection): Unit = createIndex(conn, createTickIndexDDL)
 
   protected def readForUpdate[R](key: ID)(thunk: (Connection, Option[Snapshot]) => R): Future[R] = {
-    cs.asyncUpdate { conn =>
+    connectionSource.asyncUpdate { conn =>
       val existing = getOne(conn, key)
       thunk(conn, existing)
     }

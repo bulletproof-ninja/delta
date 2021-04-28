@@ -12,6 +12,18 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+  * Basic subscription support, with implementation
+  * of conditional (revision or tick) and continuous reads.
+  *
+  * @see [[delta.read.MessageHubSupport]] for subscription
+  * implementation using a [[delta.MessageHub]]
+  * @see [[delta.read.MessageTransportSupport]] for lower level
+  * subscription implementation using a [[delta.MessageTransport]]
+  * @tparam ID The instance identifier
+  * @tparam S The instance type
+  * @tparam U The update type
+  */
 trait SubscriptionSupport[ID, S, U]
 extends StreamId {
   rm: ReadModel[ID, S] =>
@@ -35,15 +47,25 @@ extends StreamId {
   /** Update subscription stub. */
   protected def subscribe(id: ID)(callback: Update => Unit): Subscription
 
+  def read(id: ID, timeout: FiniteDuration)(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] =
+    readMin(id, timeout)
+
+  def read(id: ID, timeout: Option[FiniteDuration])(
+      implicit
+      ec: ExecutionContext): Future[Snapshot] =
+    readMin(id, timeout getOrElse defaultReadTimeout)
+
   def read(id: ID, minTick: Tick)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
-    read(id, minTick, defaultReadTimeout)
+    readMin(id, defaultReadTimeout, minTick = minTick)
 
   def read(id: ID, minRevision: Revision)(
       implicit
       ec: ExecutionContext): Future[Snapshot] =
-    read(id, minRevision, defaultReadTimeout)
+    readMin(id, defaultReadTimeout, minRevision = minRevision)
 
   /**
    * Read snapshot, ensuring it's at least the given revision,
@@ -75,8 +97,8 @@ extends StreamId {
    * Read snapshot, ensuring it's at least the given tick,
    * waiting the supplied timeout if current is too old.
    * @param id The read identifier
-   * @param afterTick The tick value the snapshot must succeed
-   * @param timeout Lookup timeout. This timeout is only used if `afterTick` doesn't match
+   * @param minTick The tick value the snapshot must succeed
+   * @param timeout Lookup timeout. This timeout is only used if `minTick` doesn't match
    * @return Snapshot >= `minTick` or [[delta.read.ReadRequestFailure]] cannot fullfil
    */
   def read(id: ID, minTick: Tick, timeout: FiniteDuration)(
@@ -88,7 +110,7 @@ extends StreamId {
    * Read snapshot, ensuring it's at least the given tick,
    * waiting the supplied or default timeout if current is too old.
    * @param id The read identifier
-   * @param afterTick The tick value the snapshot must succeed
+   * @param minTick The tick value the snapshot must succeed
    * @param timeout Optional alternate timeout.
    * @return Snapshot >= `minTick` or [[delta.read.ReadRequestFailure]] cannot fullfil
    */
@@ -191,17 +213,16 @@ extends StreamId {
   }
 
   /**
-    * Second read, to ensure closing race condition gap.
-    * @note Defaults to reading snapshot. Override if better
-    * implementation is available.
+    * Second read, to ensure closing race condition gap. If
+    * possible, this read should be more thorough with respect
+    * to the provided minimum revision/tick arguments.
     * @param id identifier
     * @param minRevision The minimum revision expected. Provided as a hint, can be ignored.
     * @param minTick The minimum tick expected. Provided as a hint, can be ignored.
     */
   protected def readAgain(id: ID, minRevision: Revision, minTick: Tick)(
       implicit
-      ec: ExecutionContext): Future[Option[Snapshot]] =
-    readSnapshot(id)
+      ec: ExecutionContext): Future[Option[Snapshot]]
 
   private def readMin(
       id: ID, timeout: FiniteDuration, minRevision: Revision = -1, minTick: Tick = Long.MinValue)(
@@ -216,15 +237,37 @@ extends StreamId {
       }
 
       def readAgain(promise: Promise[Snapshot]): Unit = {
-
         this.readAgain(id, minRevision, minTick) andThen {
           case Success(Some(snapshot)) if expected(snapshot.revision, snapshot.tick) =>
             promise trySuccess snapshot
           case Failure(th) =>
             promise tryFailure th
         }
-
       }
+      def onSubscriptionUpdate(
+          promise: Promise[Snapshot],
+          maybeSnapshot: Option[Snapshot])(
+          update: Update): Unit =
+        if (expected(update.revision, update.tick)) {
+          val snapshotRev = maybeSnapshot.map(_.revision) getOrElse -1
+          val updSnapshot = {
+            if (snapshotRev != update.revision - 1) None // Cannot reliably update, if not monotonic
+            else update.change match {
+              case Some(updated) =>
+                updateState(id, maybeSnapshot.map(_.state), updated)
+                  .map(s => new Snapshot(s, update.revision, update.tick))
+              case _ => // No content change
+                maybeSnapshot
+                  .map(_.copy(revision = update.revision, tick = update.tick))
+            }
+          }
+          updSnapshot match {
+            case Some(snapshot) =>
+              promise trySuccess snapshot
+            case None =>
+              readAgain(promise)
+          }
+        }
 
     readSnapshot(id) flatMap {
       case Some(snapshot) if expected(snapshot.revision, snapshot.tick) =>
@@ -234,28 +277,7 @@ extends StreamId {
           Future failed Timeout(id, maybeSnapshot, minRevision, minTick, timeout)
         } else {
           val promise = Promise[Snapshot]()
-          val subscription = this.subscribe(id) { update =>
-            if (expected(update.revision, update.tick)) {
-              val snapshotRev = maybeSnapshot.map(_.revision) getOrElse -1
-              val updSnapshot = {
-                if (snapshotRev != update.revision - 1) None // Cannot reliably update, if not monotonic
-                else update.changed match {
-                  case Some(updated) =>
-                    updateState(id, maybeSnapshot.map(_.state), updated)
-                      .map(s => new Snapshot(s, update.revision, update.tick))
-                  case _ => // No content change
-                    maybeSnapshot
-                      .map(_.copy(revision = update.revision, tick = update.tick))
-                }
-              }
-              updSnapshot match {
-                case Some(snapshot) =>
-                  promise trySuccess snapshot
-                case None =>
-                  readAgain(promise)
-              }
-            }
-          }
+          val subscription = this.subscribe(id) { onSubscriptionUpdate(promise, maybeSnapshot) }
           promise.future onComplete { _ => subscription.cancel() }
           scheduler.schedule(timeout) {
             if (!promise.isCompleted) {
@@ -290,10 +312,11 @@ extends StreamId {
       }
 
     val timeout = if (readTimeout != null) readTimeout else defaultReadTimeout
-    val timeoutTask = scheduler.schedule(timeout) {
-      p tryFailure
-        new Timeout(id, timeout, s"$rmName: Custom read for $id timed out after $timeout")
-    }
+    val timeoutTask =
+      scheduler.schedule(timeout) {
+        p tryFailure
+          new Timeout(id, timeout, s"$name: Custom read for `$id` timed out after $timeout")
+      }
 
     p.future.andThen {
       case _ =>
@@ -303,33 +326,32 @@ extends StreamId {
 
   }
 
-  private lazy val rmName = s"${classOf[ReadModel[_, _]].getSimpleName}{${this.name}}"
-
   private def Timeout(
       id: ID, snapshot: Option[Snapshot],
       minRevision: Revision, minTick: Tick, timeout: FiniteDuration): ReadRequestFailure = {
     snapshot match {
       case None =>
-        val errMsg = s"$rmName: Failed to read `$id` within timeout of $timeout"
+        val errMsg = s"$name: Failed to read `$id` before timeout of $timeout (does not exist)"
         new Timeout(id, timeout, errMsg) with UnknownIdRequested
-      case Some(snapshot) =>
+      case Some(Snapshot(_, revision, tick)) =>
         assert(minRevision != -1 || minTick != Long.MinValue)
         val revText = if (minRevision != -1) s"revision >= $minRevision" else ""
         val tickText = if (minTick != Long.MinValue) s"tick >= $minTick" else ""
-        val failedCondition =
-          if (revText == "") tickText
-          else if (tickText == "") revText
-          else s"BOTH $revText AND $tickText"
-        val errMsg = s"$rmName: Failed to read $id expecting $failedCondition within timeout of $timeout"
+        val (failedCondition, stuckAt) =
+          if (revText == "") tickText -> s"stuck at tick $tick"
+          else if (tickText == "") revText -> s"stuck at revision $revision"
+          else s"BOTH $revText AND $tickText" -> s"stuck at revision $revision / tick $tick"
+        val errMsg = s"$name: Failed to read `$id` with $failedCondition before timeout of $timeout ($stuckAt)"
         if (minRevision != -1)
           if (minTick != Long.MinValue)
             new Timeout(id, timeout, errMsg) with UnknownRevisionRequested with UnknownTickRequested {
-              def knownRevision = snapshot.revision; def knownTick = snapshot.tick
+              def knownRevision = revision; def knownTick = tick
+              def requestedRevision = minRevision; def requestedTick = minTick
             }
           else
-            new Timeout(id, timeout, errMsg) with UnknownRevisionRequested { def knownRevision = snapshot.revision }
+            new Timeout(id, timeout, errMsg) with UnknownRevisionRequested { def knownRevision = revision; def requestedRevision = minRevision }
         else
-          new Timeout(id, timeout, errMsg) with UnknownTickRequested { def knownTick = snapshot.tick }
+          new Timeout(id, timeout, errMsg) with UnknownTickRequested { def knownTick = tick; def requestedTick = minTick }
     }
   }
 

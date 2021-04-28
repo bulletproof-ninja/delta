@@ -4,8 +4,6 @@ import delta.testing._
 
 import scala.concurrent._
 
-import org.junit._
-
 import delta.jdbc._
 
 import scuff.jdbc._
@@ -15,38 +13,30 @@ import org.h2.jdbcx.JdbcDataSource
 import java.io.File
 import scala.util.Random
 
-object TestMoreH2StreamProcessStore {
-
-
-  implicit def ec = RandomDelayExecutionContext
+class TestMoreH2StreamProcessStore
+extends TestMoreJdbcStreamProcessStore {
 
   val h2Name = s"delete-me.h2db.${Random.nextInt().abs}"
   val h2File = new File(".", h2Name + ".mv.db")
 
   val cs = new AsyncConnectionSource with DataSourceConnection {
 
-    override def updateContext: ExecutionContext = RandomDelayExecutionContext
+    override def updateContext: ExecutionContext = ec
 
-    override def queryContext: ExecutionContext = RandomDelayExecutionContext
+    override def queryContext: ExecutionContext = ec
 
     val dataSource = new JdbcDataSource
     dataSource.setURL(s"jdbc:h2:./${h2Name}")
   }
 
 
-  @AfterClass
-  def cleanup(): Unit = {
+  override def afterAll(): Unit = {
     h2File.delete()
+    super.afterAll()
   }
-
-}
-
-class TestMoreH2StreamProcessStore
-extends TestMoreJdbcStreamProcessStore {
 
   import TestMoreStreamProcessStore._
   import TestMoreJdbcStreamProcessStore._
-  import TestMoreH2StreamProcessStore._
 
   override def newLookupStore() = {
     new ProcessStore(cs) with Lookup {
@@ -64,6 +54,4 @@ extends TestMoreJdbcStreamProcessStore {
     }
   }.ensureTable()
 
-  @Test
-  def dummy() = ()
 }

@@ -8,26 +8,29 @@ import scala.util.Try
 import java.sql.Statement
 import scala.annotation.tailrec
 import scala.concurrent._, duration._
+
+import scuff._
 import scuff.concurrent._
 import scuff.jdbc.AsyncConnectionSource
 
 abstract class AbstractJdbcStore(
-    protected val version: Option[Short],
-    table: String, schema: Option[String]) {
+  protected val version: Option[Short],
+  protected val tableRef: String,
+  schema: Option[String]) {
 
-  protected def cs: AsyncConnectionSource
+  protected def connectionSource: AsyncConnectionSource
 
   protected def schemaDDL(schemaName: String): String = Dialect schemaDDL schemaName
 
   protected def createTable(conn: Connection): Unit
   protected def createTickIndex(conn: Connection): Unit
 
-  /** Ensure table. */
+  /** Ensure table exists. */
   def ensureTable(ensureTable: Boolean = true): this.type = {
     if (ensureTable) {
-      cs.asyncUpdate { conn =>
+      connectionSource.asyncUpdate { conn =>
         this.ensureTable(conn)
-      }.await(33.seconds)
+      }.await(60.seconds)
     }
     this
   }
@@ -41,27 +44,24 @@ abstract class AbstractJdbcStore(
     createTickIndex(conn)
   }
 
-  private[this] val schemaRef = schema.map(_ concat ".") getOrElse ""
-  protected val tableRef: String = schemaRef concat table
-
   def name = tableRef
 
   def tickWatermark: Option[Tick] =
-    cs.asyncQuery { conn =>
+    connectionSource.asyncQuery { conn =>
       maxTick(tableRef)(conn)
-    }.await(33.seconds)
+    }.await(60.seconds)
 
   protected def tickIndexName = tableRef.replace(".", "_") concat "_tick"
   protected def createTickIndexDDL = {
-    val withVersion = version.map(_ => "version, ") getOrElse ""
-    s"""
+    val withVersion = version.map(_ => "version, ") || ""
+s"""
 CREATE INDEX IF NOT EXISTS $tickIndexName
   ON $tableRef (${withVersion}tick)
 """
   }
 
   protected def selectMaxTick(tableRef: String) = {
-    val WHERE = version.map(version => s"\nWHERE version = $version") getOrElse ""
+    val WHERE = version.map(version => s"\nWHERE version = $version") || ""
 s"""
 SELECT MAX(tick)
 FROM $tableRef$WHERE
@@ -80,14 +80,15 @@ FROM $tableRef$WHERE
     } finally Try(stm.close)
   }
 
-  protected def futureUpdate[R](thunk: Connection => R): Future[R] = cs.asyncUpdate(thunk)
-  protected def futureQuery[R](thunk: Connection => R): Future[R] = cs.asyncQuery(thunk)
+  protected def futureUpdate[R](thunk: Connection => R): Future[R] = connectionSource.asyncUpdate(thunk)
+  protected def futureQuery[R](thunk: Connection => R): Future[R] = connectionSource.asyncQuery(thunk)
 
   /** Execute batch, return failures. */
   protected def executeBatch[K](ps: PreparedStatement, keys: Iterable[K]): Iterable[K] = {
       @tailrec
-      def normalize(arr: Array[Int], idx: Int = 0): Array[Int] = {
-        if (idx < arr.length) {
+      def normalize(arr: Array[Int], idx: Int = 0): Array[Int] =
+        if (idx == arr.length) arr
+        else {
           arr(idx) match {
             case 0 | 1 => // Expected
             case Statement.SUCCESS_NO_INFO => arr(idx) = 1
@@ -95,11 +96,11 @@ FROM $tableRef$WHERE
             case _ => arr(idx) = 1 // Should not happen
           }
           normalize(arr, idx + 1)
-        } else arr
-      }
+        }
+
     val updateStatus = try ps.executeBatch() catch {
-      case be: BatchUpdateException =>
-        val updateCounts = Option(be.getUpdateCounts).map(normalize(_)) getOrElse new Array[Int](keys.size)
+      case e: BatchUpdateException =>
+        val updateCounts = Option(e.getUpdateCounts).map(normalize(_)) || new Array[Int](keys.size)
         if (updateCounts.length < keys.size) java.util.Arrays.copyOf(updateCounts, keys.size)
         else updateCounts
     }
@@ -111,7 +112,7 @@ FROM $tableRef$WHERE
   protected def createSchema(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
   protected def createTable(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
   protected def createIndex(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
-  protected def dropTable(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
-  protected def dropIndex(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
+  // protected def dropTable(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
+  // protected def dropIndex(conn: Connection, ddl: String): Unit = Dialect.executeDDL(conn, ddl)
 
 }

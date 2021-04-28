@@ -1,55 +1,69 @@
 package delta.java
 
+import java.util.{ Collection, Collections }
+import java.util.function.{ BiFunction, Supplier }
+
 import scala.jdk.CollectionConverters._
+import scala.reflect.ClassTag
 
-import delta.{ Tick, Revision }
-import delta.process.{ StreamProcessStore, ReplayProcessConfig }
+import delta.process.JoinState
+import delta.process.ReplayProcessConfig
+import delta.process.StreamProcessStore
 
-import java.util.Optional
 
 /** Monotonic processor. */
 abstract class MonotonicProcessor[ID, EVT, S >: Null, U](
+  process: BiFunction[delta.Transaction[ID, _ >: EVT], Option[S], S],
   protected val processStore: StreamProcessStore[ID, S, U])
 extends delta.process.MonotonicProcessor[ID, EVT, S, U]
-with LiveProcessor[ID, EVT]
+with LiveProcessor[ID, EVT] {
+  protected def process(tx: Transaction, currState: Option[S]) =
+    this.process.apply(tx, currState)
+}
 
 /** Monotonic replay processor. */
 abstract class MonotonicReplayProcessor[ID, EVT, S >: Null, U](
+  process: BiFunction[delta.Transaction[ID, _ >: EVT], Option[S], S],
   protected val processStore: StreamProcessStore[ID, S, U],
-  // protected val executionContext: ExecutionContext,
   replayConfig: ReplayProcessConfig)
 extends delta.process.MonotonicReplayProcessor[ID, EVT, S, U](replayConfig)
-with ReplayProcessor[ID, EVT]
+with ReplayProcessor[ID, EVT] {
+  protected def process(tx: Transaction, currState: Option[S]) =
+    this.process.apply(tx, currState)
+}
 
 /** Monotonic processor with join state. */
 abstract class JoinStateProcessor[ID, EVT, S >: Null, U](
+  process: BiFunction[delta.Transaction[ID, _ >: EVT], Option[S], S],
   processStore: StreamProcessStore[ID, S, U])
-extends MonotonicProcessor[ID, EVT, S, U](processStore)
-with delta.process.MonotonicJoinState[ID, EVT, S, U]
+extends MonotonicProcessor[ID, EVT, S, U](process, processStore)
+with delta.process.MonotonicJoinProcessor[ID, EVT, S, U]
 
 /** Monotonic replay processor with join state. */
 abstract class JoinStateReplayProcessor[ID, EVT, S >: Null, U](
+  stateClass: Class[_ <: S],
+  process: BiFunction[delta.Transaction[ID, _ >: EVT], Option[S], S],
   processStore: StreamProcessStore[ID, S, U],
-  // ec: ExecutionContext,
   replayConfig: ReplayProcessConfig)
 extends MonotonicReplayProcessor[ID, EVT, S, U](
-  processStore, replayConfig)
-with delta.process.MonotonicJoinState[ID, EVT, S, U] {
+  process, processStore, replayConfig)
+with delta.process.MonotonicJoinProcessor[ID, EVT, S, U] {
 
-  protected def join(streamId: ID, streamRevision: Revision, tick: Tick, evt: EVT, metadata: Map[String, String]): Map[ID, Processor] = {
-    joinEvent(streamId, streamRevision, tick, evt, metadata) match {
-      case null => Map.empty
-      case jmap => jmap.entrySet.iterator.asScala.foldLeft(Map.empty[ID, Processor]) {
-        case (map, entry) => map.updated(entry.getKey, entry.getValue)
-      }.toMap
-    }
-  }
+  implicit private val stateTag = ClassTag[S](stateClass)
 
-  protected final def Processor(process: java.util.function.Function[Optional[S], S]): Processor = {
-    val adapter = (state: Option[S]) => process(Optional.ofNullable(state.orNull))
-    new Processor(adapter)
-  }
+  protected final def Enrichment(
+      stream: ID,
+      newState: Supplier[S],
+      enrich: java.util.function.Function[S, S])
+      : Enrichment =
+    Enrichment(Collections.singletonList(stream), newState, enrich)
 
-  protected def joinEvent(streamId: ID, streamRevision: Revision, tick: Tick, evt: EVT, metadata: Map[String, String]): java.util.Map[ID, Processor]
+
+  protected final def Enrichment(
+      streams: Collection[ID],
+      newState: Supplier[S],
+      enrich: java.util.function.Function[S, S])
+      : Enrichment =
+    JoinState.Enrichment(streams.asScala, newState.get)(enrich.apply)
 
 }

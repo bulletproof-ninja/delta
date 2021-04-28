@@ -1,108 +1,101 @@
 package sampler
 
-import scala.util.{ Failure, Success, Try }
-
-import org.junit.Assert._
-import org.junit.Test
-
-import delta.{ EventStore, LamportTicker, MessageTransportPublishing }
-import delta.write.{ DuplicateIdException, EntityRepository }
+import delta._
 import delta.testing._
-import delta.util.TransientEventStore
-import sampler.aggr.{ Department, DomainEvent, Employee, RegisterEmployee, UpdateSalary }
-import delta.util.LocalTransport
-import scuff.Codec
-import delta.write.Metadata
+import delta.util._
+import delta.write._
 
-class TestSampler {
+import sampler.aggr._
+
+import scuff.LamportClock
+import scala.concurrent.Future
+import scala.util.control.NonFatal
+
+class TestSampler
+extends BaseTest {
   import delta.testing.F
 
   implicit def metadata = Metadata("timestamp" -> new scuff.Timestamp().toString)
 
-  protected def initTicker(es: EventStore[Int, DomainEvent]) = LamportTicker(es)
-
   lazy val es: EventStore[Int, DomainEvent] =
     new TransientEventStore[Int, DomainEvent, JSON](
-         RandomDelayExecutionContext, JsonDomainEventFormat)(initTicker)
-         with MessageTransportPublishing[Int, DomainEvent] {
-      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
-      val txChannels = Set(Employee.Def.channel, Department.Def.channel)
-      val txCodec = Codec.noop[Transaction]
+      ec, JsonDomainEventFormat) {
+      val ticker: Ticker = LamportTicker(new LamportClock(0))
     }
 
-  implicit def ec = RandomDelayExecutionContext
+  lazy val EmployeeRepo = new EntityRepository(Employee.Def)(es, ec)
+  lazy val DepartmentRepo = new EntityRepository(Department.Def)(es, ec)
 
-  lazy val EmployeeRepo = new EntityRepository(Employee.Def)(es)
-  lazy val DepartmentRepo = new EntityRepository(Department.Def)(es)
-
-  @Test
-  def inserting(): Unit = {
+  test("inserting") {
     val id = new EmpId
-    assertFalse(EmployeeRepo.exists(id).await.isDefined)
+    assert(EmployeeRepo.exists(id).await.isEmpty)
     val register = RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor")
     val emp = Employee(register)
     val insertId = EmployeeRepo.insert(id, emp).await
-    assertEquals(id, insertId)
-    Try(EmployeeRepo.insert(id, emp).await) match {
-      case Success(idAgain) =>
-        // Allow idempotent inserts
-        assertEquals(id, idAgain)
-      case Failure(th) =>
-        fail(s"Should succeed, but didn't: $th")
-    }
+    assert(id === insertId)
+    val idAgain = EmployeeRepo.insert(id, emp).await
+    // Allow idempotent inserts
+    assert(id === idAgain)
+
     emp.apply(UpdateSalary(40000))
-    Try(EmployeeRepo.insert(id, emp).await) match {
-      case Success(revision) => fail(s"Should fail, but inserted revision $revision")
-      case Failure(dupe: DuplicateIdException) => assertEquals(id, dupe.id)
-      case Failure(th) => fail(s"Should have thrown ${classOf[DuplicateIdException].getSimpleName}, not $th")
+    // No longer idempotent, thus fail
+    try {
+      EmployeeRepo.insert(id, emp).await
+      fail(s"Should fail, but inserted revision 0 again for $id")
+    } catch {
+      case dupe: DuplicateIdException =>
+        assert(id === dupe.id)
+      case NonFatal(th) =>
+        fail(s"Should have thrown ${classOf[DuplicateIdException].getSimpleName}, not: $th")
     }
   }
 
-  @Test
-  def updating(): Unit = {
+  test("updating") {
     val id = new EmpId
-    assertTrue(EmployeeRepo.exists(id).await.isEmpty)
+    assert(EmployeeRepo.exists(id).await.isEmpty)
     val emp = register(id, RegisterEmployee("John Doe", "555-55-5555", new MyDate(1988, 4, 1), 43000, "Janitor"))
+    implicit def toMetadata(emp: Employee): Future[Metadata] = Future successful metadata
     val insertId = EmployeeRepo.insert(id, emp).await
-    assertEquals(id, insertId)
+    assert(id === insertId)
     try {
       EmployeeRepo.update(id) {
         case (emp, 3) =>
           emp(UpdateSalary(45000))
+          metadata
         case (_, rev) =>
           throw new IllegalStateException(rev.toString)
       }.await
       fail("Should throw a Revision.MismatchException")
     } catch {
       case e: IllegalStateException =>
-        assertEquals("0", e.getMessage)
+        assert("0" === e.getMessage)
     }
-    var revs = EmployeeRepo.update(id, Some(0)) {
+    @volatile var fromRev = -1
+    var toRev = EmployeeRepo.update(id, Some(0)) {
       case (emp, revision) =>
+        fromRev = revision
         emp(UpdateSalary(45000))
-        revision
     }.await
-    assertEquals(0, revs._1)
-    assertEquals(1, revs._2)
-    revs = EmployeeRepo.update(id, Some(0)) {
+    assert(0 === fromRev)
+    assert(1 === toRev)
+    toRev = EmployeeRepo.update(id, Some(0)) {
       case (emp, revision) =>
+        fromRev = revision
         emp(UpdateSalary(45000))
-        revision
     }.await
-    assertEquals(1, revs._1)
-    assertEquals(1, revs._2)
+    assert(1 === fromRev)
+    assert(1 === toRev)
     try {
       EmployeeRepo.update(id) {
         case (emp, 0) =>
           emp(UpdateSalary(66000))
+          metadata
         case (_, rev) => throw new IllegalStateException(rev.toString)
       }.await
       fail("Should throw a Match exception")
     } catch {
       case e: IllegalStateException =>
-        assertEquals("1", e.getMessage)
+        assert("1" === e.getMessage)
     }
   }
 

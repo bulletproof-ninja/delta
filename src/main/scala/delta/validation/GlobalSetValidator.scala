@@ -1,8 +1,9 @@
 package delta.validation
 
+import delta.write.Metadata
+
 import scala.concurrent._
 import scala.collection.compat._
-import scala.util.control.NonFatal
 
 /**
   * Partial [[delta.validation.Validator]] implementation
@@ -26,7 +27,8 @@ extends Validator[ID, S, Ctx] {
 
   /**
     * @return List of qualifiers that need validation.
-    * For efficient processing, don't return already validated.
+    * For more efficient processing, don't return qualifiers
+    * that have already been validated.
     */
   protected def needValidation(state: S): Set[Qualifier]
 
@@ -39,19 +41,42 @@ extends Validator[ID, S, Ctx] {
   /** Pick winner. Will never receive empty map. */
   protected def pickWinner(candidates: Map[ID, Metric]): ID
 
-  protected def compensate(q: Qualifier, validatedState: S, context: Ctx): Unit
+  /**
+    * Perform compensation. The passed metadata may be empty or it may be the result of
+    * a another compensation on the same qualifier.
+    *
+    * @param q Qualifier
+    * @param validatedState Validated state of globally inconsistent stream
+    * @param context The context
+    * @param metadata Metadata to modify, if needed.
+    */
+  protected def compensate(
+      q: Qualifier,
+      validatedState: S,
+      context: Ctx)(
+      implicit
+      metadata: Metadata): Metadata
 
   private def compensateAll(
-      qualifiers: Set[Qualifier], validatedState: S, context: Ctx)(
+      qualifiers: Set[Qualifier], validatedState: S, context: Ctx)
+      /*(
       implicit
-      failureReporter: ExecutionContext): Unit = {
+      failureReporter: ExecutionContext)*/
+      : Metadata = {
 
-    val qs = qualifiers.iterator
-    while (qs.hasNext) try {
-      compensate(qs.next(), validatedState, context)
-    } catch {
-      case NonFatal(cause) => failureReporter reportFailure cause
-    }
+    qualifiers
+      .iterator
+      .foldLeft(newCompensatingMetadata) {
+        case (metadata, qualifier) =>
+          compensate(qualifier, validatedState, context)(metadata)
+      }
+    // val qs = qualifiers.iterator
+    // while (qs.hasNext) {
+    //   try compensate(qs.next(), validatedState, context, txMetadata) catch {
+    //     case NonFatal(cause) =>
+    //       failureReporter reportFailure cause
+    //   }
+    // }
   }
 
   /** Validate and return compensation function, if needed. */
@@ -79,16 +104,14 @@ extends Validator[ID, S, Ctx] {
 
       val futureQualifiers: Future[Map[ID, Set[Qualifier]]] =
         (Future sequence losers) map {
-          case losers =>
-            losers
-              .iterator
-              .filter(_._2.nonEmpty)
-              .foldLeft(Map.empty[ID, Set[Qualifier]]) {
-                case (qualifiers, (qualifier, metrics)) =>
-                  qualifiers ++ metrics.map {
-                    case (id, _) => id -> (qualifiers.getOrElse(id, Set.empty) + qualifier)
-                  }
-              }
+          _.iterator
+            .filter(_._2.nonEmpty)
+            .foldLeft(Map.empty[ID, Set[Qualifier]]) {
+              case (qualifiers, (qualifier, metrics)) =>
+                qualifiers ++ metrics.map {
+                  case (id, _) => id -> (qualifiers.getOrElse(id, Set.empty) + qualifier)
+                }
+            }
         }
 
       futureQualifiers map {

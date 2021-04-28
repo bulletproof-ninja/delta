@@ -3,11 +3,11 @@ package delta.jdbc
 import java.sql.{ Connection, ResultSet, SQLException }
 
 import scala.concurrent._, duration._
-import scala.util.{ Failure, Success, Try }
+import scala.util.Try
 
 import delta._
 
-import scuff.StreamConsumer
+import scuff.Reduction
 import scuff.concurrent._
 import scuff.jdbc.AsyncConnectionSource
 
@@ -21,28 +21,29 @@ private object JdbcEventStore {
 }
 
 abstract class JdbcEventStore[ID, EVT, SF](
-    evtFmt: EventFormat[EVT, SF],
-    dialect: Dialect[ID, EVT, SF], cs: AsyncConnectionSource)(
-    initTicker: JdbcEventStore[ID, EVT, SF] => Ticker)
-  extends EventStore[ID, EVT] {
-
-  lazy val ticker = initTicker(this)
+  evtFmt: EventFormat[EVT, SF],
+  dialect: Dialect[ID, EVT, SF], cs: AsyncConnectionSource)
+extends EventStore[ID, EVT] {
 
   @inline implicit private def ef = evtFmt
 
+  protected def asyncEnsureSchema(): Future[Unit] =
+    cs.asyncUpdate { conn =>
+      dialect.createSchema(conn)
+      dialect.createStreamTable(conn)
+      dialect.createChannelIndex(conn)
+      dialect.createTransactionTable(conn)
+      dialect.createTickIndex(conn)
+      dialect.createEventTable(conn)
+      dialect.createEventNameIndex(conn)
+      dialect.createMetadataTable(conn)
+    }
+
+  /** Ensure schema tables exists. */
   def ensureSchema(ensureSchema: Boolean = true): this.type = {
     if (ensureSchema) {
-      cs.asyncUpdate { conn =>
-        dialect.createSchema(conn)
-        dialect.createStreamTable(conn)
-        dialect.createChannelIndex(conn)
-        dialect.createTransactionTable(conn)
-        dialect.createTickIndex(conn)
-        dialect.createEventTable(conn)
-        dialect.createEventNameIndex(conn)
-        dialect.createMetadataTable(conn)
-      }
-    }.await(33.seconds)
+      asyncEnsureSchema().await(60.seconds)
+    }
     this
   }
 
@@ -65,9 +66,14 @@ abstract class JdbcEventStore[ID, EVT, SF](
     dupe
   }
 
-  def commit(
-      channel: Channel, stream: ID, revision: Revision, tick: Tick,
-      events: List[EVT], metadata: Map[String, String] = Map.empty): Future[Transaction] = {
+  protected def commit(
+      tick: Tick,
+      channel: Channel,
+      stream: ID,
+      revision: Revision,
+      metadata: Map[String, String],
+      events: List[EVT])
+      : Future[Transaction] = {
     require(revision >= 0, "Must be non-negative revision, was: " + revision)
     require(events.nonEmpty, "Must have at least one event")
     cs.asyncUpdate { implicit conn =>
@@ -108,16 +114,15 @@ abstract class JdbcEventStore[ID, EVT, SF](
     else None
   }
 
-  private def complete[U](cb: StreamConsumer[Transaction, U])(thunk: => Future[Unit]): Unit = {
+  private def complete[U](reduction: Reduction[Transaction, U])(thunk: => Future[Unit]): Future[U] = {
     import cs.queryContext
-    thunk.onComplete {
-      case Success(_) => cb.onDone()
-      case Failure(th) => cb onError th
+    thunk.map { _ =>
+      reduction.result()
     }
   }
 
   @annotation.tailrec
-  private def processTransactions(singleStream: Boolean, onNext: Transaction => Unit)(
+  private def processTransactions(singleStream: Boolean, next: Transaction => Unit)(
       stream: ID, revision: Revision, rs: ResultSet, col: dialect.Columns): Unit = {
     import JdbcEventStore.RawEvent
     val channel = rs.getChannel(col.channel)
@@ -157,51 +162,51 @@ abstract class JdbcEventStore[ID, EVT, SF](
     val events = rawEvents.foldLeft(List.empty[EVT]) {
       case (list, rawEvent) => rawEvent.decode(channel, metadata) :: list
     }
-    onNext(Transaction(tick, channel, stream, revision, metadata, events))
+    next(Transaction(tick, channel, stream, revision, metadata, events))
     nextTxKey match {
       case Some((stream, revision)) =>
-        processTransactions(singleStream, onNext)(stream, revision, rs, col)
+        processTransactions(singleStream, next)(stream, revision, rs, col)
       case _ => // Done
     }
   }
 
-  def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit =
-    complete(callback) {
+  def replayStream[R](stream: ID)(reduction: Reduction[Transaction, R]): Future[R] =
+    complete(reduction) {
       cs.asyncQuery { implicit conn =>
         dialect.selectStreamFull(stream) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
-              processTransactions(singleStream = true, callback.onNext)(stream, revision, rs, col)
+              processTransactions(singleStream = true, reduction.next)(stream, revision, rs, col)
             }
         }
       }
     }
-  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit =
-    complete(callback) {
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(reduction: Reduction[Transaction, R]): Future[R] =
+    complete(reduction) {
       cs.asyncQuery { implicit conn =>
         dialect.selectStreamRange(stream, revisionRange) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
-              processTransactions(singleStream = true, callback.onNext)(stream, revision, rs, col)
+              processTransactions(singleStream = true, reduction.next)(stream, revision, rs, col)
             }
         }
       }
     }
-  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit =
-    if (fromRevision == 0) replayStream(stream)(callback)
-    else complete(callback) {
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(reduction: Reduction[Transaction, R]): Future[R] =
+    if (fromRevision == 0) replayStream(stream)(reduction)
+    else complete(reduction) {
       cs.asyncQuery { implicit conn =>
         dialect.selectStreamRange(stream, fromRevision to Int.MaxValue) {
           case (rs, col) =>
             nextRevision(rs, col) foreach { revision =>
-              processTransactions(singleStream = true, callback.onNext)(stream, revision, rs, col)
+              processTransactions(singleStream = true, reduction.next)(stream, revision, rs, col)
             }
         }
       }
     }
 
-  def query[U](selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
-    complete(callback) {
+  def query[U](selector: Selector)(reduction: Reduction[Transaction, U]): Future[U] =
+    complete(reduction) {
       cs.asyncQuery { implicit conn =>
         val select = selector match {
           case Everything => dialect.selectTransactions() _
@@ -213,24 +218,24 @@ abstract class JdbcEventStore[ID, EVT, SF](
           case (rs, col) =>
             nextTransactionKey(rs, col) foreach {
               case (stream, revision) =>
-                processTransactions(singleStream = false, callback.onNext)(stream, revision, rs, col)
+                processTransactions(singleStream = false, reduction.next)(stream, revision, rs, col)
             }
         }
       }
     }
-  def querySince[U](sinceTick: Tick, selector: Selector)(callback: StreamConsumer[Transaction, U]): Unit =
-    complete(callback) {
+  def querySince[U](sinceTick: Tick, selector: Selector)(reduction: Reduction[Transaction, U]): Future[U] =
+    complete(reduction) {
       cs.asyncQuery { implicit conn =>
-        val (singleStream, onNext, select) = selector match {
+        val (singleStream, reduce, select) = selector match {
           case Everything =>
-            (None, (callback.onNext _), dialect.selectTransactions(sinceTick) _)
+            (None, (reduction.next _), dialect.selectTransactions(sinceTick) _)
           case ChannelSelector(channels) =>
-            (None, (callback.onNext _), dialect.selectTransactionsByChannels(channels, sinceTick) _)
+            (None, (reduction.next _), dialect.selectTransactionsByChannels(channels, sinceTick) _)
           case EventSelector(byChannel) =>
-            (None, (callback.onNext _), dialect.selectTransactionsByEvents(byChannel, sinceTick) _)
+            (None, (reduction.next _), dialect.selectTransactionsByEvents(byChannel, sinceTick) _)
           case SingleStreamSelector(id, _) =>
-            val onNext = (tx: Transaction) => if (tx.tick >= sinceTick) callback.onNext(tx)
-            (Some(id), onNext, dialect.selectStreamFull(id) _)
+            val reduce = (tx: Transaction) => if (tx.tick >= sinceTick) reduction.next(tx)
+            (Some(id), reduce, dialect.selectStreamFull(id) _)
         }
         select {
           case (rs, col) =>
@@ -239,7 +244,7 @@ abstract class JdbcEventStore[ID, EVT, SF](
             } orElse nextTransactionKey(rs, col)
             next foreach {
               case (stream, revision) =>
-                processTransactions(singleStream.isDefined, onNext)(stream, revision, rs, col)
+                processTransactions(singleStream.isDefined, reduce)(stream, revision, rs, col)
             }
         }
       }

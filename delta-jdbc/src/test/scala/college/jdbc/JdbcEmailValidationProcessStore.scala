@@ -22,19 +22,23 @@ private object JdbcEmailValidationProcessStore {
   }
 }
 
+import JdbcStreamProcessStore._
 import JdbcEmailValidationProcessStore._
 
 class JdbcEmailValidationProcessStore(
-  cs: AsyncConnectionSource, version: Short, schema: Option[String],
-  timestamp: TimestampColumn)
+  protected val connectionSource: AsyncConnectionSource,
+  version: Short, schema: Option[String],
+  updateTimestamp: UpdateTimestamp)
 extends JdbcStreamProcessStore[Int, State, Unit](
-  Config("student_id", table = "student_email_lookup", schema = schema) withVersion version withTimestamp timestamp,
-  cs)
+  Table("student_email_lookup", schema = schema)
+    withPrimaryKey "student_id"
+    withVersion version
+    withTimestamp updateTimestamp)
 with IndexTableSupport[Int, State, Unit]
 with EmailValidationProcessStore {
 
   protected val indexTables =
-    Table[String](EmailColumn)(_.asData.allEmails.map(_.toLowerCase)) ::
+    IndexTable[String](EmailColumn)(_.asData.allEmails.map(_.toLowerCase)) ::
     Nil
 
   override def toQueryValue(addr: EmailAddress) = addr.toLowerCase

@@ -8,10 +8,12 @@ import scala.util.Try
 import scala.util.control.NonFatal
 import scala.util.Failure
 
-final class LamportTicker private (impl: LamportClock, onClose: () => Unit) extends Ticker {
+final class LamportTicker private (impl: LamportClock, onClose: () => Unit)
+extends Ticker {
+
   @volatile private[this] var closed = false
   @inline private def checkClosed(): Unit =
-    if (closed) throw new IllegalStateException(s"Ticker has been closed.")
+    if (closed) throw new IllegalStateException(s"${getClass.getName} has been closed.")
 
   def nextTick(): Tick = {
     checkClosed()
@@ -36,7 +38,7 @@ object LamportTicker {
         val maxTick = es.maxTick.await(111.seconds) getOrElse -1L
         val clock = new LamportClock(maxTick)
         val subscription = Try {
-          es.subscribe()(tx => clock.sync(tx.tick))
+          es.subscribeGlobal()(tx => clock.sync(tx.tick))
         }
         subscription.map(sub => new LamportTicker(clock, sub.cancel _))
 
@@ -45,19 +47,22 @@ object LamportTicker {
   }
 
   /**
-    * Internally managed Lamport ticker.
+    * Internally managed Lamport ticker that subscribes to transactions
+    * from event source.
+    * @note This method only makes sense in a distributed environment, where
+    * the event source transactions are broadcast to all members.
     * @param es The event source, which must support publishing.
-    * @return The Lamport ticker, or `None` if event source does not support publishing
+    * @return The Lamport ticker
     */
-  def apply(es: EventSource[_, _]): LamportTicker = subscribingClocks(es).recoverWith {
+  @throws[IllegalArgumentException]
+  def subscribeTo(es: EventSource[_, _]): LamportTicker = subscribingClocks(es).recoverWith {
     case NonFatal(cause) => Failure {
-      val lamportTicker = classOf[LamportTicker].getName
-      new IllegalArgumentException(s"Cannot create $lamportTicker from event source: $es", cause)
+      new IllegalArgumentException(s"Cannot subscribe to event source: $es", cause)
     }
   }.get
 
   /** Use a custom {{scuff.LamportClock}} implementation. */
-  def apply(impl: LamportClock, shutdown: () => Unit = () => ()) = {
+  def apply(impl: LamportClock, shutdown: () => Unit = () => () ) = {
     new LamportTicker(impl, shutdown)
   }
 

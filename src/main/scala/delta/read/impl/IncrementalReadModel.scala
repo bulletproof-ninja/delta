@@ -2,13 +2,12 @@ package delta.read.impl
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.concurrent.duration._
-import delta.process._
+import scala.concurrent._
 import scala.reflect.ClassTag
-import scuff.Subscription
-import delta.read._
+
 import delta._
+import delta.process._
+import delta.read._
 
 /**
  * Incrementally built on-demand read-model, pull or push.
@@ -22,18 +21,17 @@ import delta._
  * @tparam ID The id type
  * @tparam SID The stream id
  * @tparam EVT The event type
- * @tparam Work The model type, for projection updates
- * @tparam Stored The model type, for storage
- * @tparam U The update model
+ * @tparam InUse The in-memory state type for projection updates
+ * @tparam AtRest The storage state type
+ * @tparam U The update state type
  */
-abstract class IncrementalReadModel[ID, SID, EVT: ClassTag, Work >: Null, Stored, U](
+private[impl] abstract class BaseIncrementalReadModel[ID, SID, EVT, InUse >: Null, AtRest, U](
   es: EventSource[SID, _ >: EVT])(
   implicit
-  stateCodec: AsyncCodec[Work, Stored],
   convId: ID => SID)
-extends EventSourceReadModel[ID, SID, EVT, Work, Stored](es)
-with MessageHubSupport[ID, Stored, U]
-with ProcessStoreSupport[ID, SID, Work, Stored, U] {
+extends EventSourceReadModel[ID, SID, EVT, InUse, AtRest](es)
+with MessageHubSupport[ID, AtRest, U]
+with ProcessStoreSupport[ID, SID, InUse, AtRest, U] {
 
   protected def readSnapshot(id: ID)(
       implicit
@@ -43,7 +41,7 @@ with ProcessStoreSupport[ID, SID, Work, Stored, U] {
       case some => Future successful some
     }
 
-  protected override def readAgain(id: ID, minRevision: Revision, minTick: Tick)(
+  protected def readAgain(id: ID, minRevision: Revision, minTick: Tick)(
       implicit
       ec: ExecutionContext): Future[Option[Snapshot]] =
     readAndUpdate(id, minRevision, minTick)
@@ -61,32 +59,38 @@ with ProcessStoreSupport[ID, SID, Work, Stored, U] {
    * to avoid unnecessary processing and database access.
    */
   @throws[IllegalStateException]("if attempt to start more than once")
-  protected def start(selector: eventSource.Selector): Subscription = {
+  protected def start(selector: eventSource.Selector): LiveProcess = {
     if (!started.compareAndSet(false, true)) {
       throw new IllegalStateException("Already started!")
     }
-    eventSource.subscribe(selector.toStreamsSelector)(onTxUpdate)
+    val subscription = eventSource.subscribeLocal(selector.toStreamsSelector)(onTxUpdate)
+    new LiveProcess {
+      def name = BaseIncrementalReadModel.this.name
+      def cancel() = subscription.cancel()
+    }
   }
 
-  protected def replayDelayOnMissing: FiniteDuration = 2.seconds
+  protected def onMissingRevision: LiveProcessConfig.OnMissingRevision
 
   private[this] val onTxUpdate =
-    new MonotonicProcessor[SID, EVT, Work, U]
+    new MonotonicProcessor[SID, EVT, InUse, U]
     with MissingRevisionsReplay[SID, EVT] {
+
+      def name = processStore.name
 
       protected def onMissingRevisions(id: SID, missing: Range): Unit =
         replayMissingRevisions(
-          eventSource, Some(replayDelayOnMissing -> scheduler))(
+          eventSource, onMissingRevision)(
           id, missing)(this.apply)
 
       protected def onUpdate(id: SID, update: Update): Unit =
-        hub.publish(id, update)
+        updateHub.publish(id, update)
 
-      protected val processStore = IncrementalReadModel.this.processStore.adaptState(stateCodec, stateCodecContext)
-      protected def processContext(id: SID) = IncrementalReadModel.this.processContext(id)
+      protected val processStore = BaseIncrementalReadModel.this.processStore.adaptState(stateAugmentCodec _)
+      protected def processContext(id: SID) = BaseIncrementalReadModel.this.processContext(id)
 
-      private[this] val projector = Projector(IncrementalReadModel.this.projector) _
-      protected def process(tx: Transaction, currState: Option[Work]): Future[Work] =
+      private[this] val projector = Projector(BaseIncrementalReadModel.this.projector) _
+      protected def process(tx: Transaction, currState: Option[InUse]): Future[InUse] =
         projector(tx, currState)
 
   }
@@ -94,15 +98,26 @@ with ProcessStoreSupport[ID, SID, Work, Stored, U] {
 }
 
 /**
-  * Model where the various state representations are identical.
+  * Simple incremental read model.
   */
-abstract class SimpleIncrementalReadModel[ID, SID, EVT: ClassTag, S >: Null](
+abstract class IncrementalReadModel[ID, SID, EVT, S >: Null](
   es: EventSource[SID, _ >: EVT])(
   implicit
   convId: ID => SID)
-extends IncrementalReadModel[ID, SID, EVT, S, S, S](es) {
+extends BaseIncrementalReadModel[ID, SID, EVT, S, S, S](es) {
 
-  protected def stateCodecContext = scuff.concurrent.Threads.PiggyBack
+  protected def stateAugmentCodec(id: SID) = AsyncCodec.noop[S]
   protected def updateState(id: ID, prevState: Option[S], currState: S) = Some(currState)
 
 }
+
+/**
+  * Flexible incremental read model, where the model type needs augmenting
+  * before being stored, and/or the published updates are diffs rather than
+  * full state.
+  */
+abstract class FlexIncrementalReadModel[ID, SID, EVT, InUse >: Null, AtRest, U](
+  es: EventSource[SID, _ >: EVT])(
+  implicit
+  convId: ID => SID)
+extends BaseIncrementalReadModel[ID, SID, EVT, InUse, AtRest, U](es)

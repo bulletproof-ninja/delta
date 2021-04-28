@@ -2,25 +2,27 @@ package delta.testing
 
 import scala.collection.compat._
 import scala.concurrent._
+import scala.collection.concurrent.{ Map => CMap, TrieMap }
 
-import delta._
 import delta.process._
 
+import scuff.Reduction
 import scuff.concurrent._
-import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scuff.reflect.Surgeon
 
 class InMemoryProcStore[K, S <: AnyRef, U](
   val name: String,
   protected val snapshots: CMap[K, delta.Snapshot[S]] = TrieMap.empty[K, delta.Snapshot[S]])(
   implicit
+  ec: ExecutionContext,
   protected val updateCodec: UpdateCodec[S, U])
 extends StreamProcessStore[K, S, U]
 with BlockingCASWrites[K, S, U, Unit]
 with SecondaryIndexing
-with AggregationSupport {
+with AggregationSupport
+with Iterable[(K, delta.Snapshot[S])] {
 
-  implicit def ec = RandomDelayExecutionContext
+  def iterator: Iterator[(K, Snapshot)] = snapshots.iterator
 
   protected type MetaType[V] = (String, S) => Set[V]
 
@@ -40,48 +42,50 @@ with AggregationSupport {
       .toMap
   }
 
-  type QueryType = Any
+  protected type QueryType = Any
+  protected def bulkRead[R](select: (String, Any)*)(consumer: Reduction[(K, Snapshot), R]): Future[R] =
+    Future {
+      snapshots
+        .foreach {
+          case (key, snapshot) =>
+            val matches = select.isEmpty || select.forall {
+              case (name, expected) => isQueryMatch(name, expected, snapshot.state)
+            }
+            if (matches) consumer next key -> snapshot
+        }
+    } map { _ =>
+      consumer.result()
+    }
+
   protected def isQueryMatch(name: String, value: QueryType, state: S): Boolean = {
     val surgeon = new Surgeon(state)
     surgeon.selectDynamic(name) == value
   }
-  protected def queryForSnapshot(
+
+  protected def readTicks(
       nameValue: (String, QueryType), more: (String, QueryType)*)
-      : Future[Map[K, Snapshot]] = Future {
-
-    val filters = nameValue :: more.toList
-
-    snapshots
-      .filter {
-        case (_, Snapshot(state, _, _)) =>
-          filters.forall {
-            case (name, expected) => isQueryMatch(name, expected, state)
-          }
-      }.toMap
-
+      : Future[Map[K, Tick]] =
+    bulkRead((nameValue +: more): _*) {
+      new Reduction[(K, Snapshot), Map[K, Tick]] {
+        val map = collection.mutable.HashMap[K, Tick]()
+        def next(t: (K, Snapshot)): Unit = map.update(t._1, t._2.tick)
+        def result(): Map[K,Tick] = map.toMap
+      }
     }
 
-  protected def queryForTick(
-      nameValue: (String, QueryType), more: (String, QueryType)*)
-      : Future[Map[K, Long]] =
-    queryForSnapshot(nameValue, more: _*)
-      .map(_.view.mapValues(_.tick).toMap)
-
-  def read(key: K): scala.concurrent.Future[Option[Snapshot]] = Future {
+  def read(key: K): Future[Option[Snapshot]] = Future {
     snapshots.get(key)
   }
-  def write(key: K, snapshot: Snapshot): scala.concurrent.Future[Unit] = Future {
+  def write(key: K, snapshot: Snapshot): Future[Unit] = Future {
     snapshots.update(key, snapshot)
   }
 
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] = Future {
     snapshots.view.filterKeys(keys.toSet).toMap
   }
-  def writeBatch(batch: scala.collection.Map[K, Snapshot]): Future[Unit] = Future {
-    batch.foreach {
-      case (key, snapshot) => snapshots.update(key, snapshot)
-    }
-  }
+  def writeBatch(batch: scala.collection.Map[K, Snapshot]): Future[Unit] =
+    (Future sequence batch.map(write)).map(_ => ())
+
   def refresh(key: K, revision: Revision, tick: Tick): Future[Unit] = Future {
     refreshKey(())(key, revision, tick)
   }

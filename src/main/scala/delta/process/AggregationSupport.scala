@@ -20,6 +20,18 @@ trait AggregationSupport {
     */
   protected def findDuplicates[D](
       refName: String)(
-      implicit metaType: MetaType[D]): Future[Map[D, Map[StreamId, Tick]]]
+        implicit metaType: MetaType[D])
+        : Future[Map[D, Map[StreamId, Tick]]]
+
+  // protected def count[R](
+  //     refName: String,
+  //     atLeast: Long = 0)(
+  //       implicit
+  //       metaType: MetaType[R])
+  //       : Future[Map[D, Long]]
+
+  protected def findStaleStreams(
+
+  )
 
 }

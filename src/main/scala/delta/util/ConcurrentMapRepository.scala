@@ -4,9 +4,8 @@ import scala.collection.concurrent.{ Map => CMap, TrieMap }
 import scala.concurrent.{ ExecutionContext, Future }
 
 import delta._
-import delta.write.{ DuplicateIdException, Repository, UnknownIdException }
+import delta.write.{ DuplicateIdException, Repository, Metadata }
 import delta.write.ImmutableEntity
-import delta.write.Metadata
 
 /**
  * Repository backed by concurrent map.
@@ -22,9 +21,7 @@ with ImmutableEntity {
   type Loaded = (E, Revision)
   protected def revision(loaded: Loaded) = loaded._2
 
-  def insert(id: => K, entity: E)(
-      implicit
-      metadata: Metadata): Future[K] = Future {
+  def insert(id: => K, entity: E)(implicit metadata: Metadata): Future[K] = Future {
     insertImpl(id, id, entity, metadata.toMap)
   }
 
@@ -52,26 +49,30 @@ with ImmutableEntity {
 
   private def tryUpdate[R](
       id: K, expectedRevision: Option[Revision],
-      metadata: Map[String, String],
-      updateThunk: Loaded => Future[E]): Future[Revision] =
+      // metadata: Map[String, String],
+      updateThunk: Loaded => Future[(E, Metadata)]): Future[(Revision, Metadata)] =
     map.get(id) match {
       case None => Future failed new UnknownIdException(id)
       case Some(oldE) =>
-        updateThunk(oldE).flatMap { ar =>
+        updateThunk(oldE).flatMap {
+          case (entitiy, metadata) =>
           val newRev = oldE._2 + 1
-          if (map.replace(id, oldE, ar -> newRev)) {
-            Future successful newRev
+          if (map.replace(id, oldE, entitiy -> newRev)) {
+            Future successful newRev -> metadata
           } else {
-            tryUpdate(id, expectedRevision, metadata, updateThunk)
+            tryUpdate(id, expectedRevision, /*metadata,*/ updateThunk)
           }
         }
     }
 
-  protected def update[R](
-      updateThunk: Loaded => Future[UT[R]],
-      id: K, expectedRevision: Option[Revision])(
-      implicit
-      metadata: Metadata): Future[UM[R]] =
-    Future(tryUpdate(id, expectedRevision, metadata.toMap, updateThunk)).flatMap(identity)
+  protected def update(
+      updateThunk: Loaded => Future[UpdateReturn],
+      id: K, expectedRevision: Option[Revision])
+      // (
+      // implicit
+      // metadata: Metadata)
+      : Future[Revision] =
+    Future(tryUpdate(id, expectedRevision, /*metadata.toMap,*/ updateThunk))
+      .flatMap { _.map(_._1) }
 
 }

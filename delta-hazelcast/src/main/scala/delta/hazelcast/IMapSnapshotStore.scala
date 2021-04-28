@@ -28,17 +28,20 @@ extends SnapshotStore[K, V] {
     callback.future
   }
 
-  private def updateFailure(id: K, th: Throwable) =
-    logger.severe(s"""Updating entry $id in "${imap.getName}" failed""", th)
+  private def logUpdateFailure(id: K, th: Throwable) =
+    logger.severe(s"""Updating entry `$id` in "${imap.getName}" failed""", th)
 
   def write(id: K, snapshot: Snapshot): Future[Unit] =
     write(id, Right(snapshot))
 
-  protected def write(id: K, update: Either[(Int, Long), Snapshot]): Future[Unit] =
+  protected def write(
+      id: K,
+      update: Either[(Int, Long), Snapshot])
+      : Future[Unit] =
     try {
       val callback = new CallbackPromise[Any, Unit](_ => ()) {
         override def onFailure(th: Throwable) = {
-          updateFailure(id, th)
+          logUpdateFailure(id, th)
           super.onFailure(th)
         }
       }
@@ -46,7 +49,7 @@ extends SnapshotStore[K, V] {
       callback.future
     } catch {
       case NonFatal(th) =>
-        updateFailure(id, th)
+        logUpdateFailure(id, th)
         Future failed th
     }
 

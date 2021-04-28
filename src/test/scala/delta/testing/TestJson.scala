@@ -1,7 +1,5 @@
 package delta.testing
 
-import org.junit._, Assert._
-
 import scuff.Codec
 
 import delta._
@@ -10,34 +8,34 @@ import delta.util.json._
 import java.util.UUID
 import java.time.LocalDateTime
 
-class TestJson {
+class TestJson
+extends BaseTest {
+
   type JSON = String
 
-  @Test
-  def transaction1() = {
+  test("transaction1") {
     val eventCodec = new Codec[String, JSON] {
       def encode(list: String) = s"""{"value":"${list.replace("\"", "\\\"")}"}"""
       def decode(json: JSON) = json.substring(10, json.length - 2).replace("\\\"", "\"")
     }
     val testEvt = eventCodec encode "ABC"
-    assertEquals("ABC", eventCodec decode testEvt)
+    assert("ABC" === (eventCodec decode testEvt))
     val md = Map("one" -> "1", "time" -> LocalDateTime.now.toString)
     val events = List("foo", "BAR", "", "baZZ")
     val tx = new Transaction(45623423423L, Channel("cHAnnel"), UUID.randomUUID(), 123, md, events)
 
-    val txCodec = new delta.util.json.JsonTransaction(JsonUUID, eventCodec)
-    val txJson = txCodec encode tx
-    val restoredTx = txCodec decode txJson
-    assertEquals(tx, restoredTx)
+    val txTransportCodec = new delta.util.json.JsonTransaction(JsonUUID, eventCodec)
+    val txJson = txTransportCodec encode tx
+    val restoredTx = txTransportCodec decode txJson
+    assert(tx === restoredTx)
   }
-  @Test
-  def transaction2() = {
+  test("transaction2") {
     val eventCodec = Codec.fromString(_.toInt)
     val md = Map("one" -> "1", "time" -> LocalDateTime.now.toString)
     val events = List(1, 2, 3, Int.MaxValue)
     val tx = new Transaction(Long.MinValue, Channel(""), UUID.randomUUID(), Int.MaxValue, md, events)
 
-    val txCodec = new delta.util.json.JsonTransaction(JsonUUID, eventCodec) {
+    val txTransportCodec = new delta.util.json.JsonTransaction(JsonUUID, eventCodec) {
       override def streamField = "id"
       override def channelField = "ch"
       override def tickField = "@t"
@@ -45,37 +43,34 @@ class TestJson {
       override def metadataField = "@md"
       override def eventsField = "@ev"
     }
-    val txJson = txCodec encode tx
-    val restoredTx = txCodec decode txJson
-    assertEquals(tx, restoredTx)
+    val txJson = txTransportCodec encode tx
+    val restoredTx = txTransportCodec decode txJson
+    assert(tx === restoredTx)
   }
 
-  @Test
-  def tuples1() = {
+  test("tuples1") {
     val eventCodec = Codec.fromString(_.toInt)
     val uuid = UUID.randomUUID()
-    val txCodec = new JsonTransaction(JsonUUID, eventCodec)
-    val codec = JsonTuple2(JsonUUID, txCodec)
+    val txTransportCodec = new JsonTransaction(JsonUUID, eventCodec)
+    val codec = JsonTuple2(JsonUUID, txTransportCodec)
     val tx = Transaction.apply(23424, Channel("Hello"), uuid, 45, Map.empty, 4 :: 3 :: 2 :: 1 :: Nil)
     val tupleJson = codec.encode(uuid -> tx)
     println(tupleJson)
     val (uuid2, tx2) = codec decode tupleJson
-    assertEquals(uuid, uuid2)
-    assertEquals(tx, tx2)
+    assert(uuid === uuid2)
+    assert(tx === tx2)
   }
 
-  @Test
-  def tuples2() = {
+  test("tuples2") {
     val codec = JsonTuple2(Codec.fromString(_.toInt))
     val tupleJson = codec encode 9 -> 8
     println(tupleJson)
     val (nine, eight) = codec decode tupleJson
-    assertEquals(9, nine)
-    assertEquals(8, eight)
+    assert(9 === nine)
+    assert(8 === eight)
   }
 
-  @Test
-  def eventCodec() = {
+  test("eventCodec") {
     val evtFmt = new EventFormat[Int, JSON] {
       def getName(cls: Class[_ <: Int]): String = "integer"
       def getVersion(cls: Class[_ <: Int]): Byte = 111
@@ -84,28 +79,26 @@ class TestJson {
     }
     val evtCodec = new JsonEvent(evtFmt)(Channel(""), Map.empty[String, String])
     val jsonMax = evtCodec encode Int.MaxValue
-    assertEquals(Int.MaxValue, evtCodec decode jsonMax)
+    assert(Int.MaxValue === (evtCodec decode jsonMax))
     val jsonMin = evtCodec encode Int.MinValue
-    assertEquals(Int.MinValue, evtCodec decode jsonMin)
+    assert(Int.MinValue === (evtCodec decode jsonMin))
   }
 
-  @Test
-  def eventCodec_noVersion() = {
+  test("eventCodec_noVersion") {
     val evtFmt = new EventFormat[Int, JSON] {
       def getName(cls: Class[_ <: Int]): String = "integer"
-      def getVersion(cls: Class[_ <: Int]): Byte = NoVersion
+      def getVersion(cls: Class[_ <: Int]): Byte = NotVersioned
       def decode(encoded: delta.EventFormat.Encoded[String]): Int = encoded.data.toInt
       def encode(evt: Int): TestJson.this.JSON = evt.toString
     }
     val evtCodec = new JsonEvent(evtFmt)(Channel(""), Map.empty[String, String])
     val jsonMax = evtCodec encode Int.MaxValue
-    assertEquals(Int.MaxValue, evtCodec decode jsonMax)
+    assert(Int.MaxValue === (evtCodec decode jsonMax))
     val jsonMin = evtCodec encode Int.MinValue
-    assertEquals(Int.MinValue, evtCodec decode jsonMin)
+    assert(Int.MinValue === (evtCodec decode jsonMin))
   }
 
-  @Test
-  def jsonPatch(): Unit = {
+  test("jsonPatch") {
 
   }
 

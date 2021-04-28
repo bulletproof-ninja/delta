@@ -54,8 +54,9 @@ package object sampler {
     override type Return = JSON
 
     def encode(evt: DomainEvent) = evt match {
-      case evt: aggr.dept.DeptEvent => evt.dispatch(this)
-      case evt: aggr.emp.EmpEvent => evt.dispatch(this)
+      case evt: aggr.dept.DeptEvent => evt dispatch this
+      case evt: aggr.emp.EmpEvent => evt dispatch this
+      case _ => ???
     }
   }
 

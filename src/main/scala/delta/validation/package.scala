@@ -5,11 +5,12 @@ import scala.concurrent.Future
 /**
   * Support for global, cross stream, state validation
   * and compensating (rollback) actions.
+  * @see https://docs.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction
   */
 package object validation {
 
   /** Compensation function. */
-  type Compensate[C] = C => Unit
+  type Compensate[C] = C => write.Metadata
 
   private[this] val future_EmptyMap = Future successful Map.empty[Any, Any]
 

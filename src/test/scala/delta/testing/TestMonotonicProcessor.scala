@@ -6,51 +6,43 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent._, duration._
 import scala.util.{ Random => rand }
 
-import org.junit.Assert._
-import org.junit.Test
-
 import delta._
-import delta.process.MonotonicReplayProcessor
-import delta.process.ConcurrentMapStore
-import delta.process.Update
+import delta.process._
 
 import scuff.concurrent.{ PartitionedExecutionContext, ScuffFutureObject }
-import delta.process.ReplayCompletion
-import delta.process.ReplayProcessConfig
-import delta.process.StreamProcessStore
 
-class TestMonotonicProcessor {
+class TestMonotonicProcessor
+extends BaseTest {
   private[this] val NoFallback = (_: Int) => Future.none
 
-  @Test
-  def `test out-of-order and callback`(): Unit = {
+  test("test out-of-order and callback") {
     object Tracker {
       def clear() = {
         snapshotMap.clear()
         latch = new CountDownLatch(1)
       }
-      type State = ConcurrentMapStore.State[String]
-      val snapshotMap = new TrieMap[Int, State]
+      type ReplayState = delta.process.ReplayState[String]
+      val snapshotMap = new TrieMap[Int, ReplayState]
       @volatile var lastUpdate: Update[String] = _
       @volatile var latch: CountDownLatch = _
     }
     class Mono(implicit ec: ExecutionContext)
     extends MonotonicReplayProcessor[Int, Char, String, String](
-      ReplayProcessConfig(10.seconds, 100)) {
+      ReplayProcessConfig(completionTimeout = 90.seconds, writeBatchSize = 100)) {
         protected def executionContext = ec
         protected val processStore: StreamProcessStore[Int,String,String] =
-          ConcurrentMapStore(Tracker.snapshotMap, "", None)(NoFallback)
+          ConcurrentMapStore(Tracker.snapshotMap, "string", None)(NoFallback)
 
-        protected def whenDone(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] =
+        protected def asyncResult(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] =
           Future successful status
 
-      override def onUpdate(id: Int, update: Update) = {
+      override def onUpdate(id: Int, update: Update[String]) = {
         // println(s"Update: ${update.snapshot}, Latch: ${Tracker.latch.getCount}")
-        // assertEquals(42, update.id)
-        assertTrue(update.changed.nonEmpty)
+        // assert(42 === update.id)
+        assert(update.change.nonEmpty)
         Tracker.lastUpdate = update
         if (update.revision == 4) {
-          assertEquals(1L, Tracker.latch.getCount)
+          assert(1L === Tracker.latch.getCount)
           Tracker.latch.countDown()
         }
       }
@@ -65,7 +57,7 @@ class TestMonotonicProcessor {
         newState
       }
     }
-    val Ch = Channel("")
+    val Ch = Channel("test")
     val txs = List(
       Transaction(
         stream = 42, revision = 0,
@@ -97,12 +89,13 @@ class TestMonotonicProcessor {
         val txSequence = { txs.map(_.revision).mkString(",") }
         //        println(s"----------------- $n: $txSequence using $ec ---------------")
         val mp = new Mono()(ec)
-        txs.map(mp).foreach(_.await)
-        assertTrue(
-          s"(Latch: ${Tracker.latch.getCount}) Timed out on number $n with the following revision sequence: $txSequence, using EC $ec",
-          Tracker.latch.await(5, TimeUnit.SECONDS))
-        assertEquals(Snapshot("Hello, World!", 4, 666), Tracker.snapshotMap(42).snapshot)
-        assertEquals(Update(Some("Hello, World!"), 4, 666), Tracker.lastUpdate)
+        txs.map(mp.next)
+        mp.result().await
+        assert(
+          Tracker.latch.await(5, TimeUnit.SECONDS),
+          s"(Latch: ${Tracker.latch.getCount}) Timed out on number $n with the following revision sequence: $txSequence, using EC $ec")
+        assert(Snapshot("Hello, World!", 4, 666) === Tracker.snapshotMap(42).snapshot)
+        assert(Update(Some("Hello, World!"), 4, 666) === Tracker.lastUpdate)
       }
 
     val partitioned = PartitionedExecutionContext(1, th => th.printStackTrace(System.err))
@@ -114,20 +107,18 @@ class TestMonotonicProcessor {
       ecs.foreach(processAndVerify(_, random, n))
     }
     for (n <- 1001 to 1025) {
-      processAndVerify(RandomDelayExecutionContext, rand.shuffle(txs), n)
+      processAndVerify(ec, rand.shuffle(txs), n)
     }
 
   }
 
-  @Test
-  def `large entity`(): Unit = {
+  test("large entity") {
       def test(exeCtx: ExecutionContext): Unit = {
           implicit def ec = exeCtx
-        //        println(s"Testing with $exeCtx")
-        type State = ConcurrentMapStore.State[String]
-        val snapshotMap = new TrieMap[Int, State]
+        type ReplayState = delta.process.ReplayState[String]
+        val snapshotMap = new TrieMap[Int, ReplayState]
         val processor = new MonotonicReplayProcessor[Int, Char, String, String](
-          ReplayProcessConfig(20.seconds, 100)) {
+          ReplayProcessConfig(completionTimeout = 90.seconds, writeBatchSize = 100)) {
           protected def executionContext = ec
           protected val processStore: StreamProcessStore[Int,String,String] =
             ConcurrentMapStore(snapshotMap, "", None)(NoFallback)
@@ -135,7 +126,7 @@ class TestMonotonicProcessor {
             case ec: PartitionedExecutionContext => ec.singleThread(id)
             case ec => ec
           }
-          protected def whenDone(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] =
+          protected def asyncResult(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] =
             Future successful status
           protected def process(tx: Transaction, currState: Option[String]) = {
             val sb = new StringBuilder(currState getOrElse "")
@@ -159,20 +150,19 @@ class TestMonotonicProcessor {
         }
         val expectedString: String = txs.flatMap(_.events).mkString
         val randomized = rand.shuffle(txs)
-        val processFutures = randomized.map { tx =>
-          processor(tx)
+        randomized.foreach {
+          processor.next
         }
-        val allProcessed = Future.sequence(processFutures)
-        allProcessed.await
-        val ConcurrentMapStore.State(Snapshot(string, revision, _), modified) = snapshotMap(id)
-        assertTrue(modified)
-        assertEquals(expectedString, string)
-        assertEquals(txCount - 1, revision)
+        processor.result().await
+        val ReplayState(Snapshot(string, revision, _), modified) = snapshotMap(id)
+        assert(modified)
+        assert(expectedString === string)
+        assert(txCount - 1 === revision)
       }
 
     test(ExecutionContext.global)
     test(PartitionedExecutionContext(1, th => th.printStackTrace(System.err)))
-    test(new RandomDelayExecutionContext(ExecutionContext.global, 3))
+    test(ec)
 
   }
 

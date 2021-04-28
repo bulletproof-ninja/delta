@@ -19,7 +19,7 @@ import delta.process.ReplayResult
  * have validation process activated by calling the `activate` method.
  */
 trait ConsistencyValidation[SID, EVT]
-extends TransactionPublishing[SID, EVT] {
+extends EventStore[SID, EVT] {
 
   private abstract class Activation {
     type State
@@ -75,7 +75,8 @@ extends TransactionPublishing[SID, EVT] {
     val streamCompletion =
       replayProc.finished
         .flatMap { replayCompletion =>
-          validation.completeStreams(this, replayCompletion.incompleteStreams, txProcessor)
+          validation.completeStreams(
+              this, replayCompletion.brokenStreams, txProcessor, replayConfig.completionTimeout)
             .map { streamErrors =>
               ReplayResult(replayCompletion.txCount, streamErrors)
             }
@@ -177,20 +178,33 @@ extends TransactionPublishing[SID, EVT] {
     }
   }
 
+  /**
+    * @return Single-thread context for validation.
+    */
   protected def validationContext(stream: SID): ExecutionContext
 
-  abstract final override protected def publishTransaction(
-      stream: SID, ch: Channel, txFuture: Future[Transaction]): Unit = {
-    implicit val ec = validationContext(stream)
-    for (a <- this.activation.future) {
-      if (a.compensation isDefinedAt ch) txFuture.foreach {
-        publishOrDelay(_, a.txProcessor, a.compensation(ch))
+  override protected def publish(tx: Transaction): Unit = {
+    implicit val ec = validationContext(tx.stream)
+    for (act <- this.activation.future) {
+      if (act.compensation isDefinedAt tx.channel) {
+        publishOrDelay(tx, act.txProcessor, act.compensation(tx.channel))
       } else {
-        super.publishTransaction(stream, ch, txFuture)
+        super.publish(tx)
       }
     }
-
   }
+  // abstract final override protected def publishTransaction(
+  //     stream: SID, ch: Channel, txFuture: Future[Transaction]): Unit = {
+  //   implicit val ec = validationContext(stream)
+  //   for (a <- this.activation.future) {
+  //     if (a.compensation isDefinedAt ch) txFuture.foreach {
+  //       publishOrDelay(_, a.txProcessor, a.compensation(ch))
+  //     } else {
+  //       super.publishTransaction(stream, ch, txFuture)
+  //     }
+  //   }
+
+  // }
 
   private def publishOrDelay[S](
       tx: Transaction,
@@ -239,7 +253,7 @@ extends TransactionPublishing[SID, EVT] {
     }
 
   private def publishAndDeactivate(tx: Transaction, status: StreamStatus): Unit = {
-    try super.publishTransaction(tx.stream, tx.channel, Future successful tx) finally {
+    try super.publish(tx) finally {
       StreamStatus.deactivate(tx, status).foreach {
         case (anotherTx, updStatus) => publishAndDeactivate(anotherTx, updStatus)
       }

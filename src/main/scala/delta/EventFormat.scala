@@ -13,7 +13,7 @@ trait EventFormat[EVT, SF] {
 
   type Encoded = EventFormat.Encoded[SF]
   type EventClass = Class[_ <: EVT]
-  final def NoVersion = EventFormat.NoVersion
+  final def NotVersioned = EventFormat.NotVersioned
 
   final def adapt[A](implicit adapter: Codec[SF, A]): EventFormat[EVT, A] =
     new EventFormatAdapter[EVT, A, SF](adapter, this)
@@ -27,9 +27,23 @@ trait EventFormat[EVT, SF] {
     }
   }
 
-  /** Return unique name of event. */
+  /**
+    * Construct name of event type. Must be unique
+    * withtin the scope of this formatter.
+    * @note This method is cached.
+    * @return Unique name of event
+    */
   protected def getName(cls: EventClass): String
-  /** Return event version number. Must be strictly > 0. */
+  /**
+    * Return event version number.
+    * Must be either strictly > 0 or set to
+    * [[delta.EventFormat.NotVersioned]].
+    * @note If not versioned, any changes to an event
+    * must lead to a new event type with a new unique
+    * name, eg. the version number embedded in the name.
+    * @note This method is cached, so not necessary to optimize
+    * @return Version of event, or `NotVersioned` if not versioned
+    */
   protected def getVersion(cls: EventClass): Byte
 
   /**
@@ -39,8 +53,15 @@ trait EventFormat[EVT, SF] {
     */
   def encode(evt: EVT): SF
 
+  /**
+    * Override to fix any potential typos or other fixes to a persisted event name.
+    * @param persistedEventName The persisted event name
+    * @return The desired event name
+    */
+  protected def fixEventName(persistedEventName: String): String = persistedEventName
+
   final def decode(name: String, version: Byte, data: SF, channel: Channel, metadata: Map[String, String]): EVT =
-    decode(new Encoded(name, version, data, channel, metadata))
+    decode(new Encoded(fixEventName(name), version, data, channel, metadata))
 
   /**
     * Decode to event.
@@ -52,7 +73,7 @@ trait EventFormat[EVT, SF] {
 
 object EventFormat {
   /** Use this if versioning is not desired. */
-  final val NoVersion: Byte = -1
+  final val NotVersioned: Byte = -1
 
   final case class EventSig(name: String, version: Byte)
 
@@ -72,12 +93,12 @@ object EventFormat {
     def mapData[T](f: SF => T): Encoded[T] = new Encoded(name, _version, f(data), channel, metadata)
 
     /**
-     * Version, *if* version is supported, i.e. not `NoVersion`.
+     * Version, *if* version is supported, i.e. not `NotVersioned`.
      */
     @throws[IllegalStateException]("if version is unsupported")
     @inline
     def version: Byte =
-      if (_version != NoVersion) _version
+      if (_version != NotVersioned) _version
       else throw new IllegalStateException(s"Versioning not supported for event `$name`")
 
     def version[R](pf: PartialFunction[Byte, R]): R = try pf(version) catch {

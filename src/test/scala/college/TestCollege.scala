@@ -1,111 +1,112 @@
 package college
 
-import org.junit._, Assert._
+import java.util.concurrent.ScheduledExecutorService
 
 import delta._
 import delta.util._
+import delta.write._
 import delta.testing._
-
-import college.student._
-import college.semester._
-
-import scuff._
-import scuff.concurrent.{ Threads, StreamPromise, ScuffFutureObject }
-
-import scala.concurrent._, duration._
-import scala.util.{ Random => rand }
-
-import scala.collection.concurrent.TrieMap
-
-import delta.MessageTransportPublishing
-import delta.testing.RandomDelayExecutionContext
-import scala.util.Success
-import scala.util.Failure
-import delta.process._
-import college.validation._
-import delta.testing.InMemoryProcStore
+import delta.process._, LiveProcessConfig._
 import delta.validation.ConsistencyValidation
+import college.validation.EmailValidationProcess.State
 import delta.read.SnapshotReaderSupport
 import delta.read.ReadModel
 import delta.read.MessageHubSupport
-import java.util.concurrent.ScheduledExecutorService
-import college.validation.EmailValidationProcess.State
 
-object TestCollege {
+import college._, student.Student, semester.Semester
 
-  type Transaction = delta.Transaction[Int, CollegeEvent]
+import scuff._
+import scuff.concurrent.{ Threads, ScuffFutureObject }
 
-}
+import scala.collection.concurrent.TrieMap
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.util.{ Random => rand }
+import scala.util.Success
+import scala.util.Failure
+
+import college.validation._
 
 // FIXME: Something's not right with the test case. Code coverage is incomplete.
-class TestCollege {
+class TestCollege
+extends BaseTest {
 
+  implicit def newCollegeMD: CollegeMD = new CollegeMD
+  // implicit def newCollegeMD(unit: Unit)(implicit md: CollegeMD): Future[CollegeMD] = Future successful md
+
+  type Transaction = delta.Transaction[Int, CollegeEvent]
   val Scheduler = Threads.newScheduledThreadPool(8, Threads.factory(Threads.SystemThreadGroup), _.printStackTrace)
 
   val replayConfig = ReplayProcessConfig(2.minutes, 100)
-  val liveConfig = LiveProcessConfig(2.seconds, Scheduler)
-
-  protected def initTicker(es: EventSource[Int, CollegeEvent]) = LamportTicker(es)
+  val liveConfig = LiveProcessConfig(ImmediateReplay)
 
   private class TransientCollegeEventStore
-  extends TransientEventStore(RandomDelayExecutionContext, CollegeEventFormat)(initTicker)
-    with MessageTransportPublishing[Int, CollegeEvent]
-    with ConsistencyValidation[Int, CollegeEvent] {
+  extends TransientEventStore[Int, CollegeEvent, Array[Byte]](ec, CollegeEventFormat)
+  with ConsistencyValidation[Int, CollegeEvent] {
 
-      def validationContext(stream: Int) = RandomDelayExecutionContext
+    val ticker = LamportTicker(new LamportClock(0))
+    def validationContext(stream: Int) = ec
 
-      val txChannels = Set(Student.channel, Semester.channel)
-      def toTopic(ch: Channel) = MessageTransport.Topic(ch.toString)
-      val txTransport = new LocalTransport[Transaction](tx => toTopic(tx.channel), RandomDelayExecutionContext)
-      val txCodec = Codec.noop[Transaction]
+    // val txChannels = Set(student.Channel, semester.Channel)
+    // def toTopic(ch: Channel) = MessageTransport.Topic(ch.toString)
+    // val txTransport = new LocalTransport[Transaction](ec)
+    // val txTransportCodec = Codec.noop[Transaction]
 
-    }
+  }
 
-  def newEventStore(): CollegeEventStore = new TransientCollegeEventStore
+  def newEventStore[MT](
+      allChannels: Set[Channel],
+      txTransport: MessageTransport[MT])(
+      implicit
+      encode: Transaction => MT,
+      decode: MT => Transaction)
+      : college.CollegeEventStore =
+    new TransientCollegeEventStore().asInstanceOf[CollegeEventStore]
+
   def newEmailIndexUpdateHub(): UpdateHub[Int, Unit] = {
     type Msg = (Int, delta.process.Update[Unit])
     val topic = MessageTransport.Topic("email-index-update")
-      def sameTopic(msg: Msg) = topic
-    val transport = new delta.util.LocalTransport(sameTopic, RandomDelayExecutionContext)
+    val transport = new delta.util.LocalTransport[Msg](ec)
     MessageHub(transport, topic)
   }
 
   protected var eventStore: CollegeEventStore = null
 
-  implicit def md = new CollegeMD
-  implicit val mdFunc = () => md
-  implicit def ec = RandomDelayExecutionContext
+  implicit val mdFunc = () => newCollegeMD
 
   protected var StudentRepository: StudentRepo = null
   protected var SemesterRepository: SemesterRepo = null
   protected var EmailIndexStore: EmailValidationProcessStore = null
   protected var EmailIndexUpdates: UpdateHub[Int, Unit] = null
 
-  @Before
-  def setup(): Unit = {
+  override def beforeEach(): Unit = {
 
-    this.eventStore = newEventStore()
+    this.eventStore = {
+      val transport = new delta.util.LocalTransport[Transaction](ec)
+      val channels = college.AllEntities.map(_.channel)
+      newEventStore(channels, transport)
+    }
 
     EmailIndexStore = newEmailValidationProcessStore()
     EmailIndexUpdates = newEmailIndexUpdateHub()
-    this.StudentRepository = new CollegeRepo(Student)(eventStore)
-    this.SemesterRepository = new CollegeRepo(Semester)(eventStore)
+    this.StudentRepository = new CollegeRepo(student.Entity)(eventStore)
+    this.SemesterRepository = new CollegeRepo(semester.Entity)(eventStore)
 
-    val emailValidation = new EmailValidationProcess(
-      10, EmailIndexStore, Scheduler)(
-      StudentRepository, EmailIndexStore, EmailIndexUpdates)
+    val emailValidation =
+      new EmailValidationProcess(
+        EmailIndexStore)(
+        StudentRepository, EmailIndexStore, EmailIndexUpdates)
 
     val replayProcess = emailValidation.validate(eventStore, replayConfig)
     val completion = replayProcess.finished.await
-    assertTrue(completion.incompleteStreams.isEmpty)
-    assertEquals(0, replayProcess.activeTransactions)
+    assert(completion.incompleteStreams.isEmpty)
+    assert(0 === replayProcess.activeTransactions)
     println(s"Total transactions: ${replayProcess.totalTransactions}")
     eventStore.activate(emailValidation, liveConfig)
 
   }
 
-  @After
-  def after(): Unit = {
+  override def afterEach(): Unit = {
     eventStore.ticker.close()
   }
 
@@ -113,9 +114,9 @@ class TestCollege {
     val ids =
       for (_ <- 1 to count) yield {
         val name = randomName
-        val student = Student(RegisterStudent(name, EmailAddress(s"$name@school.edu")))
-        student(AddStudentEmail(EmailAddress(s"$name@gmail.com")))
-        StudentRepository.insert(new Student.Id, student)
+        val st = Student { student.RegisterStudent(name, EmailAddress(s"$name@school.edu")) }
+        st apply student.AddStudentEmail(EmailAddress(s"$name@gmail.com"))
+        StudentRepository.insert(new Student.Id, st)
       }
     Future.sequence(ids).await
   }
@@ -124,7 +125,7 @@ class TestCollege {
     val ids =
       for (_ <- 1 to count) yield {
         val name = randomName + " " + (100 + rand.nextBetween(1, 10))
-        val cls = Semester(CreateClass(name))
+        val cls = Semester { semester.CreateClass(name) }
         SemesterRepository.insert(new Semester.Id, cls)
       }
     Future.sequence(ids).await
@@ -142,7 +143,7 @@ class TestCollege {
       val semesters = (1 to rand.nextBetween(1, 11)).map(_ => randomSemester).distinct
       semesters.map { semesterId =>
         SemesterRepository.update(semesterId) {
-          _._1 apply EnrollStudent(studentId)
+          _._1 apply semester.EnrollStudent(studentId)
         }
       }
     }
@@ -152,15 +153,15 @@ class TestCollege {
       val futureEnrollment1 =
         if (rand.nextBoolean()) {
           SemesterRepository.update(randomSemester) {
-            _._1 apply EnrollStudent(studentId)
+            _._1 apply semester.EnrollStudent(studentId)
           }
         } else Future.unit
       val futureNameChange = StudentRepository.update(studentId) {
-        _._1 apply ChangeStudentName(randomName)
+        _._1 apply student.ChangeStudentName(randomName)
       }
       val futureEnrollment2 = if (rand.nextBoolean()) {
         SemesterRepository.update(randomSemester) {
-          _._1 apply EnrollStudent(studentId)
+          _._1 apply semester.EnrollStudent(studentId)
         }
       } else Future.unit
       Seq(futureEnrollment1, futureEnrollment2, futureNameChange)
@@ -188,203 +189,254 @@ class TestCollege {
 
     }
 
-  @Test
-  def `many-to-many relationship`(): Unit = {
+  val UnknownName = "[unknown]"
+
+  // test("many-to-many relationship") {
+
+  //   val eventStore = this.eventStore
+  //   type Transaction = eventStore.Transaction
+
+  //   case class StudentM(
+  //     name: String = UnknownName,
+  //     emails: Set[EmailAddress] = Set.empty,
+  //     enrolledClasses: Map[Semester.Id, String] = Map.empty)
+  //   case class SemesterM(
+  //     className: String = UnknownName,
+  //     students: Map[Student.Id, String] = Map.empty)
+
+  //   val AnonStudent = StudentM()
+  //   val AnonSemester = SemesterM()
+
+  //   populateRepos(100, 15)
+  //   val enrollmentQuery = eventStore.query(eventStore.ChannelSelector(Student.channel, Semester.channel)) _
+
+  //   val allStudents = new TrieMap[Student.Id, StudentM]
+  //   val allSemesters = new TrieMap[Semester.Id, SemesterM]
+  //   val done = FutureReduction.foreach(enrollmentQuery) { tx: Transaction =>
+  //       def onSemester(semesterId: Semester.Id)(evt: semester.SemesterEvent): Unit = {
+  //         import semester._
+  //         evt match {
+  //           case ClassCreated(className) =>
+  //             allSemesters.putIfAbsent(semesterId, SemesterM(className)) match {
+  //               case None => // Ok
+  //               case Some(existing) =>
+  //                 if (!allSemesters.replace(semesterId, existing, existing.copy(className = className))) {
+  //                   onSemester(semesterId)(evt)
+  //                 }
+  //             }
+  //           case StudentEnrolled(studentId) =>
+  //             val sem = allSemesters.getOrElse(semesterId, AnonSemester)
+  //             val stu = allStudents.getOrElse(studentId, AnonStudent)
+  //             allStudents.replace(studentId, stu, stu.copy())
+  //             readModel.update(semesterId, semesterStudents.updated(studentId, studentModel))
+  //           case _ => ???
+  //         }
+  //       }
+  //       def studentNameChange(studentName: String, studentId: Student.Id): Unit = {
+  //         val (studentSemesters, oldStudent) = allStudents(studentId)
+  //         val studentModel = oldStudent.copy(name = studentName)
+  //         allStudents.update(studentId, (studentSemesters, studentModel))
+  //         studentSemesters.foreach { semesterId =>
+  //           val semesterStudents = readModel(semesterId)
+  //           readModel.update(semesterId, semesterStudents.updated(studentId, studentModel))
+  //         }
+  //       }
+  //       def studentEmailChange(email: Either[EmailAddress, EmailAddress], studentId: Student.Id): Unit = {
+  //         val (studentSemesters, oldStudent) = allStudents(studentId)
+  //         val studentModel = email match {
+  //           case Left(remove) => oldStudent.copy(emails = oldStudent.emails - remove)
+  //           case Right(add) => oldStudent.copy(emails = oldStudent.emails + add)
+  //         }
+  //         allStudents.update(studentId, (studentSemesters, studentModel))
+  //         studentSemesters.foreach { semesterId =>
+  //           val semesterStudents = readModel(semesterId)
+  //           readModel.update(semesterId, semesterStudents.updated(studentId, studentModel))
+  //         }
+  //       }
+  //       def onStudent(studentId: Student.Id)(evt: student.StudentEvent) = {
+  //         import student._
+  //         evt match {
+  //           case StudentRegistered(name) =>
+  //             studentNameChange(name, studentId)
+  //           case StudentChangedName(newName) =>
+  //             studentNameChange(newName, studentId)
+  //           case StudentEmailAdded(newEmail) =>
+  //             studentEmailChange(Right(EmailAddress(newEmail)), studentId)
+  //           case StudentEmailRemoved(removeEmail) =>
+  //             studentEmailChange(Left(EmailAddress(removeEmail)), studentId)
+  //           case _ => ???
+  //         }
+  //       }
+  //     val evtHandler = tx.channel match {
+  //       case Student.channel =>
+  //         tx.events
+  //           .collect { case evt: student.StudentEvent => evt }
+  //           .foreach { onStudent(new Student.Id(tx.stream)) _ }
+  //       case Semester.channel =>
+  //         tx.events
+  //           .collect { case evt: semester.SemesterEvent => evt }
+  //           .foreach { onSemester(new Semester.Id(tx.stream)) _ }
+  //       case _ => ???
+  //     }
+  //   }
+  //   done.await
+  //   allStudents.foreach {
+  //     case (id, (_, name)) =>
+  //       assert(name !== UnknownName, s"Student $id name was not updated")
+  //   }
+  //   readModel.foreach {
+  //     case (semesterId, students) =>
+  //       students.foreach {
+  //         case (studentId, name) =>
+  //           val (studentSemesters, studentName) = allStudents(studentId)
+  //           assert(studentName === name)
+  //           assert(studentSemesters.contains(semesterId))
+  //       }
+  //   }
+  // }
+
+  test("with join state") {
 
     val eventStore = this.eventStore
-    type Transaction = eventStore.Transaction
 
-    case class StudentModel(name: String, emails: Set[String] = Set.empty)
-
-    val Unknown = StudentModel("<unknown>")
-    populateRepos(100, 15)
-    val enrollmentQuery = eventStore.query(eventStore.ChannelSelector(Student.channel, Semester.channel)) _
-
-    val allStudents = new TrieMap[Student.Id, (Set[Semester.Id], StudentModel)].withDefaultValue(Set.empty -> Unknown)
-    val readModel = new TrieMap[Semester.Id, Map[Student.Id, StudentModel]].withDefaultValue(Map.empty)
-    val done = StreamPromise.foreach(enrollmentQuery) { tx: Transaction =>
-        def onSemester(semesterId: Semester.Id)(evt: CollegeEvent) = evt match {
-          case ClassCreated(_) => ()
-          case StudentEnrolled(studentId) =>
-            val semesterStudents = readModel(semesterId)
-            val (studentSemesters, studentModel) = allStudents(studentId)
-            allStudents.update(studentId, (studentSemesters + semesterId, studentModel))
-            readModel.update(semesterId, semesterStudents.updated(studentId, studentModel))
-        }
-        def studentNameChange(studentName: String, studentId: Student.Id): Unit = {
-          val (studentSemesters, oldStudent) = allStudents(studentId)
-          val studentModel = oldStudent.copy(name = studentName)
-          allStudents.update(studentId, (studentSemesters, studentModel))
-          studentSemesters.foreach { semesterId =>
-            val semesterStudents = readModel(semesterId)
-            readModel.update(semesterId, semesterStudents.updated(studentId, studentModel))
-          }
-        }
-        def studentEmailChange(email: Either[String, String], studentId: Student.Id): Unit = {
-          val (studentSemesters, oldStudent) = allStudents(studentId)
-          val studentModel = email match {
-            case Left(remove) => oldStudent.copy(emails = oldStudent.emails - remove)
-            case Right(add) => oldStudent.copy(emails = oldStudent.emails + add)
-          }
-          allStudents.update(studentId, (studentSemesters, studentModel))
-          studentSemesters.foreach { semesterId =>
-            val semesterStudents = readModel(semesterId)
-            readModel.update(semesterId, semesterStudents.updated(studentId, studentModel))
-          }
-        }
-        def onStudent(studentId: Student.Id)(evt: CollegeEvent) = evt match {
-          case StudentRegistered(name) =>
-            studentNameChange(name, studentId)
-          case StudentChangedName(newName) =>
-            studentNameChange(newName, studentId)
-          case StudentEmailAdded(newEmail) =>
-            studentEmailChange(Right(newEmail), studentId)
-          case StudentEmailRemoved(removeEmail) =>
-            studentEmailChange(Left(removeEmail), studentId)
-        }
-      val evtHandler = tx.channel match {
-        case Student.channel => onStudent(new Student.Id(tx.stream)) _
-        case Semester.channel => onSemester(new Semester.Id(tx.stream)) _
-      }
-      tx.events.foreach(evtHandler)
-    }
-    done.await
-    allStudents.foreach {
-      case (id, (_, name)) => assertNotEquals(s"Student $id name was not updated", Unknown, name)
-    }
-    readModel.foreach {
-      case (semesterId, students) =>
-        students.foreach {
-          case (studentId, name) =>
-            val (studentSemesters, studentName) = allStudents(studentId)
-            assertEquals(studentName, name)
-            assertTrue(studentSemesters.contains(semesterId))
-        }
-    }
-  }
-
-  @Test
-  def `with join state`(): Unit = {
-
-    val eventStore = this.eventStore
-
-    case class SemesterRev(id: Semester.Id, rev: Revision) {
-      def this(id: Int, rev: Revision) = this(new Semester.Id(id), rev)
-      override val toString = s"${id.int}:$rev"
-    }
+    // case class SemesterRev(id: Semester.Id, rev: Revision) {
+    //   def this(id: Int, rev: Revision) = this(new Semester.Id(id), rev)
+    //   override val toString = s"${id.int}:$rev"
+    // }
     sealed abstract class Model
-    case class StudentModel(enrolled: Set[SemesterRev] = Set.empty) extends Model
-    case class SemesterModel(students: Set[Student.Id] = Set.empty) extends Model
+    case class StudentM(name: String = UnknownName, enrolled: Map[Semester.Id, Revision] = Map.empty) extends Model
+    case class SemesterM(className: String = UnknownName, enrolledStudentNames: Map[Student.Id, String] = Map.empty) extends Model
 
-    import ConcurrentMapStore.State
-    type State = ConcurrentMapStore.State[Model]
+    type ReplayState = delta.process.ReplayState[Model]
 
-    class ModelBuilder(memMap: TrieMap[Int, State])
-      extends MonotonicReplayProcessor[Int, SemesterEvent, Model, Model](
-        ReplayProcessConfig(10.seconds, 100))
-      with MonotonicJoinState[Int, SemesterEvent, Model, Model] {
-        protected def executionContext = ec
-        protected val processStore: StreamProcessStore[Int,Model,Model] =
-          ConcurrentMapStore(memMap, "semester", None)(_ => Future.none)
+    class ModelReplayBuilder(memMap: TrieMap[Int, ReplayState])
+    extends MonotonicReplayProcessor[Int, CollegeEvent, Model, Model](
+      ReplayProcessConfig(60.seconds, 100)) {
+      join: MonotonicJoinProcessor[Int, CollegeEvent, Model, Model] =>
+      protected def executionContext = ec
 
-        protected def prepareJoin(
-          semesterId: Int, semesterRev: Revision, tick: Tick, md: Map[String, String])(
-          evt: SemesterEvent): Map[Int, Processor] = {
+      protected val processStore: StreamProcessStore[Int, Model, Model] =
+        ConcurrentMapStore(memMap, "semester", None)(_ => Future.none)
 
-        val semester = new SemesterRev(semesterId, semesterRev)
-        evt match {
-          case StudentEnrolled(studentId) => Map {
-            studentId.int -> Processor(studentEnrolled(semester) _)
-          }
-          case StudentCancelled(studentId) => Map {
-            studentId.int -> Processor(studentCancelled(semester) _)
-          }
-          case _ => Map.empty
-        }
-
-      }
-
-      val streamPartitions = scuff.concurrent.PartitionedExecutionContext(1, _.printStackTrace(System.err))
-      def whenDone(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] = {
+      val replayThreads = scuff.concurrent.PartitionedExecutionContext(2, _.printStackTrace(System.err))
+      def asyncResult(status: ReplayCompletion[Int]): Future[ReplayCompletion[Int]] = {
         println("Shutting down stream partitions...")
-        streamPartitions.shutdown()
+        replayThreads.shutdown()
           .map(_ => status)
           .andThen {
             case Success(_) => println("Stream partitions shut down successfully.")
             case Failure(th) => th.printStackTrace(System.err)
           }
       }
-      protected def processContext(id: Int) = streamPartitions.singleThread(id)
-      override protected def onUpdate(id: Int, update: Update) = update match {
-        case Update(Some(StudentModel(enrolled)), _, _) =>
+      protected def processContext(id: Int) = replayThreads.singleThread(id)
+      override protected def onUpdate(id: Int, update: Update[Model]) = update match {
+        case Update(Some(StudentM(_, enrolled)), _, _) =>
           println(s"Student $id is currently enrolled in: $enrolled")
-        case Update(Some(SemesterModel(students)), rev, _) =>
-          println(s"Semester $id:$rev currently has enrolled: $students")
+        case Update(Some(SemesterM(name, students)), rev, _) =>
+          println(s"Semester $id:$rev ($name) currently has enrolled: $students")
         case _ => // Ignore
       }
 
-      protected def processStream(tx: Transaction, currState: Option[Model]) =
-        tx.events.foldLeft(currState getOrElse SemesterModel()) {
-          case (model @ SemesterModel(students), StudentEnrolled(studentId)) => model.copy(students = students + studentId)
-          case (model @ SemesterModel(students), StudentCancelled(studentId)) => model.copy(students = students - studentId)
-          case (model, _) => model
+      protected def EnrichmentEvaluator(
+          refTx: Transaction, refState: Model) = refState match {
+        case student: StudentM => SemesterEnrichmentFromStudent(new Student.Id(refTx.stream), student)
+        case _: SemesterM => StudentEnrichmentFromSemester(new Semester.Id(refTx.stream), refTx.revision)
+        case _ => PartialFunction.empty
+      }
+
+      private def SemesterEnrichmentFromStudent(studentId: Student.Id, studentM: StudentM): EnrichmentEvaluator = {
+        case student.StudentChangedName(newName) => Enrichment(studentM.enrolled.keySet, new SemesterM) { semester =>
+          val updatedStudents = semester.enrolledStudentNames.updated(studentId, newName)
+          semester.copy(enrolledStudentNames = updatedStudents)
+        }
+      }
+      private def StudentEnrichmentFromSemester(semesterId: Semester.Id, semesterRev: Revision): EnrichmentEvaluator = {
+        case semester.StudentEnrolled(studentId) => Enrichment(studentId, new StudentM) { student =>
+          val enrolled = student.enrolled.updated(semesterId, semesterRev)
+          student.copy(enrolled = enrolled)
+        }
+        case semester.StudentCancelled(studentId) => Enrichment(studentId, new StudentM) { student =>
+          val unenrolled = student.enrolled - semesterId
+          student.copy(enrolled = unenrolled)
+        }
+      }
+
+      protected def process(tx: Transaction, currState: Option[Model]) =
+        tx.channel match {
+          case Student.channel =>
+            val student = currState.collectAs[StudentM] getOrElse StudentM()
+            tx.events.foldLeft(student) {
+              case _ => student
+            }
+          case Semester.channel =>
+            val sem = currState.collectAs[SemesterM] getOrElse SemesterM()
+            tx.events.foldLeft(sem) {
+              case (sem, semester.StudentEnrolled(studentId)) =>
+                val students = sem.enrolledStudentNames.updated(studentId, UnknownName)
+                sem.copy(enrolledStudentNames = students)
+              case (sem, semester.StudentCancelled(studentId)) =>
+                val students = sem.enrolledStudentNames - studentId
+                sem.copy(enrolledStudentNames = students)
+              case _ => sem
+            }
+          case ch =>
+            sys.error(s"Unhandled entity: $ch")
         }
 
-      private def studentEnrolled(semester: SemesterRev)(model: Option[Model]): StudentModel = {
-        val student = model collectOrElse new StudentModel
-        student.copy(enrolled = student.enrolled + semester)
-      }
-      private def studentCancelled(semester: SemesterRev)(model: Option[Model]): StudentModel = {
-        val student = model.collectAs[StudentModel] getOrElse sys.error("Out of order processing")
-        student.copy(enrolled = student.enrolled - semester)
-      }
     }
 
     val (_, semesterIds) = populateRepos(100, 20)
-    val semesterRevs: Map[Semester.Id, Int] =
+    val currSemesterRevs: Map[Semester.Id, Int] =
       (Future sequence semesterIds.map(id => eventStore.currRevision(id.int).map(rev => id -> rev)))
       .await
       .map {
         case (id, revOpt) => id -> revOpt.getOrElse { fail(s"Semester $id does not exist"); -1 }
       }.toMap
-    val inMemoryMap = new TrieMap[Int, State]
-    val builder = StreamPromise(new ModelBuilder(inMemoryMap))
-    eventStore.query(eventStore.Selector(Semester.channel))(builder)
-    builder.future.await
+    val inMemoryMap = new TrieMap[Int, ReplayState]
+    val queryFuture: Future[ReplayCompletion[Int]] = eventStore.query(eventStore.Selector(Semester.channel)) {
+      new ModelReplayBuilder(inMemoryMap)
+      with MonotonicJoinProcessor[Int, CollegeEvent, Model, Model]
+    }
+    val replayCompletion = queryFuture.await
+    assert(replayCompletion.incompleteStreams.isEmpty)
     inMemoryMap.foreach {
-      case (semesterId, State(Snapshot(SemesterModel(students), rev, _), _)) =>
-        val semId = new Semester.Id(semesterId)
-        val expected = semesterRevs.get(semId) match {
+      case (semesterIntId, ReplayState(Snapshot(SemesterM(_, students), inMemSemesterRev, _), _)) =>
+        val semesterId = new Semester.Id(semesterIntId)
+        val currSemesterRev = currSemesterRevs.get(semesterId) match {
           case Some(rev) => rev
           case None =>
-            if (semesterIds contains semId) {
-              eventStore.currRevision(semId.int).await getOrElse sys.error(s"Semester $semId does not exist in event store, which should be impossible")
-            } else fail(s"Semester $semId exists in inMemoryMap, but not in event store. That is basically impossible")
+            if (semesterIds contains semesterId) {
+              eventStore.currRevision(semesterId.int).await getOrElse sys.error(s"Semester $semesterId does not exist in event store, which should be impossible")
+            } else fail(s"Semester $semesterId exists in inMemoryMap, but not in event store. That is basically impossible")
         }
-        assertEquals(s"Semester $semesterId revision $rev failed", expected, rev)
-        val studentSemesters = students
-          .map(id => inMemoryMap(id.int))
-          .collect {
-            case State(Snapshot(StudentModel(semesters), _, _), _) => semesters.map(_.id.int)
-          }
+        assert(currSemesterRev === inMemSemesterRev, s"Semester $semesterId revision $inMemSemesterRev failed")
+        val studentSemesters: Iterable[Set[Semester.Id]] =
+          students.keys
+            .flatMap(id => inMemoryMap.get(id.int))
+            .collect {
+              case ReplayState(Snapshot(StudentM(_, semesters), _, _), _) =>
+                semesters.keySet
+            }
         studentSemesters.foreach { semesters =>
-          assertTrue(semesters contains semesterId)
+          assert(semesters contains semesterId)
         }
-      case (studentId, State(Snapshot(StudentModel(semesters), rev, _), _)) =>
-        assertEquals(-1, rev)
-        val semesterStudents = semesters
-          .map(s => inMemoryMap(s.id.int))
-          .collect {
-            case State(Snapshot(SemesterModel(students), _, _), _) => students.map(_.int)
-          }
+      case (studentIntId, ReplayState(Snapshot(StudentM(_, semesters), rev, _), _)) =>
+        assert(-1 === rev)
+        val studentId = new Student.Id(studentIntId)
+        val semesterStudents: Iterable[Set[Student.Id]] =
+          semesters
+            .map(_ => inMemoryMap(studentId.int))
+            .collect {
+              case ReplayState(Snapshot(SemesterM(_, students), _, _), _) =>
+                students.keySet
+            }
         semesterStudents.foreach { students =>
-          assertTrue(students contains studentId)
+          assert(students contains studentId)
         }
     }
   }
 
-  @Test
-  def `lookup by email`(): Unit = {
+  test("lookup by email") {
 
     type Snapshot = delta.Snapshot[Unit]
     type Update = delta.process.Update[Unit]
@@ -402,53 +454,52 @@ class TestCollege {
         def name = "unit"
         protected type StreamId = Int
         protected def StreamId(id: Student.Id): StreamId = id.int
-        protected val snapshotReader = EmailIndexStore.asSnapshotReader[Unit]
+        protected val snapshotReader = EmailIndexStore.asSnapshotReader[Int, Unit]
 
         private[this] val SomeUnit = Some(())
         protected def updateState(
-            id: Student.Id, prevState: Option[Unit], update: Unit) =
-          SomeUnit
-        protected val defaultReadTimeout: FiniteDuration = 10.seconds
+            id: Student.Id, prevState: Option[Unit], update: Unit) = SomeUnit
+        protected val defaultReadTimeout: FiniteDuration = 60.seconds
         protected def scheduler: ScheduledExecutorService = Scheduler
-        protected def hub: MessageHub[StreamId, Update] = EmailIndexUpdates
+        protected def updateHub: MessageHub[StreamId, Update] = EmailIndexUpdates
     }
 
     val emailA = EmailAddress("A@school.edu")
-    val studentA = Student(RegisterStudent("A", emailA))
+    val studentA = Student { student.RegisterStudent("A", emailA) }
     val idA = StudentRepository.insert(new Student.Id, studentA).await
 
     val emailB = EmailAddress("B@school.edu")
-    val studentB = Student(RegisterStudent("B", emailB))
+    val studentB = Student { student.RegisterStudent("B", emailB) }
     val idB = StudentRepository.insert(new Student.Id, studentB).await
 
     val dupes = EmailIndexStore.findDuplicates().await
-    assertTrue(s"Duplicates found: $dupes", dupes.isEmpty)
+    assert(dupes.isEmpty, s"Duplicates found: $dupes")
 
     emailIndexModel.readCustom(idA)(minRevision(0)).await
-    assertEquals(idA, EmailIndexStore.lookup(emailA).await.get)
+    assert(idA === EmailIndexStore.lookup(emailA).await.get)
 
     emailIndexModel.read(idB, minRevision = 0).await
-    assertEquals(idB, EmailIndexStore.lookup(emailB).await.get)
+    assert(idB === EmailIndexStore.lookup(emailB).await.get)
 
     val emailA2 = EmailAddress("a@SCHOOL.EDU")
     val emailB2 = EmailAddress("b@SCHOOL.EDU")
-    assertEquals(idA, EmailIndexStore.lookup(emailA2).await.get)
-    assertEquals(idB, EmailIndexStore.lookup(emailB2).await.get)
+    assert(idA === EmailIndexStore.lookup(emailA2).await.get)
+    assert(idB === EmailIndexStore.lookup(emailB2).await.get)
 
     StudentRepository.update(idA) {
-      case (student, 0) =>
-        student apply AddStudentEmail(emailB2)
+      case (stu, 0) =>
+        stu apply student.AddStudentEmail(emailB2)
       case (_, rev) =>
         sys.error(s"Unexpected revision: $rev")
     }.await
-    assertEquals(idB, EmailIndexStore.lookup(emailB2).await.get)
+    assert(idB === EmailIndexStore.lookup(emailB2).await.get)
 
     emailIndexModel.readCustom(idA)(minRevision(1)).await
-    assertEquals(idB, EmailIndexStore.lookup(emailB2).await.get)
+    assert(idB === EmailIndexStore.lookup(emailB2).await.get)
 
     val snapshot = emailIndexModel.read(idA, minRevision = 2).await
-    assertEquals(2, snapshot.revision)
-    assertEquals(1, EmailIndexStore.lookupAll(emailB2).await.size)
+    assert(2 === snapshot.revision)
+    assert(1 === EmailIndexStore.lookupAll(emailB2).await.size)
 
   }
 }

@@ -15,12 +15,14 @@ import com.mongodb.async.SingleResultCallback
 import com.mongodb.async.client.MongoCollection
 import com.mongodb.async.client.{ MongoClient, MongoClients }
 import com.mongodb.connection.ClusterType
-import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
+// import org.mongodb.scala.bson.codecs.DEFAULT_CODEC_REGISTRY
 
 import scuff._
 import scuff.concurrent.Threads
 
 import delta._
+import scala.concurrent.Promise
+import scala.util.control.NonFatal
 
 object MongoEventStore {
   @varargs
@@ -44,7 +46,7 @@ object MongoEventStore {
       case ClusterType.REPLICA_SET => ReadConcern.MAJORITY -> WriteConcern.MAJORITY
       case _ => ReadConcern.DEFAULT -> WriteConcern.JOURNALED
     }
-    val registries = Seq(optRegistry, settings.getCodecRegistry, DEFAULT_CODEC_REGISTRY).filter(_ != null)
+    val registries = Seq(optRegistry, settings.getCodecRegistry/*, DEFAULT_CODEC_REGISTRY*/).filter(_ != null)
     val registry = CodecRegistries.fromRegistries(registries.asJava)
     client
       .getDatabase(ns.getDatabaseName)
@@ -77,8 +79,7 @@ object MongoEventStore {
 abstract class MongoEventStore[ID: BsonCodec, EVT](
   docCollection: MongoCollection[Document],
   evtFmt: EventFormat[EVT, BsonValue],
-  overrideTransactionCodec: BsonCodec[delta.Transaction[ID, EVT]] = null)(
-  initTicker: MongoEventStore[ID, EVT] => Ticker)
+  overrideTransactionCodec: BsonCodec[delta.Transaction[ID, EVT]] = null)
 extends delta.EventStore[ID, EVT] {
 
   def ensureIndexes(ensureIndexes: Boolean = true): this.type = {
@@ -98,12 +99,11 @@ extends delta.EventStore[ID, EVT] {
     }
     this
   }
-  lazy val ticker = initTicker(this)
 
   def codecRegistry: CodecRegistry = txCollection.getCodecRegistry
 
   protected val txCollection: MongoCollection[Transaction] = {
-    val txCodec = Option(overrideTransactionCodec) getOrElse new DefaultTransactionCodec(
+    val txTransportCodec = Option(overrideTransactionCodec) getOrElse new DefaultTransactionCodec(
       docCollection.getCodecRegistry.get(classOf[BsonValue])
         .ensuring(_ != null, "No BsonValue codec found in codec registry!"))
     val registry = Try(docCollection.getCodecRegistry.get(classOf[Transaction])) match {
@@ -113,7 +113,7 @@ extends delta.EventStore[ID, EVT] {
         CodecRegistries.fromRegistries(
           CodecRegistries.fromCodecs(
             implicitly[BsonCodec[ID]],
-            txCodec),
+            txTransportCodec),
           docCollection.getCodecRegistry)
       case Failure(cause) => throw cause
     }
@@ -137,18 +137,18 @@ extends delta.EventStore[ID, EVT] {
     }(Threads.PiggyBack) // map revision on the same thread
   }
 
-  def replayStream[R](stream: ID)(callback: StreamConsumer[Transaction, R]): Unit = {
-    queryWith(new Document("_id.stream", stream), callback, OrderByRevision)
+  def replayStream[R](stream: ID)(reduction: Reduction[Transaction, R]): Future[R] = {
+    queryWith(new Document("_id.stream", stream), reduction, OrderByRevision)
   }
 
-  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStreamFrom[R](stream: ID, fromRevision: Revision)(reduction: Reduction[Transaction, R]): Future[R] = {
     val filter = new Document("_id.stream", stream)
     if (fromRevision > 0) {
       filter.append("_id.rev", new Document("$gte", fromRevision))
     }
-    queryWith(filter, callback, OrderByRevision)
+    queryWith(filter, reduction, OrderByRevision)
   }
-  def replayStreamRange[R](stream: ID, revisionRange: Range)(callback: StreamConsumer[Transaction, R]): Unit = {
+  def replayStreamRange[R](stream: ID, revisionRange: Range)(reduction: Reduction[Transaction, R]): Future[R] = {
     require(revisionRange.step == 1, s"Revision range must step by 1 only, not ${revisionRange.step}")
     val filter = new Document("_id.stream", stream)
     val from = revisionRange.head
@@ -161,12 +161,17 @@ extends delta.EventStore[ID, EVT] {
       val range = new Document("$gte", from).append("$lte", to)
       filter.append("_id.rev", range)
     }
-    queryWith(filter, callback, OrderByRevision)
+    queryWith(filter, reduction, OrderByRevision)
   }
 
-  def commit(
-    channel: Channel, stream: ID, revision: Revision, tick: Tick,
-    events: List[EVT], metadata: Map[String, String]): Future[Transaction] = {
+  protected def commit(
+      tick: Tick,
+      channel: Channel,
+      stream: ID,
+      revision: Revision,
+      metadata: Map[String, String],
+      events: List[EVT])
+      : Future[Transaction] = {
     val tx = Transaction(tick, channel, stream, revision, metadata, events)
     val insertFuture = withFutureCallback[Void] { callback =>
       txCollection.insertOne(tx, callback)
@@ -182,17 +187,22 @@ extends delta.EventStore[ID, EVT] {
   }
 
   protected def queryWith[U](
-      filter: Document, callback: StreamConsumer[Transaction, U], ordering: Document = null): Unit = {
+      filter: Document, reduction: Reduction[Transaction, U], ordering: Document = null): Future[U] = {
+    val promise = Promise[U]()
     val onTx = new Block[Transaction] {
-      def apply(tx: Transaction) = callback.onNext(tx)
+      def apply(tx: Transaction) =
+        try reduction next tx catch {
+          case NonFatal(cause) => promise tryFailure cause
+        }
     }
     val onFinish = new SingleResultCallback[Void] {
       def onResult(result: Void, t: Throwable): Unit = {
-        if (t != null) callback.onError(t)
-        else callback.onDone()
+        if (t == null) promise tryComplete Try { reduction.result() }
+        else promise tryFailure t
       }
     }
     txCollection.find(filter).sort(ordering).forEach(onTx, onFinish)
+    promise.future
   }
 
   def maxTick: Future[Option[Long]] = getFirst[Long]("tick", reverse = true)
@@ -230,9 +240,9 @@ extends delta.EventStore[ID, EVT] {
             matcher.append("events.name", new Document("$in", toJList(evtNames)))
         }
         if (matchByChannel.size == 1) {
-          import scala.jdk.CollectionConverters._
-          matchByChannel.head.asScala.foreach { entry =>
-            docFilter.append(entry._1, entry._2)
+          matchByChannel.head.forEach {
+            case (field, value) =>
+              docFilter.append(field, value)
           }
         } else {
           docFilter.append("$or", toJList(matchByChannel))
@@ -243,13 +253,12 @@ extends delta.EventStore[ID, EVT] {
     docFilter
   }
 
-  def query[U](streamFilter: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
-    queryWith(toDoc(streamFilter), callback)
-  }
+  def query[U](streamFilter: Selector)(reduction: Reduction[Transaction, U]): Future[U] =
+    queryWith(toDoc(streamFilter), reduction)
 
-  def querySince[U](sinceTick: Tick, streamFilter: Selector)(callback: StreamConsumer[Transaction, U]): Unit = {
+  def querySince[U](sinceTick: Tick, streamFilter: Selector)(reduction: Reduction[Transaction, U]): Future[U] = {
     val docFilter = new Document("tick", new Document("$gte", sinceTick))
-    queryWith(toDoc(streamFilter, docFilter), callback)
+    queryWith(toDoc(streamFilter, docFilter), reduction)
   }
 
   private class DefaultTransactionCodec(bsonCodec: BsonCodec[BsonValue])
@@ -292,7 +301,7 @@ extends delta.EventStore[ID, EVT] {
           writeDocument(writer) {
             val EventFormat.EventSig(name, version) = evtFmt signature evt
             writer.writeString("name", name)
-            if (version != evtFmt.NoVersion) {
+            if (version != evtFmt.NotVersioned) {
               writer.writeInt32("v", version.unsigned)
             }
             writer.writeName("data"); bsonCodec.encode(writer, evtFmt.encode(evt), ctx)
@@ -339,7 +348,7 @@ extends delta.EventStore[ID, EVT] {
               val version = reader.readInt32().toByte
               reader.readName("data")
               version
-            case "data" => evtFmt.NoVersion
+            case "data" => evtFmt.NotVersioned
             case unexpected => sys.error(s"Unexpected name: $unexpected")
           }
           val data = bsonCodec.decode(reader, ctx)

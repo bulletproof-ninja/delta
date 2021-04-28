@@ -1,35 +1,60 @@
 package delta
 
 import scuff._
-import scala.reflect.ClassTag
 import delta.process.Update
 
-trait MessageHub[ID, M] {
+trait MessageSink[ID, -M] {
   def publish(id: ID, msg: M): Unit
-  def subscribe(id: ID)(callback: M => Unit): Subscription
 }
+
+trait MessageSource[ID, +M] {
+  def subscribe(id: ID)(callback: M => Unit): Subscription
+
+  def withUpdate[U](implicit ev: M <:< Update[_]): MessageSource[ID, Update[U]] = {
+    val source = MessageSource.this
+    new MessageSource[ID, Update[U]] {
+      def subscribe(id: ID)(callback: Update[U] => Unit): Subscription =
+        source.subscribe(id)(callback.asInstanceOf[M => Unit])
+    }
+  }
+
+}
+
+trait MessageHub[ID, M]
+extends MessageSink[ID, M]
+with MessageSource[ID, M]
 
 object MessageHub {
 
-  def apply[ID, M](
-      transport: MessageTransport { type TransportType = (ID, Update[M]) },
-      topic: MessageTransport.Topic): MessageHub[ID, Update[M]] =
-    new MessageTransportHub[ID, Update[M], (ID, Update[M])](transport, topic, Codec.noop)
+  def forUpdates[ID, M](
+      transport: MessageTransport[(ID, Update[M])],
+      topic: MessageTransport.Topic)
+      : MessageHub[ID, Update[M]] =
+    new MessageTransportHub[ID, Update[M], (ID, Update[M])](transport, topic)
 
-  def apply[ID, M, T: ClassTag](
-      transport: MessageTransport { type TransportType = T },
+  def apply[ID, M, T](
+      transport: MessageTransport[T],
       topic: MessageTransport.Topic,
-      codec: Codec[(ID, M), T]): MessageHub[ID, M] =
-    new MessageTransportHub[ID, M, T](transport, topic, codec)
+      codec: Codec[(ID, M), T])
+      : MessageHub[ID, M] =
+    new MessageTransportHub[ID, M, T](transport, topic)(codec.encode, codec.decode)
+
+  def apply[ID, M, T](
+      transport: MessageTransport[T],
+      topic: MessageTransport.Topic)(
+      implicit
+      encode: ((ID, M)) => T,
+      decode: T => (ID, M))
+      : MessageHub[ID, M] =
+    new MessageTransportHub[ID, M, T](transport, topic)
 
   private final class MessageTransportHub[ID, M, T](
-    transport: MessageTransport { type TransportType = T },
-    topic: MessageTransport.Topic,
-    codec: Codec[(ID, M), T])
+    transport: MessageTransport[T],
+    topic: MessageTransport.Topic)(
+    implicit
+    encoder: ((ID, M)) => T,
+    decoder: T => (ID, M))
   extends MessageHub[ID, M] {
-
-    implicit private[this] val encoder = codec.encode _
-    implicit private[this] val decoder = codec.decode _
 
     def publish(id: ID, msg: M): Unit = transport.publish(topic, id -> msg)
     def subscribe(MatchId: ID)(callback: M => Unit): Subscription = {

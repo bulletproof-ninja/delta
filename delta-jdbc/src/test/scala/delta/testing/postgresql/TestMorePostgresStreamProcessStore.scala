@@ -4,8 +4,6 @@ import delta.testing._
 
 import scala.concurrent._
 
-import org.junit._
-
 import delta.jdbc._
 
 import scuff.SysProps
@@ -15,18 +13,16 @@ import scuff.EmailAddress
 
 import org.postgresql.ds.PGSimpleDataSource
 
-object TestMorePostgresStreamProcessStore {
-
-
-  implicit def ec = RandomDelayExecutionContext
+class TestMorePostgresStreamProcessStore
+extends TestMoreJdbcStreamProcessStore {
 
   val schema = s"delta_testing_$randomName"
 
   val cs = new AsyncConnectionSource with DataSourceConnection {
 
-    override def updateContext: ExecutionContext = RandomDelayExecutionContext
+    override def updateContext: ExecutionContext = ec
 
-    override def queryContext: ExecutionContext = RandomDelayExecutionContext
+    override def queryContext: ExecutionContext = ec
 
     val dataSource = {
       val ds = new PGSimpleDataSource
@@ -38,20 +34,15 @@ object TestMorePostgresStreamProcessStore {
     }
   }
 
-  @AfterClass
-  def cleanup(): Unit = {
+  override def afterAll(): Unit = {
     cs.asyncUpdate {
       _.createStatement().execute(s"DROP SCHEMA $schema CASCADE")
     }.await
+    super.afterAll()
   }
-}
-
-class TestMorePostgresStreamProcessStore
-extends TestMoreJdbcStreamProcessStore {
 
   import TestMoreStreamProcessStore._
   import TestMoreJdbcStreamProcessStore._
-  import TestMorePostgresStreamProcessStore._
 
   override def newLookupStore() = {
     new ProcessStore(cs, schema)
@@ -71,6 +62,4 @@ extends TestMoreJdbcStreamProcessStore {
     }
   }.ensureTable()
 
-  @Test
-  def dummy() = ()
 }

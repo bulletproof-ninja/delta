@@ -24,9 +24,10 @@ import scuff.Codec
 class EntityCompensation[SID, S, ID, E](
   idCodec: Codec[SID, ID],
   repo: Repository[ID, E] with MutableEntity,
-  validator: Validator[ID, S, E], moreValidators: Validator[ID, S, E]*)(
-  implicit
-  metadata: () => Metadata)
+  validator: Validator[ID, S, E], moreValidators: Validator[ID, S, E]*)
+  // (
+  // implicit
+  // metadata: () => Metadata)
 extends Compensation[SID, S] {
 
   @inline
@@ -60,36 +61,36 @@ extends Compensation[SID, S] {
         compensate(compensations)
     }
 
-  private def compensate(compensations: Map[ID, Compensate[E]])(
+  private def compensate(
+      compensations: Map[ID, Compensate[E]])(
       implicit
-      ec: ExecutionContext): Future[Map[SID, Try[Revision]]] = try {
+      ec: ExecutionContext): Future[Map[SID, Try[Revision]]] =
+    try {
 
-    val futureUpdates: Iterable[(SID, Future[Revision])] =
-      compensations.map {
-        case (id, compensation) =>
-          val updateFuture: Future[Revision] =
-            repo.update(id) {
-              case (entity, _) =>
-                Future fromTry Try {
-                  compensation(entity)
-                }
-            }(metadata()) map {
-              case (_, revision) => revision
-            }
-          idCodec.decode(id) -> updateFuture
-        }
+      val futureUpdates: Iterable[(SID, Future[Revision])] =
+        compensations.map {
+          case (id, compensation) =>
+            val updateFuture: Future[Revision] =
+              repo.update(id) {
+                case (entity, _) =>
+                  Future fromTry Try {
+                    compensation(entity)
+                  }
+              }
+            idCodec.decode(id) -> updateFuture
+          }
 
-    Future.traverse(futureUpdates) {
-      case (id, futureRevision) =>
-        futureRevision map {
-          case revision => id -> Success(revision)
-        } recover {
-          case NonFatal(cause) => id -> Failure(new CompensationFailure(id, cause))
-        }
-    }.map(_.toMap)
+      Future.traverse(futureUpdates) {
+        case (id, futureRevision) =>
+          futureRevision map {
+            case revision => id -> Success(revision)
+          } recover {
+            case NonFatal(cause) => id -> Failure(new CompensationFailure(id, cause))
+          }
+      }.map(_.toMap)
 
-  } catch {
-    case NonFatal(cause) => Future failed cause
-  }
+    } catch {
+      case NonFatal(cause) => Future failed cause
+    }
 
 }

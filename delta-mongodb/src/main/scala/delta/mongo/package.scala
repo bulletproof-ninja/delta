@@ -50,10 +50,10 @@ package object mongo {
     }
   }
   implicit def JavaEnumCodec[E <: java.lang.Enum[E]: ClassTag] = new JavaEnumCodec[E]
-  def ScalaEnumCodec[E <: Enumeration](enum: E): Codec[E#Value] = new Codec[E#Value] {
-    val getEncoderClass = enum.values.head.getClass.asInstanceOf[Class[E#Value]]
-    private[this] val byName = enum.values.foldLeft(Map.empty[String, E#Value]) {
-      case (map, enum) => map.updated(enum.toString, enum)
+  def ScalaEnumCodec[E <: Enumeration](enumeration: E): Codec[E#Value] = new Codec[E#Value] {
+    val getEncoderClass = enumeration.values.head.getClass.asInstanceOf[Class[E#Value]]
+    private[this] val byName = enumeration.values.foldLeft(Map.empty[String, E#Value]) {
+      case (map, enumeration) => map.updated(enumeration.toString, enumeration)
     }
     def encode(writer: BsonWriter, value: E#Value, encoderContext: EncoderContext): Unit = {
       stringCodec.encode(writer, value.toString, encoderContext)

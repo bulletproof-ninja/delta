@@ -10,8 +10,9 @@ import collection.{ Map => aMap, Seq => aSeq }
 import collection.mutable.{ Map => mMap }
 
 package cassandra {
-  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](val enum: Enumeration)
-      extends ColumnType[EV] with conv.ScalaEnumType[EV] {
+  abstract class ScalaEnumColumn[EV <: Enumeration#Value: ClassTag](
+    val enumeration: Enumeration)
+  extends ColumnType[EV] with conv.ScalaEnumType[EV] {
     def typeName = "ascii"
     def readFrom(row: Row, col: Int) = byName(row.getString(col))
   }

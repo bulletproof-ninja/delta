@@ -2,7 +2,7 @@ package delta.read
 
 import delta.SnapshotReader
 import scala.concurrent._
-import com.github.ghik.silencer.silent
+import scala.annotation.nowarn
 
 /**
   * Support use of [[delta.SnapshotReader]] as
@@ -15,14 +15,13 @@ trait SnapshotReaderSupport[ID, S]
 extends StreamId {
   rm: ReadModel[ID, S] =>
 
-  implicit protected def toUnit[T](any: T): Unit = ()
+  implicit protected def toUnit[T](@nowarn any: T): Unit = ()
 
   protected def snapshotReader: SnapshotReader[StreamId, _ >: S]
 
-  @silent("never used")
   protected def readSnapshot(id: ID)(
       implicit
-      ec: ExecutionContext): Future[Option[Snapshot]] = {
+      @nowarn ec: ExecutionContext): Future[Option[Snapshot]] = {
 
     val future: Future[Option[delta.Snapshot[_ >: S]]] = snapshotReader read StreamId(id)
 
@@ -31,5 +30,10 @@ extends StreamId {
     future.asInstanceOf[Future[Option[Snapshot]]]
 
   }
+
+  protected def readAgain(
+      id: ID, @nowarn minRevision: Int, @nowarn minTick: Long)(
+      implicit ec: ExecutionContext): Future[Option[Snapshot]] =
+    readSnapshot(id)
 
 }

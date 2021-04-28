@@ -12,9 +12,12 @@ import com.hazelcast.aggregation.Aggregator
 import com.hazelcast.query._
 
 import scala.concurrent._
+import scala.collection.compat._
 import scala.jdk.CollectionConverters._
 
 import scuff.concurrent._
+import scuff.Reduction
+import scala.util.Failure
 
 /**
   * @note This class will generally only make sense if
@@ -35,30 +38,44 @@ with NonBlockingCASWrites[K, V, U] {
 
   def name = imap.getName
 
-  def readBatch(keys: Iterable[K]): Future[collection.Map[K, Snapshot]] = {
-    implicit def ec = Threads.PiggyBack
-    val futures = keys.map { key =>
-      val f = this.read(key).map(_.map(key -> _))
-      f
+  protected def blockingBatchIO: ExecutionContext
+
+  def readBatch(keys: Iterable[K]): Future[collection.Map[K, Snapshot]] =
+    blockingBatchIO.submit {
+      imap
+        .getAll(SetHasAsJava(keys.toSet).asJava)
+        .asScala
     }
-    Future.sequence(futures).map(_.flatten.toMap)
-  }
-  def writeBatch(batch: collection.Map[K, Snapshot]): Future[Unit] = {
-    implicit def ec = Threads.PiggyBack
-    val futures = batch.iterator.map {
-      case (key, snapshot) => write(key, snapshot)
+
+  def writeBatch(
+      batch: Iterable[(K, Snapshot)])
+      : Future[WriteErrors] =
+    blockingBatchIO.submit {
+      imap.putAll(batch.asJava)
+      NoWriteErrors
     }
-    Future.sequence(futures).map(_ => ())
-  }
+
   def refresh(key: K, revision: Revision, tick: Tick): Future[Unit] =
     write(key, Left(revision -> tick))
 
-  def refreshBatch(revisions: collection.Map[K, (Revision, Tick)]): Future[Unit] = {
+  def refreshBatch(
+      revisions: collection.Map[K, (Revision, Tick)])
+      : Future[WriteErrors] = {
     implicit def ec = Threads.PiggyBack
-    val futures = revisions.iterator.map {
-      case (key, update) => write(key, Left(update))
+    val futures: Iterator[(K, Future[Unit])] =
+      revisions.iterator
+        .map {
+          case (key, update) =>
+            key -> write(key, Left(update))
+        }
+    Future.sequenceTry(futures)(_._2, _._1).map { results =>
+      results
+        .collect {
+          case (Failure(failure), key) => key -> failure
+        }
+        .toMap
     }
-    Future.sequence(futures).map(_ => ())
+
   }
 
   import IMapStreamProcessStore._
@@ -147,6 +164,44 @@ extends SecondaryIndexing {
   protected def blockingCtx: ExecutionContext
 
   protected type QueryType = Comparable[_]
+  protected def bulkReadBatchSize = 1000
+
+  private def consumeAll[R](
+      batch: PagingPredicate[K, Snapshot],
+      consumer: Reduction[(StreamId, Snapshot), R]): R = {
+    val entries = imap entrySet batch
+    if (entries.isEmpty) consumer.result()
+    else {
+      entries.forEach { entry =>
+        consumer next entry.getKey -> entry.getValue
+      }
+      if (entries.size < bulkReadBatchSize) consumer.result()
+      else {
+        batch.nextPage()
+        consumeAll(batch, consumer)
+      }
+    }
+  }
+
+  protected def bulkRead[R](
+      filter: (String, QueryType)*)(
+      consumer: Reduction[(StreamId, Snapshot), R])
+      : Future[R] = Future {
+    val predicate =
+      if (filter.isEmpty) {
+        Predicates.alwaysTrue()
+      } else if (filter.tail.isEmpty) {
+        val (name, value) = filter.head
+        Predicates.equal(name, value)
+      } else {
+        val predicates = filter.map {
+          case (name, value) => Predicates.equal(name, value)
+        }
+        Predicates.and(predicates: _*)
+      }
+    val batch = new PagingPredicate[K, Snapshot](predicate, bulkReadBatchSize)
+    consumeAll(batch, consumer)
+  }(blockingCtx)
 
   private def query[R](
       nameValue: (String, QueryType), more: Seq[(String, QueryType)])(
@@ -171,14 +226,14 @@ extends SecondaryIndexing {
     }(blockingCtx)
 
   }
-  protected def queryForSnapshot(
-      nameValue: (String, QueryType), more: (String, QueryType)*)
-      : Future[Map[StreamId, Snapshot]] =
-    query(
-      nameValue, more)(
-      KeySnapshotProjection.asInstanceOf[Projection[Entry[K, Snapshot], (K, Snapshot)]])
+  // protected def queryForSnapshot(
+  //     nameValue: (String, QueryType), more: (String, QueryType)*)
+  //     : Future[Map[StreamId, Snapshot]] =
+  //   query(
+  //     nameValue, more)(
+  //     KeySnapshotProjection.asInstanceOf[Projection[Entry[K, Snapshot], (K, Snapshot)]])
 
-  protected def queryForTick(
+  protected def readTicks(
       nameValue: (String, QueryType), more: (String, QueryType)*)
       : Future[Map[StreamId, Tick]] =
     query(
@@ -187,11 +242,11 @@ extends SecondaryIndexing {
 
 }
 
-object KeySnapshotProjection
-extends Projection[Entry[Any, Snapshot[Any]], (Any, Snapshot[Any])] {
-  def transform(entry: Entry[Any, Snapshot[Any]]): (Any, Snapshot[Any]) =
-    entry.getKey -> entry.getValue
-}
+// object KeySnapshotProjection
+// extends Projection[Entry[Any, Snapshot[Any]], (Any, Snapshot[Any])] {
+//   def transform(entry: Entry[Any, Snapshot[Any]]): (Any, Snapshot[Any]) =
+//     entry.getKey -> entry.getValue
+// }
 
 object KeyTickProjection
 extends Projection[Entry[Any, Snapshot[Any]], (Any, Tick)] {
@@ -249,6 +304,7 @@ extends Aggregator[Entry[K, delta.Snapshot[V]], Map[D, Map[K, Tick]]] {
             val merged = grouped.getOrElse(key, Map.empty) ++ thatMap
             grouped.update(key, merged)
         }
+      case _ => sys.error(s"Combining with different aggregator: ${that.getClass.getName}")
     }
 
   def aggregate(): Map[D, Map[K, Tick]] =

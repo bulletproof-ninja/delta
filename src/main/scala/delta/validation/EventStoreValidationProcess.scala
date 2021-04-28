@@ -1,8 +1,8 @@
 package delta.validation
 
 import delta.process._
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext
+import scala.concurrent._, duration._
+import scuff.concurrent._
 
 /**
   * Process for validation of [[delta.EventStore]].
@@ -36,15 +36,19 @@ extends EventSourceProcessing[SID, EVT] {
   def validate(
       eventStore: ConsistentEventStore,
       replayConfig: ReplayProcessConfig)
-      : ReplayProcess[ReplayCompletion[SID]] =
-    this.catchUp(eventStore: EventSource, replayConfig)
+      : ReplayProcess[ReplayCompletion[SID]] = {
+
+    val maxTick = eventStore.maxTick.await(60.seconds)
+    this.catchUp(eventStore, maxTick, replayConfig)
+  }
 
   override def completeStreams(
       eventSource: EventSource,
-      incompleteStreams: List[ReplayCompletion.IncompleteStream[SID]],
-      processor: LiveProcessor)(
+      brokenStreams: List[ReplayCompletion.BrokenStream[SID]],
+      processor: LiveProcessor,
+      completionTimeout: FiniteDuration)(
       implicit
       ec: ExecutionContext)
-      : Future[Map[SID, Throwable]] =
-    super.completeStreams(eventSource, incompleteStreams, processor)
+      : Future[StreamFailures] =
+    super.completeStreams(eventSource, brokenStreams, processor, completionTimeout)
 }

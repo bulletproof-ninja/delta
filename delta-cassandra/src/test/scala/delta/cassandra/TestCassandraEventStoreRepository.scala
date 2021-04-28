@@ -1,7 +1,5 @@
 package delta.cassandra
 
-import org.junit._
-
 import com.datastax.driver.core.{ Cluster, Session, SocketOptions }
 import delta.util._
 import scala.reflect.classTag
@@ -9,8 +7,6 @@ import scala.util.Try
 import delta.write.EntityRepository
 import delta._
 import delta.testing._
-import delta.Channel
-import scuff.Codec
 import scuff.json._, JsVal._
 
 class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStoreRepositoryTest {
@@ -58,29 +54,26 @@ class TestCassandraEventStoreRepository extends delta.testing.AbstractEventStore
 
   var session: Session = _
 
-  @Before
-  def setup(): Unit = {
+  override def beforeEach(): Unit = {
     session = Cluster.builder().withSocketOptions(new SocketOptions().setConnectTimeoutMillis(10000)).addContactPoints("localhost").build().connect()
     deleteAll(session)
-    es = new CassandraEventStore[String, AggrEvent, String](session, TableDescriptor, AggrEventFormat)(_ => ticker)
-      with MessageTransportPublishing[String, AggrEvent] {
-      def toTopic(ch: Channel) = Topic(s"tx:$ch")
-      val txTransport = new LocalTransport[Transaction](t => toTopic(t.channel), RandomDelayExecutionContext)
-      val txChannels = Set(Channel("any"))
-      val txCodec = Codec.noop[Transaction]
-    }.ensureTable()
-    repo = new EntityRepository(TheOneAggr)(es)
+    es = new CassandraEventStore[String, AggrEvent, String](
+      ec, session, TableDescriptor, AggrEventFormat, ec) {
+
+        def ticker = TestCassandraEventStoreRepository.this.ticker
+
+        def subscribeGlobal[U](selector: StreamsSelector)(callback: Transaction => U) =
+          subscribeLocal(selector)(callback)
+
+      }.ensureTable()
+    repo = new EntityRepository(TheOneAggr)(es, ec)
   }
   private def deleteAll(session: Session): Unit = {
     Try(session.execute(s"DROP TABLE $Keyspace.$Table;"))
   }
-  @After
-  def teardown(): Unit = {
-    deleteAll(session)
+
+  override def afterEach(): Unit = {
+    // deleteAll(session)
   }
 
-  @Test
-  def mock(): Unit = {
-    Assert.assertTrue(true)
-  }
 }

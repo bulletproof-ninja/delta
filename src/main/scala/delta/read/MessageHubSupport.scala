@@ -1,15 +1,27 @@
 package delta.read
 
 import scuff.Subscription
-import delta.MessageHub
+import delta.{ MessageSource, MessageHub }
 
-trait MessageHubSupport[ID, S, U]
+trait MessageSourceSupport[ID, S, U]
 extends SubscriptionSupport[ID, S, U] {
   rm: ReadModel[ID, S] =>
 
-  protected def hub: MessageHub[StreamId, Update]
+  protected def updateSource: MessageSource[StreamId, Update]
 
-  protected def subscribe(id: ID)(callback: Update => Unit): Subscription =
-    hub.subscribe(StreamId(id))(callback)
+  protected def subscribe(
+      id: ID)(
+      callback: Update => Unit): Subscription =
+    updateSource.subscribe(StreamId(id))(callback)
+
+}
+
+trait MessageHubSupport[ID, S, U]
+extends MessageSourceSupport[ID, S, U] {
+  rm: ReadModel[ID, S] =>
+
+  protected def updateHub: MessageHub[StreamId, Update]
+
+  protected def updateSource: MessageSource[StreamId, Update] = updateHub
 
 }

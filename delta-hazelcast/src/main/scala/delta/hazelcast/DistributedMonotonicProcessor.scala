@@ -21,7 +21,7 @@ object DistributedMonotonicProcessor {
   /**
     * Process transaction, ensuring proper sequencing.
     */
-  def apply[K, EVT: ClassTag, S >: Null: ClassTag](
+  def apply[K, EVT: ClassTag, S >: Null](
       imap: IMap[K, _ <: EntryState[S, EVT]], projector: Projector[S, EVT])(
       tx: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] =
     this.apply(Codec.noop[S], imap, projector)(tx)
@@ -29,7 +29,7 @@ object DistributedMonotonicProcessor {
   /**
     * Process transaction, ensuring proper sequencing.
     */
-  def apply[K, EVT: ClassTag, W >: Null: ClassTag, S](
+  def apply[K, EVT: ClassTag, W >: Null, S](
       stateCodec: Codec[W, S],
       imap: IMap[K, _ <: EntryState[S, EVT]], projector: Projector[W, EVT])(
       tx: Transaction[K, _ >: EVT]): Future[EntryUpdateResult] = {
@@ -50,7 +50,7 @@ object DistributedMonotonicProcessor {
   /**
     * Process transaction, ensuring proper sequencing.
     */
-  def apply[K, EVT: ClassTag, W >: Null: ClassTag, S](
+  def apply[K, EVT: ClassTag, W >: Null, S](
       stateCodec: AsyncCodec[W, S],
       stateCodecExecutor: IExecutorService,
       imap: IMap[K, _ <: EntryState[S, EVT]],
@@ -168,7 +168,7 @@ with Offloadable {
               case Some((origRev, origState)) if origRev == revision =>
                 Snapshot(origState, revision, tick) -> false
               case _ =>
-                val encoding = stateCodec.encode(currState)(Threads.PiggyBack)
+                val encoding = stateCodec.encode(currState)
                 val newState = encoding await Duration.Zero // Duration irrelevant when piggybacking
                 val snapshot = Snapshot(newState, revision, tick)
                 val contentUpdated = !origState.exists(snapshot.stateEquals)

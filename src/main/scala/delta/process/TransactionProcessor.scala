@@ -26,10 +26,10 @@ trait TransactionProcessor[SID, EVT, S >: Null] {
   private[process] final def callProcess(tx: Transaction, currState: Option[S]): Future[S] =
     try process(tx, currState) catch {
       case NonFatal(cause) =>
-        Future failed new IllegalStateException(
+        Future failed new RuntimeException(
 s"""$name: Failed processing of transaction ${tx.stream} (revision ${tx.revision})
 ----
-State: $currState
+Current state: ${currState getOrElse "`None`"}
 Transaction: $tx
 ----""", cause)
     }

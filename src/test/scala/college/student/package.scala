@@ -4,6 +4,9 @@ import scuff.Codec
 
 package object student {
 
+  def Entity = Student
+  def Channel = Student.channel
+
   implicit def StudentId(int: Int): Student.Id = new Student.Id(int)
 
   implicit val StudentIdCodec = new Codec[Int, Student.Id] {

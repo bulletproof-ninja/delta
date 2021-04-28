@@ -9,12 +9,12 @@ abstract class Entity[ID, T, S >: Null, EVT](name: String, projector: delta.Proj
   type Type = Object
 
   protected final def init(
-      state: State, concurrentUpdates: List[Transaction]): Type =
+      state: StateRef, concurrentUpdates: List[Transaction]): Type =
     init(state, concurrentUpdates.asJava).asInstanceOf[Type]
 
-  protected final def state(entity: Object): State = getState(entity.asInstanceOf[T])
+  protected final def StateRef(entity: Object) = getState(entity.asInstanceOf[T])
 
-  protected def init(state: delta.write.State[S, EVT], concurrentUpdates: java.util.List[Transaction]): T
-  protected def getState(entity: T): delta.write.State[S, EVT]
+  protected def init(state: delta.write.StateRef[S, EVT], concurrentUpdates: java.util.List[Transaction]): T
+  protected def getState(entity: T): delta.write.StateRef[S, EVT]
 
 }

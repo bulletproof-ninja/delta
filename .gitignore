@@ -7,7 +7,11 @@
 bin/
 build/
 
+# Ignore temp files
 *~
 
 # Ignore temp db files
 *.db
+
+# Ignore log files
+*.log

@@ -26,7 +26,7 @@ package college {
     eventStore: EventStore[Int, _ >: EVT])(
     implicit
     exeCtx: ExecutionContext)
-  extends write.EntityRepository[Int, EVT, S, ID, E](entity)(eventStore)
+  extends write.EntityRepository[Int, EVT, S, ID, E](entity)(eventStore, exeCtx)
 
 }
 
@@ -38,16 +38,18 @@ package object college {
   type StudentRepo = CollegeRepo[Student.Id, Student, StudentEvent, StudentState]
   type SemesterRepo = CollegeRepo[Semester.Id, Semester, SemesterEvent, SemesterState]
 
+  val AllEntities = Set(semester.Semester, student.Student)
+
   type CollegeEventStore =
-    EventSource[Int, CollegeEvent] with
-    ConsistencyValidation[Int, CollegeEvent]
+    EventStore[Int, CollegeEvent]
+    with ConsistencyValidation[Int, CollegeEvent]
 
   implicit def intId(id: IntId[_]): Int = id.int
 
   object CollegeEventFormat
-      extends EventFormat[CollegeEvent, Array[Byte]] {
+  extends EventFormat[CollegeEvent, Array[Byte]] {
 
-    def getVersion(cls: EventClass) = NoVersion
+    def getVersion(cls: EventClass) = NotVersioned
     def getName(cls: EventClass): String = cls.getName
 
     def encode(evt: CollegeEvent): Array[Byte] = JavaSerializer.encode(evt)

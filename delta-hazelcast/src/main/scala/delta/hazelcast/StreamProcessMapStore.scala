@@ -13,18 +13,20 @@ import java.util.Properties
 import com.hazelcast.logging.ILogger
 import scala.concurrent.Future
 import scala.collection.mutable.ArrayBuffer
-import delta.process.StreamProcessStore
+import delta.process.{ recoverError, StreamProcessStore }
 
 /**
   * Hazelcast `MapStore` implementation, using
   * a generic [[delta.process.StreamProcessStore]] as
   * back-end store.
+  * @note Because this is a synchronous interface, it will
+  * block on reads and writes.
+  * @throws IllegalArgumentException if `processStore` is instance of [[IMapStreamProcessStore]]
   */
-@throws[IllegalArgumentException]("if `processStore` is instance of [[IMapStreamProcessStore]]")
 class StreamProcessMapStore[K, T, U](
   processStore: StreamProcessStore[K, T, U],
   preloadKeys: Iterable[K] = Set.empty[K],
-  awaitTimeout: FiniteDuration = 11.seconds)
+  awaitTimeout: FiniteDuration = 60.seconds)
 extends MapStore[K, EntryState[T, Any]]
 with MapLoaderLifecycleSupport {
 
@@ -69,10 +71,18 @@ with MapLoaderLifecycleSupport {
         case (key, EntryState(model, false, unapplied)) if unapplied.isEmpty =>
           (key, model.revision, model.tick)
       }
-    val futures = new ArrayBuffer[Future[_]](contentUpdated.size + revUpdated.size)
+    val futures = new ArrayBuffer[Future[processStore.WriteErrors]](contentUpdated.size + revUpdated.size)
     if (contentUpdated.nonEmpty) futures += processStore.writeBatch(contentUpdated)
-    if (revUpdated.nonEmpty) futures ++= revUpdated.map{ case (key, rev, tick) => processStore.refresh(key, rev, tick) }
-    futures.foreach(_.await(awaitTimeout, logTimedOutFuture))
+    if (revUpdated.nonEmpty) futures ++= revUpdated.map{
+      case (key, rev, tick) => recoverError(key, processStore.refresh(key, rev, tick))
+    }
+    futures.foreach{
+      _.await(awaitTimeout, logTimedOutFuture)
+        .foreach {
+          case (key, err) =>
+            logger.severe(s"Failed to store `$key`", err)
+        }
+    }
   }
 
   def load(key: K): EntryState[T, Any] =

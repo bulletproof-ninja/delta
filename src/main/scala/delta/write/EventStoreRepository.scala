@@ -7,10 +7,9 @@ import scala.util.control.NonFatal
 import delta._
 import EventStoreRepository._
 
-import scuff.StreamConsumer
-import scuff.concurrent.StreamPromise
+import scuff.Reduction
 
-import com.github.ghik.silencer.silent
+import scala.annotation.nowarn
 
 /**
  * [[delta.EventStore]]-based [[delta.write.Repository]] implementation.
@@ -22,10 +21,12 @@ import com.github.ghik.silencer.silent
  * @param wrapState State wrapper
  * @param exeCtx The internal execution context
  * @param snapshots Optional snapshot store
- * @param assumeCurrentSnapshots Can snapshots from the snapshot store
+ * @param assumeCurrentRevisions Can snapshots from the snapshot store
  * be assumed to be current? I.e. are the snapshots available to all
  * running processes, or isolated to this process, and if the latter,
  * is this process exclusively snapshotting the available ids?
+ * NOTE: This is a probabilistic performance switch and does not
+ * affect correctness. When `true` reads
  * @param es The event store implementation
  * @param idConv Conversion function from repository id to stream id
  *
@@ -34,15 +35,17 @@ import com.github.ghik.silencer.silent
  */
 class EventStoreRepository[SID, EVT, S >: Null, ID](
   channel: delta.Channel,
-  wrapState: S => State[S, EVT],
+  StateRef: S => StateRef[S, EVT],
   snapshots: SnapshotStore[ID, S] = SnapshotStore.empty[ID, S],
-  assumeCurrentSnapshots: Boolean = false)(
-  es: EventStore[SID, _ >: EVT])(
+  assumeCurrentRevisions: Boolean = false)(
+  es: EventStore[SID, _ >: EVT],
+  exeCtx: ExecutionContext)(
   implicit
-  ec: ExecutionContext,
   idConv: ID => SID)
 extends Repository[ID, Save[S, EVT]]
 with ImmutableEntity {
+
+  private implicit def ec = exeCtx
 
   private[this] val eventStore = es.asInstanceOf[EventStore[SID, EVT]]
 
@@ -54,55 +57,61 @@ with ImmutableEntity {
 
   def exists(id: ID): Future[Option[Revision]] = eventStore.currRevision(id)
 
+  private case class Builder(
+      applyEventsAfter: Revision, stateRef: StateRef[S, EVT],
+      concurrentUpdates: List[Transaction] = Nil, lastTxOrNull: Transaction = null)
+
   private def loadCurrentSnapshot(
       snapshot: Option[Snapshot],
       expectedRevision: Option[Revision],
-      replayer: StreamConsumer[Transaction, Any] => Unit)
+      replayer: Reduction[Transaction, Future[Builder]] => Future[Builder])
       : Future[Option[Loaded]] = {
 
-    case class Builder(
-        applyEventsAfter: Revision, state: State[S, EVT],
-        concurrentUpdates: List[Transaction] = Nil, lastTxOrNull: Transaction = null)
-
-    val initBuilder = new Builder(snapshot.map(_.revision) getOrElse -1, wrapState(snapshot.map(_.state).orNull))
-    val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
-    val futureBuilt = StreamPromise.fold(initBuilder, replayer) {
-      case (b, tx) =>
+    val futureBuilt = replayer apply new Reduction[Transaction, Future[Builder]] {
+      private[this] val lastSeenRevision = expectedRevision getOrElse Int.MaxValue
+      @volatile private[this] var builder =
+        Builder(snapshot.map(_.revision) getOrElse -1, StateRef(snapshot.map(_.state).orNull))
+      def next(tx: Transaction): Unit = {
+        val b = this.builder
         if (tx.revision > b.applyEventsAfter) {
-          tx.events.foreach(b.state.mutate)
+          tx.events.foreach(b.stateRef.mutate)
         }
         val concurrentUpdates: List[Transaction] =
           if (tx.revision > lastSeenRevision) tx :: b.concurrentUpdates
           else b.concurrentUpdates
-        b.copy(concurrentUpdates = concurrentUpdates, lastTxOrNull = tx)
+        this.builder = b.copy(concurrentUpdates = concurrentUpdates, lastTxOrNull = tx)
+      }
+      def result(): Future[Builder] = Future successful this.builder
+
     }
     futureBuilt.map {
-      case Builder(_, state, concurrentUpdates, lastTxOrNull) =>
-        if (lastTxOrNull == null) snapshot.map { snapshot =>
-          new Loaded(snapshot.state, snapshot.revision, snapshot.tick, Nil)
-        } else Some {
-        new Loaded(state.get, lastTxOrNull.revision, lastTxOrNull.tick, concurrentUpdates.reverse)
+      case Builder(_, _, _, null) => snapshot.map { snapshot =>
+        new Loaded(snapshot.state, snapshot.revision, snapshot.tick, Nil)
+      }
+      case Builder(_, state, concurrentUpdates, lastTx) => Some {
+        new Loaded(state.get, lastTx.revision, lastTx.tick, concurrentUpdates.reverse)
       }
     }
   }
 
   private def loadLatest(
       id: ID, snapshot: Future[Option[Snapshot]],
-      assumeSnapshotCurrent: Boolean, expectedRevision: Option[Revision])
+      assumeCurrentRevision: Boolean, expectedRevision: Option[Revision])
       : Future[Loaded] = {
 
     // Failed snapshot read should not prevent loading. Report and continue...
     val recoveredSnapshot = snapshot recover {
-      case NonFatal(th) =>
-        ec reportFailure th
+      case NonFatal(cause) =>
+        ec reportFailure new IllegalStateException(
+            s"Failed to load snapshot. Replaying all events instead.", cause)
         None
     }
     val futureState: Future[Option[Loaded]] =
       recoveredSnapshot.flatMap { maybeSnapshot =>
         maybeSnapshot match {
           case Some(snapshot) =>
-            if (assumeSnapshotCurrent && expectedRevision.forall(_ <= snapshot.revision)) {
-              Future successful Some(new Loaded(snapshot.state, snapshot.revision, snapshot.tick, Nil))
+            if (assumeCurrentRevision && expectedRevision.forall(_ <= snapshot.revision)) {
+              Future successful Some(Loaded(snapshot.state, snapshot.revision, snapshot.tick, Nil))
             } else {
               val minRev = expectedRevision.map(math.min(_, snapshot.revision)) getOrElse snapshot.revision
               loadCurrentSnapshot(maybeSnapshot, expectedRevision, eventStore.replayStreamFrom(id, minRev + 1))
@@ -117,9 +126,12 @@ with ImmutableEntity {
   final def load(id: ID): Future[Loaded] =
     loadLatest(id, snapshots.read(id), false, None)
 
-  def insert(newId: => ID, entity: Entity)(
+  def insert(
+      newId: => ID,
+      entity: Entity)(
       implicit
-      metadata: Metadata): Future[ID] =
+      metadata: Metadata)
+      : Future[ID] =
     if (entity.events.nonEmpty) {
       insertImpl(newId, newId, eventStore.ticker.nextTick(), entity.state, entity.events, metadata.toMap)
     } else Future failed {
@@ -136,8 +148,7 @@ with ImmutableEntity {
         .map(_ => idCandidate)
         .recoverWith {
           case dupe: eventStore.DuplicateRevisionException =>
-            val conflict = dupe.conflict
-            if (conflict.events == events) { // Idempotent insert
+            if (dupe.conflict.events == events) { // Allow idempotent insert
               Future successful idCandidate
             } else {
               val newCandidateId = generateId
@@ -180,44 +191,46 @@ with ImmutableEntity {
    * retried until resolved.
    * Can be used for monitoring and reporting.
    */
-  @silent("parameter value")
+  @nowarn
   protected def onUpdateCollision(id: ID, revision: Revision, channel: Channel): Unit = ()
 
   private def loadAndUpdate(
-      id: ID, expectedRevision: Option[Revision], metadata: Map[String, String],
-      maybeSnapshot: Future[Option[Snapshot]], assumeSnapshotCurrent: Boolean,
-      updateThunk: Loaded => Future[Entity]): Future[Revision] = {
+      id: ID, expectedRevision: Option[Revision],// metadata: Map[String, String],
+      maybeSnapshot: Future[Option[Snapshot]], assumeCurrentRevision: Boolean,
+      updateThunk: Loaded => Future[(Entity, Metadata)]): Future[Revision] = {
 
-    loadLatest(id, maybeSnapshot, assumeSnapshotCurrent, expectedRevision)
+    loadLatest(id, maybeSnapshot, assumeCurrentRevision, expectedRevision)
       .flatMap { loaded =>
         updateThunk(loaded).flatMap {
-          case Save(newState, newEvents) =>
+          case (Save(newState, newEvents), metadata) =>
             if (newEvents.isEmpty || loaded.concurrentUpdates.flatMap(_.events) == newEvents) {
               Future successful loaded.revision
             } else {
               val tick = eventStore.ticker.nextTick(loaded.tick)
-              recordUpdate(id, newState, loaded.revision + 1, newEvents, metadata, tick).recoverWith {
+              recordUpdate(id, newState, loaded.revision + 1, newEvents, metadata.toMap, tick).recoverWith {
                 case dupe: eventStore.DuplicateRevisionException =>
-                  val state = wrapState(loaded.state)
-                  dupe.conflict.events.foreach(state.mutate)
+                  val stateRef = StateRef(loaded.state)
+                  dupe.conflict.events.foreach(stateRef.mutate)
                   val latestSnapshot = Future successful Some {
-                    new Snapshot(state.get, dupe.conflict.revision, dupe.conflict.tick)
+                    new Snapshot(stateRef.get, dupe.conflict.revision, dupe.conflict.tick)
                   }
                   onUpdateCollision(id, dupe.conflict.revision, dupe.conflict.channel)
-                  loadAndUpdate(id, expectedRevision, metadata, latestSnapshot, true, updateThunk)
+                  loadAndUpdate(id, expectedRevision, /*metadata,*/ latestSnapshot, true, updateThunk)
               }
             }
         }
     }
   }
 
-  protected def update[R](
-      updateThunk: Loaded => Future[UT[R]],
-      id: ID, expectedRevision: Option[Revision])(
-      implicit
-      metadata: Metadata): Future[UM[R]] =
+  protected def update(
+      updateThunk: Loaded => Future[UpdateReturn],
+      id: ID, expectedRevision: Option[Revision])
+      // (
+      // implicit
+      // metadata: Metadata)
+      : Future[Revision] =
     try {
-      loadAndUpdate(id, expectedRevision, metadata.toMap, snapshots.read(id), assumeCurrentSnapshots, updateThunk)
+      loadAndUpdate(id, expectedRevision, /*metadata.toMap,*/ snapshots.read(id), assumeCurrentRevisions, updateThunk)
     } catch {
       case NonFatal(th) => Future failed th
     }

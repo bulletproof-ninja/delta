@@ -1,24 +1,25 @@
 package delta.testing
 
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit.{ MILLISECONDS, SECONDS }
+import java.util.concurrent.TimeUnit.MILLISECONDS
+import java.util.concurrent.TimeUnit.SECONDS
+
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.Seq
-import scala.concurrent.{ Future, Promise }
-import scala.concurrent.Await
-import scala.concurrent.duration.{ Duration, DurationInt }
-import scala.util.{ Failure, Success, Try }
-import org.junit._
-import org.junit.Assert._
-import scuff._, concurrent._
-import delta.write.{ Repository, UnknownIdException }
-import scuff.reflect.Surgeon
-import delta._
-import delta.write._
-import delta.util._
+import scala.concurrent._, duration._
+import scala.util._
 import scala.{ SerialVersionUID => version }
+
+import delta._
 import delta.process.ConcurrentMapStore
+import delta.util._
+import delta.write._
+
+import scuff._
 import scuff.json.JsVal
+import scuff.reflect.Surgeon
+
+import concurrent._
 
 trait AggrEventHandler {
   type Return
@@ -69,9 +70,9 @@ case class AggrCreated(status: String)
 case class StatusChanged(newStatus: String)
   extends AggrEvent { def dispatch(cb: AggrEventHandler): cb.Return = cb.on(this) }
 
-abstract class AbstractEventStoreRepositoryTest {
+abstract class AbstractEventStoreRepositoryTest
+extends BaseTest {
 
-  implicit def ec = RandomDelayExecutionContext
   def ticker = SysClockTicker
 
   class TimestampCodec(name: String) extends Codec[Timestamp, Map[String, String]] {
@@ -92,207 +93,219 @@ abstract class AbstractEventStoreRepositoryTest {
     }
   }
 
-  implicit def metadata: Metadata = Metadata(
+  implicit def newMetadata: Metadata = Metadata(
     "timestamp" -> new Timestamp().toString,
     "random" -> math.random().toString)
 
-  @Test
-  def loadUnknownId() = doAsync { done =>
-    repo.load("Foo").onComplete {
-      case Success(_) => done.complete(Try(fail("Should have failed as unknown")))
-      case Failure(e: UnknownIdException) =>
-        assertEquals("Foo", e.id)
-        done.success(())
-      case Failure(other) => done.failure(other)
+  test("loadUnknownId") {
+    doAsync { done =>
+      repo.load("Foo").onComplete {
+        case Success(_) =>
+          done.complete(Try(fail("Should have failed as unknown")))
+        case Failure(e: UnknownIdException) =>
+          assert("Foo" === e.id)
+          done.success(())
+        case Failure(other) =>
+          done.failure(other)
+      }
     }
   }
 
-  @Test
-  def failedInvariants() = doAsync { done =>
-    val id = "Foo"
-    val newFoo = TheOneAggr.create()
-    newFoo apply AddNewNumber(-1)
-    repo.insert(id, newFoo).onComplete {
-      case Failure(_) =>
-        repo.exists(id).onComplete {
-          case Failure(t) => done.failure(t)
-          case Success(None) => done.success("Fail on negative number")
-          case Success(Some(rev)) => fail(s"Should not exist: $rev")
-        }
-      case Success(_) => fail("Should not accept negative numbers")
-    }
-  }
-
-  @Test
-  def saveNewThenUpdate() = doAsync { done =>
-    val id = "Foo"
-    val newFoo = TheOneAggr.create()
-    repo.insert(id, newFoo).onComplete {
-      case Failure(t) => done.failure(t)
-      case Success(_) =>
-        repo.update("Foo", Some(0)) {
-          case (foo, rev) =>
-            assertEquals(0, rev)
-            assertEquals("New", foo.aggr.status)
-        }.onComplete {
-          case Failure(t) => done.failure(t)
-          case Success((_, rev)) =>
-            assertEquals(0, rev)
-            repo.update(id, Some(0)) {
-              case (foo, rev) if rev == 0 =>
-                assertEquals(0, rev)
-                assertEquals("New", foo.aggr.status)
-                foo(AddNewNumber(44))
-            }.onComplete {
-              case Failure(t) => done.failure(t)
-              case Success((_, rev)) =>
-                assertEquals(1, rev)
-                repo.update("Foo", Some(0)) {
-                  case (foo, rev) =>
-                    assertEquals(1, rev)
-                    assertTrue(foo.concurrentUpdates contains NewNumberWasAdded(44))
-                    assertEquals("New", foo.aggr.status)
-                    foo(AddNewNumber(44))
-                }.onComplete {
-                  case Failure(t) => done.failure(t)
-                  case Success((_, rev)) =>
-                    assertEquals(1, rev)
-                    repo.update("Foo", Some(1)) {
-                      case (foo, rev) =>
-                        assertEquals(1, rev)
-                        assertTrue(foo.concurrentUpdates.isEmpty)
-                        assertEquals("New", foo.aggr.status)
-                        foo(ChangeStatus("NotNew"))
-                    }.onComplete {
-                      case Failure(t) => done.failure(t)
-                      case Success((_, rev)) =>
-                        assertEquals(2, rev)
-                        repo.load("Foo").onComplete {
-                          case Failure(t) => done.failure(t)
-                          case Success((foo, rev)) =>
-                            assertEquals(2, rev)
-                            assertEquals("NotNew", foo.aggr.status)
-                            done.success(())
-                        }
-                    }
-                }
-
-            }
-        }
-    }
-  }
-  @Test
-  def update() = doAsync { done =>
-    val id = "Foo"
-    val newFoo = TheOneAggr.create()
-    newFoo(AddNewNumber(42))
-    newFoo.appliedEvents match {
-      case Seq(AggrCreated(_), NewNumberWasAdded(n)) => assertEquals(42, n)
-      case _ => fail("Event sequence incorrect: " + newFoo.appliedEvents)
-    }
-    val update1 = repo.insert(id, newFoo).flatMap {
-      case _ =>
-        repo.update(id, Some(0)) {
-          case (foo, rev) =>
-            assertEquals(0, rev)
-            foo(AddNewNumber(42))
-            assertEquals(0, foo.appliedEvents.size)
-            foo(AddNewNumber(99))
-            assertEquals(1, foo.appliedEvents.size)
-        }
-    }
-    update1.onComplete {
-      case Failure(t) => done.failure(t)
-      case Success((_, revision)) =>
-        assertEquals(1, revision)
-        repo.load(id).onComplete {
-          case Failure(t) => done.failure(t)
-          case Success((foo, rev)) =>
-            assertEquals(1, rev)
-            assertTrue(foo.numbers.contains(42))
-            assertTrue(foo.numbers.contains(99))
-            assertEquals(2, foo.numbers.size)
-            done.success(())
-        }
-    }
-  }
-
-  @Test
-  def `idempotent insert`() = doAsync { done =>
-    val id = "Baz"
-    val baz = TheOneAggr.create()
-    repo.insert(id, baz).onComplete {
-      case Failure(t) => done.failure(t)
-      case Success(idAgain) =>
-        assertEquals(id, idAgain)
-        repo.insert(id, baz).onComplete {
-          case Failure(t) => done.failure(t)
-          case Success(idAgain) =>
-            assertEquals(id, idAgain)
-            done.success(())
-        }
-    }
-  }
-
-  @Test
-  def `concurrent update`() = doAsync { done =>
-    val executor = java.util.concurrent.Executors.newScheduledThreadPool(16)
-    val id = "Foo"
-    val foo = TheOneAggr.create()
-    val insFut = repo.insert(id, foo)
-    val updateRevisions = new TrieMap[Int, Future[Int]]
-    val range = 0 to 75
-    val latch = new CountDownLatch(range.size)
-    insFut.onComplete {
-      case f: Failure[_] => done.complete(f)
-      case Success(_) =>
-        for (i <- range) {
-          val runThis = new Runnable {
-            def run: Unit = {
-              val fut = repo.update(id, Some(0)) {
-                case (foo, _) =>
-                  foo(AddNewNumber(i))
-                  Future successful foo
-              }
-              updateRevisions += i -> fut.map(_._2)
-              latch.countDown()
-            }
+  test("failedInvariants") {
+    doAsync { done =>
+      val id = "Foo"
+      val newFoo = TheOneAggr.create()
+      newFoo apply AddNewNumber(-1)
+      repo.insert(id, newFoo).onComplete {
+        case Failure(_) =>
+          repo.exists(id).onComplete {
+            case Failure(t) => done.failure(t)
+            case Success(None) => done.success("Fail on negative number")
+            case Success(Some(rev)) => fail(s"Should not exist: $rev")
           }
-          executor.schedule(runThis, 500, MILLISECONDS)
-        }
-        if (!latch.await(30, SECONDS)) {
-          done.complete(Try(fail("Timed out waiting for concurrent updates to finish")))
-        } else {
-          assertEquals(range.size, updateRevisions.size)
-          val revisions = updateRevisions.map {
-            case (_, f) => Await.result(f, Duration.Inf)
-          }.toList.sorted
-          done.complete(Try(assertEquals((1 to range.size).toList, revisions)))
-        }
+        case Success(_) => fail("Should not accept negative numbers")
+      }
     }
   }
-  @Test
-  def `noop update`() = doAsync { done =>
-    val id = "Foo"
-    val foo = TheOneAggr.create()
-    repo.insert(id, foo).onComplete {
-      case Failure(t) => done.failure(t)
-      case Success(_) =>
-        repo.update(id, Some(0)) {
-          case (foo, rev) =>
-            assertEquals(0, rev)
-            Future successful foo
-        }.onComplete {
-          case Failure(t) => done.failure(t)
-          case Success((_, newRevision)) =>
-            assertEquals(0, newRevision)
-            done.success(())
-        }
-    }
-  }
-}
 
-class Aggr(val state: TheOneAggr.State, val concurrentUpdates: Seq[AggrEvent]) {
+  test("saveNewThenUpdate") {
+    doAsync { done =>
+      val id = "Foo"
+      val newFoo = TheOneAggr.create()
+      repo.insert(id, newFoo).onComplete {
+        case Failure(t) => done.failure(t)
+        case Success(_) =>
+          repo.update("Foo", Some(0)) {
+            case (foo, rev) =>
+              assert(0 === rev)
+              assert("New" === foo.aggr.status)
+              newMetadata
+          }.onComplete {
+            case Failure(t) => done.failure(t)
+            case Success(rev) =>
+              assert(0 === rev)
+              repo.update(id, 0) {
+                case (foo, rev) if rev == 0 =>
+                  assert(0 === rev)
+                  assert("New" === foo.aggr.status)
+                  foo(AddNewNumber(44))
+              }.onComplete {
+                case Failure(t) => done.failure(t)
+                case Success(rev) =>
+                  assert(1 === rev)
+                  repo.update("Foo", 0) {
+                    case (foo, rev) =>
+                      assert(1 === rev)
+                      assert(foo.concurrentUpdates contains NewNumberWasAdded(44))
+                      assert("New" === foo.aggr.status)
+                      foo(AddNewNumber(44))
+                  }.onComplete {
+                    case Failure(t) => done.failure(t)
+                    case Success(rev) =>
+                      assert(1 === rev)
+                      repo.update("Foo", 1) {
+                        case (foo, rev) =>
+                          assert(1 === rev)
+                          assert(foo.concurrentUpdates.isEmpty)
+                          assert("New" === foo.aggr.status)
+                          foo(ChangeStatus("NotNew"))
+                      }.onComplete {
+                        case Failure(t) => done.failure(t)
+                        case Success(rev) =>
+                          assert(2 === rev)
+                          repo.load("Foo").onComplete {
+                            case Failure(t) => done.failure(t)
+                            case Success((foo, rev)) =>
+                              assert(2 === rev)
+                              assert("NotNew" === foo.aggr.status)
+                              done.success(())
+                          }
+                      }
+                  }
+
+              }
+          }
+      }
+    }
+  }
+
+  test("update") {
+    doAsync { done =>
+      val id = "Foo"
+      val newFoo = TheOneAggr.create()
+      newFoo(AddNewNumber(42))
+      newFoo.appliedEvents match {
+        case Seq(AggrCreated(_), NewNumberWasAdded(n)) => assert(42 === n)
+        case _ => fail("Event sequence incorrect: " + newFoo.appliedEvents)
+      }
+      val update1 = repo.insert(id, newFoo).flatMap {
+        case _ =>
+          repo.update(id, Some(0)) {
+            case (foo, rev) =>
+              assert(0 === rev)
+              foo(AddNewNumber(42))
+              assert(0 === foo.appliedEvents.size)
+              foo(AddNewNumber(99))
+              assert(1 === foo.appliedEvents.size)
+              newMetadata
+          }
+      }
+      update1.onComplete {
+        case Failure(t) => done.failure(t)
+        case Success(revision) =>
+          assert(1 === revision)
+          repo.load(id).onComplete {
+            case Failure(t) => done.failure(t)
+            case Success((foo, rev)) =>
+              assert(1 === rev)
+              assert(foo.numbers.contains(42))
+              assert(foo.numbers.contains(99))
+              assert(2 === foo.numbers.size)
+              done.success(())
+          }
+      }
+    }
+  }
+
+  test("idempotent insert") {
+    doAsync { done =>
+      val id = "Baz"
+      val baz = TheOneAggr.create()
+      repo.insert(id, baz).onComplete {
+        case Failure(t) => done.failure(t)
+        case Success(idAgain) =>
+          assert(id === idAgain)
+          repo.insert(id, baz).onComplete {
+            case Failure(t) => done.failure(t)
+            case Success(idAgain) =>
+              assert(id === idAgain)
+              done.success(())
+          }
+      }
+    }
+  }
+
+  test("concurrent update") {
+    doAsync { done =>
+      val executor = java.util.concurrent.Executors.newScheduledThreadPool(16)
+      val id = "Foo"
+      val foo = TheOneAggr.create()
+      val insFut = repo.insert(id, foo)
+      val updateRevisions = new TrieMap[Int, Future[Int]]
+      val range = 0 to 75
+      val latch = new CountDownLatch(range.size)
+      insFut.onComplete {
+        case f: Failure[_] => done.complete(f)
+        case Success(_) =>
+          for (i <- range) {
+            val runThis = new Runnable {
+              def run: Unit = {
+                val fut = repo.update(id, Some(0)) {
+                  case (foo, _) =>
+                    foo(AddNewNumber(i))
+                }
+                updateRevisions += i -> fut
+                latch.countDown()
+              }
+            }
+            executor.schedule(runThis, 500, MILLISECONDS)
+          }
+          if (!latch.await(30, SECONDS)) {
+            done.complete(Try(fail("Timed out waiting for concurrent updates to finish")))
+          } else {
+            assert(range.size === updateRevisions.size)
+            val revisions = updateRevisions.map {
+              case (_, f) => Await.result(f, Duration.Inf)
+            }.toList.sorted
+            done.complete(Try(assert((1 to range.size).toList === revisions)))
+          }
+      }
+    }
+  }
+
+  test("noop update") {
+    doAsync { done =>
+      val id = "Foo"
+      val foo = TheOneAggr.create()
+      repo.insert(id, foo).onComplete {
+        case Failure(t) => done.failure(t)
+        case Success(_) =>
+          repo.update(id, Some(0)) {
+            case (_, rev) =>
+              assert(0 === rev)
+              newMetadata
+          }.onComplete {
+            case Failure(t) => done.failure(t)
+            case Success(newRevision) =>
+              assert(0 === newRevision)
+              done.success(())
+          }
+      }
+    }
+  }
+
+}
+class Aggr(val state: TheOneAggr.StateRef, val concurrentUpdates: Seq[AggrEvent]) {
   def appliedEvents: List[AggrEvent] = {
     val surgeon = new Surgeon(state)
     surgeon.getAll[List[AggrEvent]].head._2.reverse
@@ -316,25 +329,26 @@ object TheOneAggr extends Entity("", AggrStateProjector) {
   type Id = String
   type Type = Aggr
 
-  def init(state: State, concurrentUpdates: List[Transaction]): Aggr =
+  def init(id: Id, state: StateRef, concurrentUpdates: List[Transaction]): Aggr =
     new Aggr(state, concurrentUpdates.flatMap(_.events.collectAs[AggrEvent]))
-  def state(entity: Aggr) = entity.state
+  def StateRef(entity: Aggr) = entity.state
   override def validate(state: AggrState): Unit = {
     require(state.numbers.filter(_ < 0).isEmpty, "Cannot contain negative numbers")
   }
   def create(): Aggr = {
-    val mutator = TheOneAggr.newState()
-    mutator(new AggrCreated("New"))
-    new Aggr(mutator, Nil)
+    val ref = TheOneAggr.newStateRef()
+    ref apply new AggrCreated("New")
+    new Aggr(ref, Nil)
   }
 }
 
-class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTest {
+class TestEventStoreRepositoryNoSnapshots
+extends AbstractEventStoreRepositoryTest {
 
   object EvtFmt
     extends EventFormat[AggrEvent, String] {
 
-    def getVersion(cls: EventClass) = NoVersion
+    def getVersion(cls: EventClass) = NotVersioned
     def getName(cls: EventClass): String = cls.getSimpleName
 
     def encode(evt: AggrEvent): String = evt match {
@@ -352,24 +366,18 @@ class TestEventStoreRepositoryNoSnapshots extends AbstractEventStoreRepositoryTe
     }
   }
 
-  @Before
-  def setup(): Unit = {
-
+  override def beforeEach() = {
     es = new TransientEventStore[String, AggrEvent, String](
-          RandomDelayExecutionContext, EvtFmt)(_ => ticker)
-        with MessageTransportPublishing[String, AggrEvent] {
-      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txTransport = new LocalTransport[Transaction](toTopic, ec)
-      val txChannels = Set(TheOneAggr.channel)
-      val txCodec = Codec.noop[Transaction]
-    }
-    repo = new EntityRepository(TheOneAggr)(es)
+      ec, EvtFmt) {
+        def ticker = TestEventStoreRepositoryNoSnapshots.this.ticker
+      }
+    repo = new EntityRepository(TheOneAggr)(es, ec)
   }
 
 }
 
-class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepositoryTest {
+class TestEventStoreRepositoryWithSnapshots
+extends AbstractEventStoreRepositoryTest {
 
   import ReflectiveDecoder._
 
@@ -380,7 +388,7 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
 
     type Return = String
 
-    def getVersion(cls: EventClass) = NoVersion
+    def getVersion(cls: EventClass) = NotVersioned
     def getName(cls: EventClass): String = {
       val lastDot = cls.getName.lastIndexOf('.')
       val nextDot = cls.getName.lastIndexOf('.', lastDot - 1)
@@ -403,23 +411,18 @@ class TestEventStoreRepositoryWithSnapshots extends AbstractEventStoreRepository
   }
 
   case class Metrics(id: String, duration: Long, timestamp: Long)
-  var metrics: List[Metrics] = _
+  // var metrics: List[Metrics] = _
 
-  @Before
-  def setup(): Unit = {
-    metrics = Nil
-    es = new TransientEventStore[String, AggrEvent, String](
-           RandomDelayExecutionContext, EvtFmt)(_ => ticker)
-         with MessageTransportPublishing[String, AggrEvent] {
-      def toTopic(ch: Channel) = Topic(s"transactions/$ch")
-      def toTopic(tx: Transaction): Topic = toTopic(tx.channel)
-      val txTransport = new LocalTransport[Transaction](toTopic, RandomDelayExecutionContext)
-      val txChannels = Set(TheOneAggr.channel)
-      val txCodec = Codec.noop[Transaction]
-    }
-    type State = ConcurrentMapStore.State[AggrState]
-    val snapshotMap = new TrieMap[String, State]
+  override def beforeEach() = {
+    // metrics = Nil
+    es =
+      new TransientEventStore[String, AggrEvent, String](
+        ec, EvtFmt) {
+        def ticker = TestEventStoreRepositoryWithSnapshots.this.ticker
+      }
+    type ReplayState = delta.process.ReplayState[AggrState]
+    val snapshotMap = new TrieMap[String, ReplayState]
     val snapshotStore = ConcurrentMapStore[String, AggrState, AggrState](snapshotMap, "aggr", None)(_ => Future.none)
-    repo = new EntityRepository(TheOneAggr)(es, snapshotStore)
+    repo = new EntityRepository(TheOneAggr)(es, ec, snapshotStore)
   }
 }

@@ -8,9 +8,9 @@ package object mongo {
 
   object BsonDomainEventFormat
     extends AbstractEventFormat[BsonValue] {
-    def encode(evt: DomainEvent) = BsonJsonCodec decode JsonDomainEventFormat.encode(evt)
+    def encode(evt: DomainEvent) = BsonJsonCodec encode JsonDomainEventFormat.encode(evt)
     def decode(encoded: Encoded) = {
-      JsonDomainEventFormat decode encoded.mapData(BsonJsonCodec.encode)
+      JsonDomainEventFormat decode encoded.mapData(BsonJsonCodec.decode)
     }
   }
 

@@ -1,6 +1,7 @@
 package delta
 
 import java.util.Arrays
+import scala.reflect.ClassTag
 
 final case class Snapshot[+S](
   state: S,
@@ -9,6 +10,19 @@ final case class Snapshot[+S](
 
   def map[That](f: S => That): Snapshot[That] =
     new Snapshot(f(state), revision, tick)
+
+  def flatMap[That](f: S => Option[That]): Option[Snapshot[That]] =
+    f(state).map(s => this.copy(state = s))
+
+  def collect[That](pf: PartialFunction[S, That]): Option[Snapshot[That]] =
+    if (pf isDefinedAt state) Some(this.copy(state = pf(state)))
+    else None
+
+  def collectAs[That: ClassTag]: Option[Snapshot[That]] =
+    state match {
+      case that: That => Some(this.copy(state = that))
+      case _ => None
+    }
 
   def transpose[That](implicit ev: S <:< Option[That]): Option[Snapshot[That]] =
     state.map(state => this.copy(state = state))

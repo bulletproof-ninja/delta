@@ -1,9 +1,9 @@
 package delta.conv
 
 trait ScalaEnumType[EV <: Enumeration#Value] extends StorageType[EV] {
-  protected def enum: Enumeration
+  protected def enumeration: Enumeration
   protected val byName: Map[String, EV] = {
-    enum.values.foldLeft(Map.empty[String, EV]) {
+    enumeration.values.foldLeft(Map.empty[String, EV]) {
       case (map, value) =>
         map.updated(value.toString, value.asInstanceOf[EV])
     }

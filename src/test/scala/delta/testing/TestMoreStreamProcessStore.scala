@@ -1,7 +1,5 @@
 package delta.testing
 
-import org.junit._, Assert._
-
 import scala.collection.compat._
 
 import scala.concurrent.Future
@@ -35,13 +33,13 @@ object TestMoreStreamProcessStore {
     protected def email2qry(email: EmailAddress): QueryType
 
     def findByNumber(num: Int): Future[Map[Long, Snapshot]] =
-      store.queryForSnapshot(numRef -> num2qry(num))
+      store.readSnapshots(numRef -> num2qry(num))
     def findTickByNumber(num: Int): Future[Map[Long, Tick]] =
-      store.queryForTick(numRef -> num2qry(num))
+      store.readTicks(numRef -> num2qry(num))
     def findByEmail(email: EmailAddress): Future[Map[Long, Snapshot]] =
-      store.queryForSnapshot(emailRef -> email2qry(email))
+      store.readSnapshots(emailRef -> email2qry(email))
     def findTickByEmail(email: EmailAddress): Future[Map[Long, Tick]] =
-      store.queryForTick(emailRef -> email2qry(email))
+      store.readTicks(emailRef -> email2qry(email))
   }
 
   object ContactCodec extends Codec[Contact, String] {
@@ -53,15 +51,14 @@ object TestMoreStreamProcessStore {
   }
 }
 
-class TestMoreStreamProcessStore {
+class TestMoreStreamProcessStore
+extends BaseTest {
 
   def numContacts = 10000L
 
   import TestMoreStreamProcessStore._
 
-  implicit val ec = RandomDelayExecutionContext
-
-  type State = ConcurrentMapStore.State[String]
+  type ReplayState = delta.process.ReplayState[String]
 
   def newDupeStore()
       : StreamProcessStore[Long, Contact, Contact] with DupeFinder =
@@ -96,8 +93,7 @@ class TestMoreStreamProcessStore {
 
     }
 
-  @Test
-  def findNumber(): Unit = {
+  test("findNumber") {
     val store = newLookupStore()
     val foos = (1L to numContacts).map { tick =>
       new Snapshot(Contact(num = Random.nextBetween(0 -> 100)), 0, tick)
@@ -108,19 +104,18 @@ class TestMoreStreamProcessStore {
     batchWrite.await
 
     val matches42 = store.findByNumber(42).await
-    assertTrue("The num 42 was not found at all", matches42.nonEmpty)
-    assertTrue(matches42.forall(_._2.state.num == 42))
+    assert(matches42.nonEmpty, "The num 42 was not found at all")
+    assert(matches42.forall(_._2.state.num == 42))
     val tickMatches42 = store.findTickByNumber(42).await
-    assertEquals(matches42.size, tickMatches42.size)
+    assert(matches42.size === tickMatches42.size)
     matches42.foreach {
       case (id, delta.Snapshot(Contact(_, num), _, tick)) =>
-        assertEquals(tick, tickMatches42(id))
-        assertEquals(42, num)
+        assert(tick === tickMatches42(id))
+        assert(42 === num)
     }
   }
 
-  @Test
-  def findEmail(): Unit = {
+  test("findEmail") {
     val store = newLookupStore()
     val foos = (1L to numContacts).map { tick =>
       new Snapshot(Contact(num = Random.nextBetween(0 -> 100)), 0, tick)
@@ -133,34 +128,33 @@ class TestMoreStreamProcessStore {
     batchWrite.await
 
     val noMatch = store.findByEmail(EmailAddress("hello@world.com")).await
-    assertTrue(noMatch.isEmpty)
+    assert(noMatch.isEmpty)
 
     val oneMatch = store.findByEmail(foos.head.state.email).await
-    assertEquals(1, oneMatch.size)
-    assertEquals(foos.head, oneMatch.head._2)
+    assert(1 === oneMatch.size)
+    assert(foos.head === oneMatch.head._2)
 
     val twoMatches = store.findByEmail(dupeEmail).await
-    assertEquals(2, twoMatches.size)
+    assert(2 === twoMatches.size)
     twoMatches.values.foreach {
       case delta.Snapshot(Contact(email, _), _, _) =>
-        assertEquals(dupeEmail, email)
+        assert(dupeEmail === email)
     }
 
     val tickTwoMatches = store.findTickByEmail(dupeEmail).await
-    assertEquals(2, tickTwoMatches.size)
+    assert(2 === tickTwoMatches.size)
     twoMatches.foreach {
       case (id, delta.Snapshot(_, _, tick)) =>
-        assertEquals(tick, tickTwoMatches(id))
+        assert(tick === tickTwoMatches(id))
     }
 
   }
 
-  @Test
-  def findDupes(): Unit = {
+  test("findDupes") {
     val store = newDupeStore()
 
     val dupeEmails = store.findDuplicateEmails().await
-    assertTrue(dupeEmails.isEmpty)
+    assert(dupeEmails.isEmpty)
 
     val foos = (1L to numContacts).map { tick =>
       new Snapshot(Contact(num = Random.nextBetween(0 -> 100)), 0, tick)
@@ -174,14 +168,14 @@ class TestMoreStreamProcessStore {
     batchWrite.await
 
     val allDupes = store.findDuplicateEmails().await
-    assertTrue(allDupes.size >= 1)
+    assert(allDupes.size >= 1)
     allDupes.values.foreach {
-      case dupes => assertTrue(dupes.size > 1)
+      case dupes => assert(dupes.size > 1)
     }
     val theDupe = allDupes(dupeEmail)
-    assertEquals(2, theDupe.size)
+    assert(2 === theDupe.size)
     val ticks = theDupe.values.toList.sorted
-    assertEquals(888L :: 999L :: Nil, ticks)
+    assert(888L :: 999L :: Nil === ticks)
   }
 
 }

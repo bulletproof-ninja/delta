@@ -9,18 +9,23 @@ import scala.reflect.{ ClassTag, classTag }
 
 import org.bson._
 
+import com.mongodb.Block
 import com.mongodb.ErrorCategory.DUPLICATE_KEY
 import com.mongodb.MongoWriteException
 import com.mongodb.async.client.MongoCollection
 import com.mongodb.client.model.UpdateOptions
+import com.mongodb.client.model.IndexOptions
+import com.mongodb.client.model.IndexModel
 import com.mongodb.client.result.UpdateResult
 
 import delta.process._
+
 import scuff.Codec
+import scuff.Reduction
 import scuff.concurrent._
-import com.mongodb.client.model.IndexOptions
+
 import java.{util => ju}
-import com.mongodb.client.model.IndexModel
+import scala.util.control.NonFatal
 
 object MongoStreamProcessStore {
 
@@ -58,22 +63,32 @@ with AggregationSupport {
     this(coll, MongoStreamProcessStore.toIndexModels(secondaryIndexFields))
 
   protected implicit def fromBson(bson: BsonValue): K = keyCodec decode bson
+  protected implicit def toBsonString(values: Iterable[String]) = values.map(new BsonString(_))
+  protected implicit def toBsonInt32(values: Iterable[Int]) = values.map(new BsonInt32(_))
+  protected implicit def toBsonInt64(values: Iterable[Long]) = values.map(new BsonInt64(_))
+
+  protected def $in(matchValues: BsonArray): BsonDocument =
+    new BsonDocument("$in", matchValues)
+  protected def $in(matchValues: Iterable[BsonValue]): BsonDocument =
+    $in(new BsonArray(matchValues.toList.asJava))
+  protected def $exists(boolean: Boolean = true): BsonDocument =
+    new BsonDocument("$exists", BsonBoolean valueOf boolean)
 
   def name = coll.getNamespace.getFullName
 
   def ensureIndexes(
       ensureIndexes: Boolean = true,
-      timeout: FiniteDuration = 10.seconds): this.type = {
+      blockingTimeout: FiniteDuration = 120.seconds): this.type = {
 
     if (ensureIndexes) {
       // Don't use sparse indexes, as they won't work for arrays, leading to collection scan
       val start = System.currentTimeMillis
-      withBlockingCallback[String](timeout) { cb =>
+      withBlockingCallback[String](blockingTimeout) { cb =>
         coll.createIndex(doc("tick", -1), MongoStreamProcessStore.indexOptions, cb)
       }
       if (secondaryIndexes.nonEmpty) {
         val tickIdxDur = System.currentTimeMillis - start
-        withBlockingCallback[ju.List[String]](timeout - tickIdxDur.millis) { cb =>
+        withBlockingCallback[ju.List[String]](blockingTimeout - tickIdxDur.millis) { cb =>
           coll.createIndexes(secondaryIndexes.asJava, cb)
         }
       }
@@ -96,7 +111,7 @@ with AggregationSupport {
     blocking(future await 11.seconds)
   }
 
-  private def _id(keys: java.util.List[BsonValue]): BsonDocument = doc("_id", doc("$in", new BsonArray(keys)))
+  private def _id(keys: java.util.List[BsonValue]): BsonDocument = doc("_id", $in(new BsonArray(keys)))
 
   def readBatch(keys: Iterable[K]): Future[Map[K, Snapshot]] =
     withFutureCallback[ArrayList[BsonDocument]] { callback =>
@@ -107,7 +122,7 @@ with AggregationSupport {
       case Some(docs) =>
         docs.asScala.foldLeft(Map.empty[K, Snapshot]) {
           case (map, doc) =>
-            val key: K = doc.get("_id")
+            val key: K = doc remove "_id"
             val snapshot = snapshotCodec decode doc
             map.updated(key, snapshot)
         }
@@ -120,6 +135,29 @@ with AggregationSupport {
     }
     Future.sequence(futures).map(_ => ())
   }
+
+  private def bulkWrite(snapshots: collection.Map[K, Snapshot]): Future[Unit] = {
+    withFutureCallback[UpdateResult] { callback =>
+      coll.bulkW
+      val upsert = new UpdateOptions().upsert(true)
+      val update = doc("$set", snapshotCodec encode snapshot)
+      coll.updateOne(where(key, snapshot.revision, snapshot.tick), update, upsert, callback)
+    } recover {
+      case we: MongoWriteException if we.getError.getCode == 11000 => Some {
+        UpdateResult.acknowledged(0, 0, null)
+      }
+    } flatMap {
+      case Some(res: UpdateResult) if res.wasAcknowledged && res.getMatchedCount == 0 && res.getUpsertedId == null =>
+        read(key) map {
+          case Some(existing) =>
+            throw Exceptions.writeOlder(key, existing, snapshot)
+          case None =>
+            sys.error(s"Failed to update snapshot $key, revision ${snapshot.revision}, tick ${snapshot.tick}")
+        }
+      case _ => Future.unit
+    }
+  }
+
 
   private def exactly(key: K, oldRev: Revision, oldTick: Tick): BsonDocument =
     _id(key)
@@ -158,18 +196,20 @@ with AggregationSupport {
     }
   }
   protected def writeReplacement(key: K, oldSnapshot: Snapshot, newSnapshot: Snapshot): Future[Option[Snapshot]] = {
+    val filter = exactly(key, oldSnapshot.revision, oldSnapshot.tick)
+    val update = doc(
+      "$set", snapshotCodec encode newSnapshot)
     withFutureCallback[UpdateResult] { callback =>
-      val update = doc(
-        "$set", snapshotCodec encode newSnapshot)
-      coll.updateOne(exactly(key, oldSnapshot.revision, oldSnapshot.tick), update, callback)
+      coll.updateOne(filter, update, callback)
     } flatMap {
       case Some(upd) if upd.wasAcknowledged && upd.getModifiedCount == 1 => Future.none
-      case Some(upd) if upd.getMatchedCount == 0 =>
+      case Some(upd) if upd.getModifiedCount == 0 =>
         read(key) map {
           case found @ Some(_) => found
           case _ => sys.error(s"Failed to replace old snapshot $key, because it doesn't exist!")
         }
-      case Some(hmm) => sys.error(s"Unexepected result: $hmm")
+      case Some(unexpected) => sys.error(s"Unexepected result: $unexpected\n  filter:$filter\n  update:$update")
+      case None => sys.error("No update result was returned!")
     }
   }
 
@@ -191,7 +231,7 @@ with AggregationSupport {
       doc("$unwind", $refName) ::
       doc("$group", doc("_id", $refName, "matches", doc("$push", "$$ROOT"))) ::
       doc("$project", doc("matches._id", 1, "matches.tick", 1)) ::
-      doc("$match", doc("matches.1", doc("$exists", true))) ::
+      doc("$match", doc("matches.1", $exists())) ::
       Nil
 
     val aggregation = coll.aggregate(pipeline.asJava)
@@ -222,13 +262,13 @@ with AggregationSupport {
 
   protected type QueryType = BsonValue
 
-  private def queryDocs[V](
-      fields: Seq[(String, BsonValue)], projection: BsonDocument = null)(
-      getValue: BsonDocument => V)
-      : Future[Map[K, V]] = {
+  protected def bulkRead[R](
+      filter: (String, QueryType)*)(
+      consumer: Reduction[(StreamId, Snapshot), R])
+      : Future[R] = {
 
-    val filter: BsonDocument =
-      fields
+    val bsonFilter: BsonDocument =
+      filter
         .groupBy(_._1)
         .view.mapValues(_.map(_._2))
         .foldLeft(new BsonDocument) {
@@ -239,35 +279,21 @@ with AggregationSupport {
               query.append(field, doc("$in", new BsonArray(values.asJava)))
             }
         }
-    withFutureCallback[ArrayList[BsonDocument]] { callback =>
-      val target = new ArrayList[BsonDocument]
-      coll.find(filter).projection(projection).into(target, callback)
-    } map {
-      case Some(docs) =>
-        docs.asScala.foldLeft(Map.empty[K, V]) {
-          case (map, doc) =>
-            val key: K = doc.get("_id")
-            val value = getValue(doc)
-            map.updated(key, value)
+    withFutureCallback[Void] { onComplete =>
+      val proxy = new Block[BsonDocument] {
+        def apply(doc: BsonDocument): Unit = {
+          val id: K = doc remove "_id"
+          consumer next id -> snapshotCodec.decode(doc)
         }
-      case _ => Map.empty
+      }
+      coll.find(bsonFilter).forEach(proxy, onComplete)
+    } recover {
+      case NonFatal(cause) =>
+        throw new RuntimeException(s"BSON query failed: ${bsonFilter.toJson}", cause)
+    } map { _ =>
+      consumer.result()
     }
-
   }
-
-  /**
-    * Query for snapshots matching column values.
-    * Uses `AND` semantics, so multiple column
-    * queries should not use mutually exclusive
-    * values.
-    * @param nameValue The name of column or field and associated value to match
-    * @param more Addtional `nameValue`s, applied with `AND` semantics
-    * @return `Map` of stream ids and snapshot
-    */
-  protected def queryForSnapshot(
-      nameValue: (String, BsonValue), more: (String, BsonValue)*)
-      : Future[Map[K, Snapshot]] =
-    queryDocs(nameValue +: more)(snapshotCodec.decode)
 
   /**
     * Lighter version of `queryForSnapshot` if only reference is needed.
@@ -278,9 +304,33 @@ with AggregationSupport {
     * @param more Addtional `nameValue`s, applied with `AND` semantics
     * @return `Map` of stream ids and tick (in case of duplicates, for chronology)
     */
-  protected def queryForTick(
+  protected def readTicks(
       nameValue: (String, BsonValue), more: (String, BsonValue)*)
-      : Future[Map[K, Tick]] =
-    queryDocs(nameValue +: more, doc("tick", 1))(_.getInt64("tick").longValue)
+      : Future[Map[K, Tick]] = {
+    // queryDocs(nameValue +: more, doc("tick", 1))(_.getInt64("tick").longValue)
+    val filter: BsonDocument =
+      (nameValue +: more)
+        .groupBy(_._1)
+        .view.mapValues(_.map(_._2))
+        .foldLeft(new BsonDocument) {
+          case (query, (field, values)) =>
+            if (values.size == 1) {
+              query.append(field, values.head)
+            } else {
+              query.append(field, doc("$in", new BsonArray(values.asJava)))
+            }
+        }
+    val ticks = new LockFreeConcurrentMap[K, Tick]
+    withFutureCallback[Void] { onComplete =>
+      val buildMap = new Block[BsonDocument] {
+        def apply(doc: BsonDocument): Unit = {
+          ticks.update(doc.get("_id"), doc.getInt64("tick").longValue)
+        }
+      }
+      coll.find(filter).projection(doc("tick", 1)).forEach(buildMap, onComplete)
+    } map { _ =>
+      ticks.snapshot[Map[K, Tick]]
+    }
 
+  }
 }
